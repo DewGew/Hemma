@@ -611,12 +611,12 @@ views:
               show_toggle: true
 
           - type: custom:button-card
-            template: hemma_curtain
-            entity: cover.YOUR_BEDROOM_CURTAIN
-            name: Curtain
+            template: hemma_roller_shades
+            entity: cover.YOUR_BEDROOM_ROLLERSHADE
+            name: Roller Shade
             variables:
               position: 8
-              icon: curtain
+              icon: roller_shades
 
           - type: custom:button-card
             template: hemma_air_purifier
