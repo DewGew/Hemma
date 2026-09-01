@@ -753,9 +753,7 @@ Hemma is designed for edge-to-edge screens. If you are using the HA iOS Companio
 
 To add additional button card icons, you can download them from the links below and place the icons in the `www/hemma/icons/` folder:
 
-[Apple Icons](https://developer.apple.com/sf-symbols/) - Set Background to **Dark** and Color to **Primary**
-
-[Google Material Icons](https://fonts.google.com/icons?icon.query=light) - Weight 300 is recommended, file type: svg
+[Google Material Icons](https://fonts.google.com/icons?icon.query=light) - Weight 300 recommended, file type: svg
 
 Hemma also keeps an inline copy of every icon inside `hemma-icons.js` (`window.HEMMA_ICONS`) so icons paint in the same frame as the card rather than arriving over the network a beat later. A new SVG dropped into `www/hemma/icons/` still works without any further steps — it just falls back to loading from that path. To give it the same instant paint as the built-in icons, regenerate the map with the snippet in the comment above `window.HEMMA_ICONS` and paste the result back in.
 
