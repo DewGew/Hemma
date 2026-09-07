@@ -1,0 +1,188 @@
+"""Build the panel's template bundle from the dashboard template tree.
+
+The bundle is a derived artifact. Shipping it prebuilt means it can drift from
+the templates it was built from, and a Save then writes stale templates into the
+dashboard. Rebuilding it here keeps the two in step no matter who edited what.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+
+from homeassistant.util.yaml import load_yaml
+
+_LOGGER = logging.getLogger(__name__)
+
+SOURCE = "dashboards/hemma/hemma.yaml.example"
+SOURCE_MOBILE = "dashboards/hemma/hemma_mobile.yaml.example"
+TEMPLATE_DIR = "dashboards/templates/button_cards"
+BUNDLE = "custom_components/hemma/panel/hemma-templates.json"
+
+
+# Directories under the template tree that are NOT part of the product. HA's
+# !include_dir_merge_named is recursive, so a draft left here is parsed into the
+# template namespace and shipped into every dashboard the panel saves.
+EXCLUDE_DIRS = ("new popups (untested)",)
+
+
+def _excluded(path: str) -> bool:
+    return any(("/%s/" % d) in path or path.endswith("/%s" % d) for d in EXCLUDE_DIRS)
+
+
+def _newest_mtime(*paths: str) -> float:
+    newest = 0.0
+    for path in paths:
+        if os.path.isfile(path):
+            newest = max(newest, os.path.getmtime(path))
+            continue
+        for dirpath, _dirnames, filenames in os.walk(path):
+            if _excluded(dirpath):
+                continue
+            for name in filenames:
+                if name.endswith(".yaml"):
+                    newest = max(newest, os.path.getmtime(os.path.join(dirpath, name)))
+    return newest
+
+
+def _excluded_keys(config_dir: str) -> set[str]:
+    """The top-level template names defined under an excluded directory."""
+    names: set[str] = set()
+    tree = os.path.join(config_dir, "templates", "button_cards")
+    for dirname in EXCLUDE_DIRS:
+        root = os.path.join(tree, dirname)
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fname in filenames:
+                if not fname.endswith(".yaml"):
+                    continue
+                try:
+                    doc = load_yaml(os.path.join(dirpath, fname))
+                except Exception:  # a broken draft must not stop a rebuild
+                    continue
+                if isinstance(doc, dict):
+                    names.update(doc)
+    return names
+
+
+def _build(source: str, mobile_source: str) -> dict:
+    cfg = load_yaml(source)
+
+    templates = cfg.get("button_card_templates")
+    if not templates:
+        raise ValueError(f"no button_card_templates in {source}")
+
+    # HA merged the whole tree, excluded directories included, so drop their
+    # keys back out before anything is shipped into a dashboard.
+    for name in _excluded_keys(os.path.dirname(os.path.dirname(source))):
+        templates.pop(name, None)
+
+    home = next((v for v in cfg.get("views", []) if v.get("path") == "home"), None)
+    if home is None:
+        raise ValueError(f"no view with path 'home' in {source}")
+
+    cards = home.get("cards") or []
+    if len(cards) < 3:
+        raise ValueError(f"home view has {len(cards)} cards, expected at least 3")
+
+    return {
+        "version": "1",
+        "templates": templates,
+        # The nav card is the scaffold's, not the user's dashboard.
+        "scaffold": {
+            "view_type": home["type"],
+            "layout": home["layout"],
+            "nav": cards[1],
+        },
+        # The phone half's scaffold. This is the FOURTH place that builds this
+        # bundle - tools/, dashboards/tools/, the harness copy, and here - and
+        # this one runs on every integration reload. Without it, every reload
+        # silently stripped the mobile scaffold and the panel lost the ability
+        # to create or preview a phone layout.
+        "mobile": _mobile_scaffold(mobile_source),
+    }
+
+
+def _mobile_scaffold(source: str) -> dict | None:
+    """The phone layout's pieces. Only the pieces: which child is chrome and
+    which is a section is knowledge the panel holds next to its extractor, and
+    duplicating that rule here is how the two would drift."""
+    if not os.path.exists(source):
+        return None
+    cfg = load_yaml(source)
+    views = cfg.get("views") or []
+    if not views:
+        return None
+    view = views[0]
+    cards = view.get("cards") or []
+    if len(cards) < 2 or (cards[1] or {}).get("type") != "custom:hemma-smart-row":
+        return None
+    return {
+        "view_type": view["type"],
+        "layout": view["layout"],
+        "shell": cards[0],
+        "row": {k: v for k, v in cards[1].items() if k != "cards"},
+        "children": cards[1].get("cards") or [],
+        "extras": {k: v for k, v in cfg.items()
+                   if k not in ("views", "button_card_templates")},
+    }
+
+
+def _bundle_is_whole(out: str) -> bool:
+    """Whether the bundle on disk carries everything this builder emits."""
+    try:
+        with open(out, encoding="utf-8") as handle:
+            bundle = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    if not bundle.get("templates") or not bundle.get("scaffold"):
+        return False
+    if bundle.get("mobile") is None:
+        _LOGGER.info("Hemma: bundle has no phone scaffold, rebuilding")
+        return False
+    return True
+
+
+def rebuild_if_stale(config_dir: str) -> bool:
+    """Regenerate the bundle when a template is newer than it. Blocking."""
+    source = os.path.join(config_dir, SOURCE)
+    tree = os.path.join(config_dir, TEMPLATE_DIR)
+    out = os.path.join(config_dir, BUNDLE)
+
+    if not os.path.exists(source) or not os.path.isdir(tree):
+        _LOGGER.debug("Hemma: no template source, keeping the shipped bundle")
+        return False
+
+    # The mobile example feeds the bundle now, so a change to it has to
+    # count as making the bundle stale.
+    newest = _newest_mtime(source, os.path.join(config_dir, SOURCE_MOBILE), tree)
+    try:
+        current = os.path.getmtime(out)
+    except OSError:
+        current = 0.0
+
+    # An mtime check alone trusts whoever wrote the bundle last to have written
+    # all of it. Four other copies of this builder exist - two under tools/, the
+    # harness copy, and whatever a scratch checkout is carrying - and one of them
+    # not knowing about a key writes a fresh-looking bundle with that key gone.
+    # That is how the phone scaffold kept disappearing between reloads. Missing
+    # a key we know belongs there counts as stale no matter how new the file is.
+    if current >= newest and _bundle_is_whole(out):
+        return False
+
+    try:
+        bundle = _build(source, os.path.join(config_dir, SOURCE_MOBILE))
+    except Exception:
+        # A half-written template must not take the panel down with it.
+        _LOGGER.exception("Hemma: could not rebuild the template bundle")
+        return False
+
+    tmp = out + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(bundle, handle, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, out)
+
+    _LOGGER.info("Hemma: rebuilt the template bundle (%d templates)", len(bundle["templates"]))
+    return True
