@@ -51,13 +51,12 @@ def _lovelace_resources(hass: HomeAssistant):
         return None
 
 
-async def _log_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
-    """Say once, at startup, which resource URLs to use.
+async def _sync_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
+    """Point Lovelace at the scripts this integration serves.
 
-    The integration does not rewrite the resource list itself: the collection is
-    read-only in yaml mode, and registering a second entry for a script that is
-    already loaded from /local would run it twice. So it reports, and the URLs
-    it reports never need a version bump again.
+    Resources are read-only in yaml mode, so there the URLs are reported and
+    the user adds them. An entry still loading from /local is repointed rather
+    than duplicated: two entries for one script run it twice.
     """
     def _present() -> list[str]:
         return [n for n in SHARED_SCRIPTS if os.path.isfile(os.path.join(scripts_dir, n))]
@@ -70,30 +69,71 @@ async def _log_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
         )
         return
 
+    wanted = {n: f"{SCRIPTS_URL_BASE}/{n}" for n in names}
     res = _lovelace_resources(hass)
-    stale: list[str] = []
-    if res is not None:
-        try:
-            for item in res.async_items():
-                url = str(item.get("url", ""))
-                if url.startswith("/local/hemma/scripts/"):
-                    stale.append(url)
-        except Exception:  # noqa: BLE001
-            stale = []
 
-    if stale:
+    if res is None or not hasattr(res, "async_create_item"):
         _LOGGER.warning(
-            "Hemma: %d dashboard resource(s) still load from /local, which the "
-            "browser caches for 30 days - a fix can look like it did not apply. "
-            "Repoint each to %s/<file> and drop the ?v=; it never needs bumping "
-            "again. Currently: %s",
-            len(stale),
-            SCRIPTS_URL_BASE,
-            ", ".join(sorted(stale)),
+            "Hemma: Lovelace resources are not writable (yaml mode). Add these "
+            "under lovelace: resources: as type module: %s",
+            ", ".join(wanted[n] for n in names),
         )
-    else:
-        _LOGGER.debug(
-            "Hemma: serving %d shared script(s) from %s", len(names), SCRIPTS_URL_BASE
+        return
+
+    try:
+        if not getattr(res, "loaded", False):
+            await res.async_load()
+            res.loaded = True
+    except Exception:  # noqa: BLE001 - a resource list must never block setup
+        _LOGGER.exception("Hemma: could not read the Lovelace resource list")
+        return
+
+    items = list(res.async_items())
+    by_url = {str(i.get("url", "")): i for i in items}
+
+    added: list[str] = []
+    moved: list[str] = []
+    for name, url in wanted.items():
+        if url in by_url:
+            continue
+        legacy = next(
+            (
+                i
+                for i in items
+                if str(i.get("url", "")).partition("?")[0].endswith("/" + name)
+                and str(i.get("url", "")).startswith("/local/")
+            ),
+            None,
+        )
+        try:
+            if legacy is not None:
+                await res.async_update_item(legacy["id"], {"url": url})
+                moved.append(name)
+            else:
+                await res.async_create_item({"res_type": "module", "url": url})
+                added.append(name)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Hemma: could not register %s", url)
+
+    orphans = [
+        str(i.get("url", ""))
+        for i in items
+        if str(i.get("url", "")).startswith("/local/hemma/scripts/")
+        and not any(str(i.get("url", "")).partition("?")[0].endswith("/" + n) for n in names)
+    ]
+    if orphans:
+        _LOGGER.warning(
+            "Hemma: these resources point at scripts Hemma no longer ships. "
+            "Remove them under Settings > Dashboards > Resources: %s",
+            ", ".join(sorted(orphans)),
+        )
+
+    if added or moved:
+        _LOGGER.info(
+            "Hemma: registered %d and repointed %d dashboard resource(s); "
+            "refresh the browser once to load them",
+            len(added),
+            len(moved),
         )
 
 
@@ -120,7 +160,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except RuntimeError:
             _LOGGER.debug("Hemma: %s is already served", url)
 
-    await _log_script_resources(hass, scripts_dir)
+    await _sync_script_resources(hass, scripts_dir)
 
     # The panel URL carries the file mtime so editing the JS busts the browser's
     # module cache without needing a version bump or a manual hard refresh.
