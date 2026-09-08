@@ -26,7 +26,7 @@ hemma_badge_presence:
       const st      = stRaw.toLowerCase().replace(/_/g,' ');
       const hide    = !enabled || !hasEnt || !stRaw || ['unknown','unavailable','none'].includes(st);
 
-      return `:host{display:${hide ? 'none' : 'inline-block'} !important;}`;
+      return `:host{display:${hide ? 'none' : 'inline-block'} !important;order:var(--hemma-badge-order-people,3);}`;
     ]]]
 
   styles:

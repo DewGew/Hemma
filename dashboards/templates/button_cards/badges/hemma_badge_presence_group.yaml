@@ -45,7 +45,7 @@ hemma_badge_presence_group:
         return (enabled && hasAny) ? 'inline-grid' : 'none';
       })();
       const _hide = String(_d).trim() === 'none';
-      return `:host{display:${_hide ? 'none' : 'inline-block'} !important;}` + `
+      return `:host{display:${_hide ? 'none' : 'inline-block'} !important;order:var(--hemma-badge-order-people,3);}` + `
     #img-cell, .img-cell{ position: relative; }
 
     #img-cell #icon, .img-cell #icon{

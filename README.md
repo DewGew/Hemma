@@ -152,7 +152,6 @@ Example layout:
         ├── weather/                    # Weather icons
         └── scripts/                    # JavaScript resources
             ├── layout-card-modified.js # Modified Layout Card build
-            ├── navbar-popup-caret.js   # Add dropdown icon to navbar
             ├── layout-offsets.js       # Navbar/hero offsets track sidebar visibility
             ├── swipe-card-patch.js     # Plex Recently Added carousel
             ├── smart-row.js            # Smart entity row with active-card sorting
@@ -187,7 +186,6 @@ Add these two first — the others read their icons and shared entity tables fro
 Then the rest, in any order:
 
 - `/local/hemma/scripts/layout-card-modified.js` (from this repo)
-- `/local/hemma/scripts/navbar-popup-caret.js` (from this repo)
 - `/local/hemma/scripts/layout-offsets.js` (from this repo)
 - `/local/hemma/scripts/swipe-card-patch.js` (from this repo, required for Plex Recently Added popup)
 - `/local/hemma/scripts/smart-row.js` (from this repo, required for Smart Row)

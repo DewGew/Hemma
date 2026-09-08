@@ -139,3 +139,26 @@ hemma_menu_icon:
         height: 0 !important;
       }
     }
+
+    /* Tablet: no glyph, but the corner stays tappable so the sidebar is still reachable. */
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (hover: none){
+      :host{
+        top: 0 !important;
+        bottom: auto !important;
+        left: 0 !important;
+        right: auto !important;
+        width: 40px !important;
+        height: 38px !important;
+      }
+
+      :host ha-card{
+        width: 40px !important;
+        height: 38px !important;
+        border-radius: 0 !important;
+      }
+
+      :host .hamburger{
+        opacity: 0 !important;
+      }
+    }

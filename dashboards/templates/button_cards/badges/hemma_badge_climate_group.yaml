@@ -187,7 +187,7 @@ hemma_badge_climate_group:
       const hasSensor = !!(variables.temp_sensor || variables.humidity_sensor || variables.quality_sensor);
       const show = enabled && hasSensor;
 
-      return `:host{display:${show ? 'inline-block' : 'none'} !important;}
+      return `:host{display:${show ? 'inline-block' : 'none'} !important;order:var(--hemma-badge-order-climate,1);}
         @keyframes hemma-fan-spin {
           from { transform: rotate(0deg); }
           to   { transform: rotate(360deg); }

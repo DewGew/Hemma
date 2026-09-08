@@ -109,7 +109,7 @@ hemma_badge_security_group:
       const open = ids.filter(id => String(states[id]?.state || '').toLowerCase() !== 'locked').length;
       const URL = window.hemmaIconUrl(open === 0 ? 'lock-fill' : 'lock-open-fill');
 
-      return `:host{display:${enabled ? 'inline-block' : 'none'} !important;}
+      return `:host{display:${enabled ? 'inline-block' : 'none'} !important;order:var(--hemma-badge-order-security,5);}
         #img-cell, .img-cell{ position: relative; }
 
         #img-cell #icon, .img-cell #icon{

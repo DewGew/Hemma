@@ -146,6 +146,10 @@ hemma_thermostat:
           ha-card::after {
             opacity: 0 !important;
           }
+          #name, #state {
+            padding-block: 0.16em;
+            margin-block: -0.16em;
+          }
 
         styles:
           card:
@@ -165,7 +169,8 @@ hemma_thermostat:
             - row-gap: 4px
           name:
             - color: var(--thermostat-overlay-text-name, var(--hemma-entity-name, rgba(255,255,255,0.9))) !important
-            - font-weight: 600
+            - font-weight: 550
+            - letter-spacing: -0.01em
             - font-size: var(--hemma-entity-name-font-current, var(--hemma-entity-name-font-desktop, 18px))
             - text-shadow: var(--hemma-entity-text-shadow, 0 1px 4px rgba(0,0,0,0.35))
             - justify-self: start
@@ -174,11 +179,12 @@ hemma_thermostat:
             - white-space: nowrap
             - overflow: hidden
             - text-overflow: ellipsis
-            - margin-bottom: -2px
+            - margin-bottom: calc(-2px - 0.16em)
             - transition: color .15s ease
           state:
             - color: var(--thermostat-overlay-text-state, var(--hemma-entity-state, var(--secondary-text-color))) !important
-            - font-weight: 600
+            - font-weight: 400
+            - letter-spacing: -0.006em
             - font-size: var(--hemma-entity-state-font-current, var(--hemma-entity-state-font-desktop, 15px))
             - text-shadow: var(--hemma-entity-text-shadow, 0 0 5px rgba(0,0,0,0.1))
             - justify-self: start
@@ -392,14 +398,10 @@ hemma_thermostat:
       - --thermo-pad: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
       - --thermo-rail-top: calc(var(--thermo-pad) - 2px)
       - --thermo-btn-h: "calc((100% - 2 * var(--thermo-pad) + 4px - 2 * var(--thermo-btn-gap, 6px)) / 3)"
-      - --thermo-toggle-top: calc(var(--thermo-pad) + (var(--hemma-entity-icon-size-current, var(--hemma-entity-icon-size-desktop, 34px)) - 20px) / 2)
-      - --thermo-toggle-h: 26px
-      - --thermo-toggle-r: 13px
-      - --thermo-toggle-w: |
-          [[[
-            const isMobile = window.matchMedia('(max-width: 767px), (max-height: 600px)').matches;
-            return isMobile ? '40px' : '46px';
-          ]]]
+      - --thermo-toggle-top: calc(var(--hemma-icon-center-y) - var(--thermo-toggle-h, 26px) / 2)
+      - --thermo-toggle-h: var(--hemma-toggle-height, 26px)
+      - --thermo-toggle-r: calc(var(--thermo-toggle-h, 26px) / 2)
+      - --thermo-toggle-w: var(--hemma-toggle-width, 46px)
       - --thermo-btn-gap: |
           [[[
             const isMobile = window.matchMedia('(max-width: 767px), (max-height: 600px)').matches;
@@ -482,7 +484,7 @@ hemma_thermostat:
       temp_puck:
         - position: |
             [[[ return variables.has_controls ? 'absolute' : 'static'; ]]]
-        # margin-top is the only nudge, same as #img-cell — the -2px used to be
+        # margin-top is the only nudge, same as #img-cell - the -2px used to be
         # in `top` as well and double-counted.
         - top: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
         - left: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))

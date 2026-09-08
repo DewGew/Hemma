@@ -29,7 +29,7 @@
 #   svg_path                   Base path for bare-name SVG icons. Default /local/hemma/icons.
 #
 #   action_N_enabled           true (default) / false. A falsey value hides the button.
-#   action_N_entity            Entity the button acts on. Required — no entity, no button.
+#   action_N_entity            Entity the button acts on. Required - no entity, no button.
 #   action_N_icon              mdi:xxx, a bare SVG name resolved against svg_path,
 #                              or an explicit /local/... , http(s)://... , .svg/.png/.webp path.
 #                              Defaults to the entity's own icon attribute, then mdi:help-circle.
@@ -48,7 +48,7 @@
 #   action_N_navigation_path   Dashboard path, required for the navigate action.
 #
 # Card-level active state:
-#   The tile's own active state follows its `entity:` as normal — the action buttons light up
+#   The tile's own active state follows its `entity:` as normal - the action buttons light up
 #   independently of it. If the tile's entity is a passive sensor that never reads as active,
 #   inherit hemma_entity's active_entities hook to let the action entities drive the whole card:
 #
@@ -67,12 +67,34 @@ hemma_entity_actions:
     - hemma_entity
 
   variables:
-    icon: default
+    # Every other Hemma tile is domain-specific and names its own glyph. This
+    # one takes anything, so it derives one - unset, hemma_entity resolves the
+    # icon to `default`, which draws a question mark. A card that sets its own
+    # `icon:` still wins: card variables override template variables.
+    # The panel's preview carries the same map, so the two agree.
+    icon: >
+      [[[
+        const dom = String(entity?.entity_id || '').split('.')[0];
+        return ({
+          light: 'light', switch: 'plug', input_boolean: 'plug',
+          fan: 'fan', climate: 'thermostat', humidifier: 'humidifier',
+          media_player: 'speaker', lock: 'lock-fill', cover: 'curtain-open',
+          vacuum: 'vacuum', script: 'scenes', scene: 'scenes',
+          automation: 'scenes', button: 'power_on', input_button: 'power_on',
+          binary_sensor: 'motion', remote: 'tv', water_heater: 'hot_water',
+          valve: 'curtain-open', siren: 'motion',
+        })[dom] || 'default';
+      ]]]
     svg_path: /local/hemma/icons
+
+    # action_N_icon is deliberately EMPTY, not mdi:help-circle. renderIcon reads
+    # `iconRaw || the entity's own icon attribute || mdi:help-circle`, and a
+    # declared default is never falsy - so declaring the question mark here made
+    # both fallbacks dead code and every unset button drew a question mark.
 
     action_1_enabled: true
     action_1_entity:
-    action_1_icon: mdi:help-circle
+    action_1_icon:
     action_1_action: more-info
     action_1_active_color:
     action_1_navigation_path:
@@ -81,7 +103,7 @@ hemma_entity_actions:
 
     action_2_enabled: true
     action_2_entity:
-    action_2_icon: mdi:help-circle
+    action_2_icon:
     action_2_action: more-info
     action_2_active_color:
     action_2_navigation_path:
@@ -261,6 +283,14 @@ hemma_entity_actions:
           const eid = variables[`action_${idx}_entity`];
           if (!eid) return;
 
+          // hass is REPLACED on every state update, and this handler is bound
+          // ONCE per element - the element is only rebuilt when the rendered
+          // HTML changes, which is exactly when the button's own state changes.
+          // So a button whose state does not change keeps the hass it was
+          // built with and acts through a snapshot that keeps going stale.
+          // Read the card's live reference at press time instead.
+          const H = (this && this._hass) || hass;
+
           const action = variables[`action_${idx}_action`] || 'more-info';
 
           if (action === 'more-info') {
@@ -275,7 +305,7 @@ hemma_entity_actions:
           if (action === 'toggle') {
             const domain = String(eid).split('.')[0];
             if (!domain) return;
-            hass.callService(domain, 'toggle', { entity_id: eid });
+            H.callService(domain, 'toggle', { entity_id: eid });
             return;
           }
 
@@ -290,7 +320,7 @@ hemma_entity_actions:
               data.entity_id = eid;
             }
 
-            hass.callService(domain, service, data);
+            H.callService(domain, service, data);
             return;
           }
 
@@ -403,7 +433,16 @@ hemma_entity_actions:
       user-select: none;
       -webkit-tap-highlight-color: transparent;
 
-      background: var(--hemma-entity-actions-btn-bg, rgba(255, 255, 255, 0.09));
+      /* An active card turns white, and a non-active button was white on
+         white: a 9% white fill holding a white glyph. Both follow the card's
+         OWN active signal - 0 while it is dark, 1 while it is lit, and the
+         hover value in between - so the chip tracks the card instead of this
+         file repeating the active test and drifting from it. */
+      --hemma-side-lit: var(--hemma-active-overlay-opacity, 0);
+      background: var(--hemma-entity-actions-btn-bg,
+        color-mix(in srgb,
+          rgba(0, 0, 0, 0.14) calc(var(--hemma-side-lit) * 100%),
+          rgba(255, 255, 255, 0.09)));
       border-radius: var(--hemma-actions-btn-radius);
       box-shadow: none;
       overflow: hidden;
@@ -440,7 +479,18 @@ hemma_entity_actions:
       max-width: var(--hemma-actions-icon-size);
     }
 
+    /* An mdi glyph takes a color; a Hemma svg is an <img> and only takes a
+       filter, so invert() carries it the same distance. Both are overridden
+       below for a button that is ON, which keeps its white glyph on the
+       accent whatever the card is doing. */
+    .hemma-side-action-ha-icon {
+      color: color-mix(in srgb,
+        var(--hemma-entity-name-active, rgba(0, 0, 0, 0.88)) calc(var(--hemma-side-lit) * 100%),
+        var(--primary-text-color));
+    }
+
     .hemma-side-action-svg {
+      filter: brightness(0) invert(calc(1 - var(--hemma-side-lit)));
       width: var(--hemma-actions-svg-size);
       height: var(--hemma-actions-svg-size);
       min-width: var(--hemma-actions-svg-size);
@@ -468,6 +518,13 @@ hemma_entity_actions:
       filter: grayscale(1);
     }
 
+    /* grayscale(1) alone would drop the invert above and hand an unavailable
+       svg its own white fill back - invisible on a lit card, which is the
+       thing being fixed. */
+    .hemma-side-action-svg.unavailable {
+      filter: brightness(0) invert(calc(1 - var(--hemma-side-lit)));
+    }
+
     .hemma-side-action-button ha-icon,
     .hemma-side-action-button img,
     .hemma-side-action-button *,
@@ -481,8 +538,15 @@ hemma_entity_actions:
 
     /* Interaction */
     @media (hover: hover) and (pointer: fine) {
+      /* A lift at BOTH ends, not "more of the resting fill". On a dark card
+         that means more white; on a lit one it means LESS black, because more
+         black there is a press, not a hover. Small either way: the chip has to
+         stay the same object, just lit. */
       .hemma-side-action-button:hover {
-        background: var(--hemma-entity-actions-btn-bg-hover, rgba(255, 255, 255, 0.16));
+        background: var(--hemma-entity-actions-btn-bg-hover,
+          color-mix(in srgb,
+            rgba(0, 0, 0, 0.10) calc(var(--hemma-side-lit) * 100%),
+            rgba(255, 255, 255, 0.13)));
       }
 
       .hemma-side-action-button.active:hover {

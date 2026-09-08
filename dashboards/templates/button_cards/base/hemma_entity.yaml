@@ -2,7 +2,7 @@
 # Foundation template for every non-badge entity card (thermostat, light,
 # media, lock, etc. all build on this). Provides:
 #   - Active-state detection and styling (icon tint/circle color by domain,
-#     name/state color, active box-shadow) — extend via variables.active_states
+#     name/state color, active box-shadow) - extend via variables.active_states
 #   - Icon color system: byIcon/byDomain color maps keyed on variables.icon /
 #     entity domain, applied as a CSS mask so a single SVG can be recolored
 #     without separate active/inactive art
@@ -21,11 +21,18 @@
 #                            icons missing from the map; see that file to add one.
 #   active_states           - extra entity states (beyond the built-in defaults)
 #                            that should count as "active"
+#   show_when               - 'always' (default) or 'active'. 'active' takes the tile
+#                            off the dashboard while `idle` is true, so a tile with
+#                            nothing to report is not there to be read. Hiding the
+#                            HOST is what smart-row watches, the same as enabled.
+#   idle                    - the card template's own "nothing to report" test, read
+#                            only when show_when is 'active'. It is declared on the
+#                            card template because the active rule it mirrors is.
 #   icon_never_masked       - skip the CSS mask-tint (default: false); always render
 #                            the raw entity_picture <img> instead. Use for icon art
 #                            that needs crisp per-state renders (e.g. a colored "on"
 #                            SVG and a separate plain "off" SVG) rather than relying
-#                            on the mask to recolor a single shape — CSS masking a
+#                            on the mask to recolor a single shape - CSS masking a
 #                            shape with fine diagonal edges can look jagged/aliased.
 #   battery_entity          - battery sensor shown as a low-battery icon
 #   battery_low_threshold   - % at/below which the battery icon appears (default: 20)
@@ -38,11 +45,11 @@
 #   progress_entity          - entity whose state/attributes drive the ring
 #   progress_value           - explicit 0-100 value (skips auto-detection)
 #   progress_active_states   - states where the ring is shown (default: playing,
-#                              cleaning, running, etc. — see below)
+#                              cleaning, running, etc. - see below)
 #   mobile_filter_category   - which mobile filter chip this card belongs to
 #                              (lights/climate/media/energy/security), or
 #                              'unfiltered' for a card that belongs to no chip
-#                              and so hides whenever any filter is active — not
+#                              and so hides whenever any filter is active - not
 #                              "always show", which is what null does. Read in JS
 #                              by hemma-smart-row and filter-overlay.js, which
 #                              fall back to their own template-name → category
@@ -56,6 +63,15 @@ hemma_entity:
   show_entity_picture: true
   show_icon: false
 
+  hidden: |
+    [[[
+      const off = (v) => v === false || v === 'false' || v === 0 || v === '0';
+      if (off(variables?.enabled)) return true;
+      if (String(variables?.show_when ?? 'always') !== 'active') return false;
+      const idle = variables?.idle;
+      return idle === true || idle === 'true' || idle === 1 || idle === '1';
+    ]]]
+
   variables:
     size: small  # small | large — phones only, see header
     icon_never_masked: false  # skip the CSS mask-tint entirely; always show the raw entity_picture <img> (icon file must supply its own inactive-state art)
@@ -64,6 +80,13 @@ hemma_entity:
     mobile_filter_category: null
     battery_entity: null
     battery_low_threshold: 20
+    # Off keeps the tile in the room's config and takes it off the dashboard,
+    # so a card can be parked without losing what was set up on it. Hiding the
+    # HOST is what smart-row watches - it collapses the slot and closes the gap
+    # the same way it does for a conditional card.
+    enabled: true
+    show_when: always  # always | active: active takes the tile off the dashboard while idle is true
+    idle: false  # set by the card template that owns the active rule
     show_toggle: false
     toggle_entity: null
     toggle_service: null
@@ -205,6 +228,14 @@ hemma_entity:
          stroke 4 in a 36 viewBox), i.e. ~0.8x the icon circle. */
       --hemma-progress-size-mq: calc(var(--hemma-icon-circle-size, 44px) * var(--hemma-progress-icon-ratio, 0.9));
       --hemma-icon-circle-size: calc(var(--hemma-entity-height-current, 200px) * var(--hemma-icon-circle-ratio, 0.22));  /* hemma_thermostat's temp puck reads this too */
+      --hemma-toggle-width: calc(46px * var(--hemma-toggle-scale, 1));
+      --hemma-toggle-height: calc(26px * var(--hemma-toggle-scale, 1));
+      /* Every top-corner extra centers on this, so the toggle, the progress ring and
+         the thermostat's rail stay in line with the icon circle at every tile size. */
+      --hemma-icon-center-y: calc(
+        var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
+        + var(--hemma-tile-icon-mt, -2px)
+        + var(--hemma-icon-circle-size, 44px) / 2);
       --hemma-entity-active-tint-current: var(--hemma-entity-active-tint, rgba(255,255,255,0.94));
       --hemma-icon-fallback-color: rgba(50,50,50,0.85);
       --hemma-toggle-off-color-active: var(--hemma-toggle-off-fill-active, rgba(0,0,0,0.55));
@@ -286,6 +317,7 @@ hemma_entity:
 
     @media (max-width: 767px), (max-height: 600px) {
       ha-card {
+        --hemma-toggle-width: calc(40px * var(--hemma-toggle-scale, 1));
         --hemma-progress-icon-ratio: 0.8;
         --hemma-entity-active-tint-current: var(--hemma-entity-active-tint-mobile, var(--hemma-entity-active-tint, rgba(255,255,255,1)));
       }
@@ -311,7 +343,13 @@ hemma_entity:
 
     /* button-card's .no-icon rules set end/start here, which closes the gap on
        hemma_thermostat only. */
-    #name, #state { align-self: center !important; }
+    #name, #state {
+      align-self: center !important;
+      /* .ellipsis clips at the padding box, so 1.15 line-height cuts descenders
+         off; the negative margin keeps the layout where it was. */
+      padding-block: 0.16em;
+      margin-block: -0.16em;
+    }
 
     @keyframes hemmaEntityFanSpin {
       from { transform: rotate(0deg); }
@@ -422,9 +460,12 @@ hemma_entity:
         :host(:hover) ha-card::after {
           transition: opacity .18s ease, background-color .18s ease !important;
         }
+        /* A small neutral lift, not the active veil at low opacity - reusing
+           the on-state tint pushed a translucent tile's warm backdrop through
+           with it, so hovering read as warmer rather than brighter. */
         :host(:hover) ha-card {
-          --hemma-active-overlay-opacity: var(--hemma-hover-overlay-opacity, 0.10);
-          --hemma-entity-overlay-tint: var(--hemma-entity-hover-tint, rgba(255,255,255,0.55));
+          --hemma-active-overlay-opacity: var(--hemma-hover-overlay-opacity, 0.05);
+          --hemma-entity-overlay-tint: var(--hemma-entity-hover-tint, rgba(255,255,255,0.30));
         }
       }
 
@@ -531,23 +572,17 @@ hemma_entity:
           @keyframes hemma-thumb-off-m{from{transform:translateX(12px)}to{transform:translateX(0)}}
           :host {
             display: block !important;
-            width: calc(46px * var(--hemma-toggle-scale, 1)) !important;
-            height: calc(26px * var(--hemma-toggle-scale, 1)) !important;
+            width: var(--hemma-toggle-width, calc(46px * var(--hemma-toggle-scale, 1))) !important;
+            height: var(--hemma-toggle-height, calc(26px * var(--hemma-toggle-scale, 1))) !important;
             overflow: visible !important;
             cursor: pointer;
           }
-          /* .ellipsis puts overflow:hidden on this field div, in THIS card's shadow root —
+          /* .ellipsis puts overflow:hidden on this field div, in THIS card's shadow root -
              the outer card's #toggle rule cannot reach it. */
           #svg, #container {
             overflow: visible !important;
             width: 100% !important;
             height: 100% !important;
-          }
-          @media (max-width: 767px), (max-height: 600px) {
-            :host {
-              width: calc(40px * var(--hemma-toggle-scale, 1)) !important;
-              height: calc(26px * var(--hemma-toggle-scale, 1)) !important;
-            }
           }
           /* Visual size stays; a transparent halo brings the tap target to 44pt. */
           @media (pointer: coarse) {
@@ -726,11 +761,11 @@ hemma_entity:
           - --hemma-icon-color-current: |
               [[[
                 const icon   = variables.icon || '';
-                const domain = entity.entity_id.split('.')[0];
+                const domain = (entity?.entity_id || '').split('.')[0];
                 // Energy follows the same Idle/Normal/Heavy/Extreme tier as its popup
                 // and sub-badges, off the popup's own power entity.
                 if (icon === 'energy' || icon === 'power') {
-                  const pid = variables.entity_power || entity.entity_id;
+                  const pid = variables.entity_power || entity?.entity_id;
                   const w = parseFloat(states[pid]?.state);
                   if (!Number.isFinite(w)) return 'var(--hemma-badge-energy-color, #30D158)';
                   if (w >= Number(variables.extreme_threshold ?? 3000)) return 'var(--hemma-badge-energy-very-high-color, #FF4245)';
@@ -836,12 +871,12 @@ hemma_entity:
       - --hemma-icon-inactive-color: |
           [[[
             const icon   = variables.icon || '';
-            const domain = entity.entity_id.split('.')[0];
+            const domain = (entity?.entity_id || '').split('.')[0];
             if (domain === 'media_player') return 'var(--hemma-icon-inactive-fallback-color, rgba(255,255,255,0.95))';
             // Energy follows the same Idle/Normal/Heavy/Extreme tier as its popup
             // and sub-badges, off the popup's own power entity.
             if (icon === 'energy' || icon === 'power') {
-              const pid = variables.entity_power || entity.entity_id;
+              const pid = variables.entity_power || entity?.entity_id;
               const w = parseFloat(states[pid]?.state);
               if (!Number.isFinite(w)) return 'var(--hemma-badge-energy-color, #30D158)';
               if (w >= Number(variables.extreme_threshold ?? 3000)) return 'var(--hemma-badge-energy-very-high-color, #FF4245)';
@@ -959,7 +994,7 @@ hemma_entity:
     custom_fields:
       toggle:
         - position: absolute
-        - top: calc(var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px)) + (var(--hemma-entity-icon-size-current, var(--hemma-entity-icon-size-desktop, 34px)) - 20px) / 2)
+        - top: calc(var(--hemma-icon-center-y) - var(--hemma-toggle-height) / 2)
         - right: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
         - z-index: 2
         - line-height: 0
@@ -986,7 +1021,7 @@ hemma_entity:
 
       progress:
         - position: absolute
-        - top: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
+        - top: calc(var(--hemma-icon-center-y) - var(--hemma-progress-size-mq) / 2)
         - right: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
         - width: var(--hemma-progress-size-mq)
         - height: var(--hemma-progress-size-mq)
@@ -998,10 +1033,11 @@ hemma_entity:
 
     name:
       - color: var(--hemma-entity-name, rgba(255,255,255,0.9)) !important
-      - font-weight: 600
+      - font-weight: 550
+      - letter-spacing: -0.01em
       - text-shadow: var(--hemma-entity-text-shadow, 0 1px 4px rgba(0,0,0,0.35))
       - justify-self: start
-      - margin-bottom: var(--hemma-tile-name-mb, -2px)
+      - margin-bottom: calc(var(--hemma-tile-name-mb, -2px) - 0.16em)
       - font-size: var(--hemma-entity-name-font-current, var(--hemma-entity-name-font-desktop, 18px))
       - line-height: 1.15
       - white-space: nowrap
@@ -1015,7 +1051,8 @@ hemma_entity:
       - font-size: var(--hemma-entity-state-font-current, var(--hemma-entity-state-font-desktop, 15px))
       - text-shadow: var(--hemma-entity-text-shadow, 0 0 5px rgba(0,0,0,0.1))
       - justify-self: start
-      - font-weight: 500
+      - font-weight: 400
+      - letter-spacing: -0.006em
       - line-height: 1.15
       - transition: color .18s ease, opacity .18s ease
 

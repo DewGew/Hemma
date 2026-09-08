@@ -1,3 +1,8 @@
+# Lock Card
+#
+# Variables:
+#   icon_locked   - icon shown while locked (default: 'lock-fill')
+#   icon_unlocked - icon shown while unlocked (default: 'lock-open-fill')
 hemma_lock:
   template: [hemma_entity]
 
@@ -8,12 +13,14 @@ hemma_lock:
   variables:
     mobile_filter_category: security
     show_toggle: true
+    icon_locked: lock-fill
+    icon_unlocked: lock-open-fill
 
   entity_picture: |
     [[[
-      if (entity.state === 'unlocked') return window.hemmaIconUrl('lock-open-fill');
+      if (entity.state === 'unlocked') return window.hemmaIconUrl(variables.icon_unlocked || 'lock-open-fill');
       if (entity.state === 'unlocking') return window.hemmaIconUrl('lock-unlocking-fill');
-      return window.hemmaIconUrl('lock-fill');
+      return window.hemmaIconUrl(variables.icon_locked || 'lock-fill');
     ]]]
 
   state_display: |
@@ -56,7 +63,7 @@ hemma_lock:
           - --hemma-entity-top-gradient: none
           - box-shadow: var(--button-card-box-shadow-active, var(--button-card-box-shadow)) !important
           - --hemma-icon-color-current: "var(--hemma-popup-primary-color, #00c3d0)"
-          - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl('lock-open-fill')}')`; ]]]"
+          - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl(variables.icon_unlocked || 'lock-open-fill')}')`; ]]]"
           - --hemma-icon-use-mask: "1"
           - --hemma-icon-circle-bg: var(--hemma-icon-color-current)
         name:
@@ -77,14 +84,14 @@ hemma_lock:
 
   styles:
     card:
-      # lock-fill.svg's viewBox origin is negative — ~6% transparent padding
+      # lock-fill.svg's viewBox origin is negative - ~6% transparent padding
       # baked into the artwork, so it needs 60% * 1.06 to match every other icon.
       - --hemma-icon-mask-scale: 63.6%
       - --hemma-icon-mask-image: |
           [[[
-            if (entity.state === 'unlocked') return `url('${window.hemmaIconUrl('lock-open-fill')}')`;
+            if (entity.state === 'unlocked') return `url('${window.hemmaIconUrl(variables.icon_unlocked || 'lock-open-fill')}')`;
             if (entity.state === 'unlocking') return `url('${window.hemmaIconUrl('lock-unlocking-fill')}')`;
-            return `url('${window.hemmaIconUrl('lock-fill')}')`;
+            return `url('${window.hemmaIconUrl(variables.icon_locked || 'lock-fill')}')`;
           ]]]
     img_cell:
       - color: var(--hemma-entity-name-active, var(--primary-text-color)) !important

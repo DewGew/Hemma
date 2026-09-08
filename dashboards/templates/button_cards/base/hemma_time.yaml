@@ -75,7 +75,7 @@ hemma_time:
     name:
       - color: var(--primary-text-color)
       - opacity: var(--hemma-time-opacity, 1)
-      # Deliberately wider than the nav/Now Playing tracking — tracked-out uppercase
+      # Deliberately wider than the nav/Now Playing tracking - tracked-out uppercase
       # is what makes this read as a clock rather than another nav label.
       - letter-spacing: 1px
       - font-size: var(--hemma-chrome-font-size, 18px)

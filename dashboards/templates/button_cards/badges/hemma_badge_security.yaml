@@ -29,22 +29,8 @@ hemma_badge_security:
   double_tap_action:
     action: none
 
-  icon: >
-    [[[
-      const id = String(entity?.entity_id || '');
-      const dom = id.split('.')[0];
-      const s = String(entity?.state || '').toLowerCase();
-      const dc = String(entity?.attributes?.device_class || '').toLowerCase();
-
-      if (dom === 'lock') return s === 'locked' ? 'mdi:lock' : 'mdi:lock-open-variant';
-      if (dom === 'alarm_control_panel')
-        return s === 'disarmed' ? 'mdi:shield-off-outline' : 'mdi:shield-check';
-      if (dom === 'camera') return 'mdi:cctv';
-      if (dc === 'garage' || dc === 'garage_door') return 'mdi:garage';
-      if (dc === 'window') return s === 'on' ? 'mdi:window-open' : 'mdi:window-closed';
-      if (dc === 'motion') return 'mdi:motion-sensor';
-      return s === 'on' ? 'mdi:door-open' : 'mdi:door-closed';
-    ]]]
+  # Carrier only - extra_styles hides #icon and masks the real glyph onto #img-cell::before.
+  icon: mdi:lock
 
   styles:
     card:
@@ -122,15 +108,25 @@ hemma_badge_security:
       const dead = !entity?.entity_id || !st || ['unknown','unavailable'].includes(st);
 
       const dom = String(entity?.entity_id || '').split('.')[0];
+      const dc = String(entity?.attributes?.device_class || '').toLowerCase();
+      const isDoor = dc === 'door' || dc === 'opening';
       let name = 'lock';
       if (dom === 'camera') name = 'doorbell';
       else if (dom === 'lock') name = st === 'locked' ? 'lock-fill' : 'lock-open-fill';
-      else if (dom === 'binary_sensor' || dom === 'cover') name = st === 'on' || st === 'open' ? 'lock-open' : 'lock';
+      else if (dom === 'binary_sensor' || dom === 'cover') {
+        const open = st === 'on' || st === 'open';
+        name = isDoor ? (open ? 'door-open' : 'door-closed') : (open ? 'lock-open' : 'lock');
+      }
       const URL = window.hemmaIconUrl(name);
       // One size for every security glyph so the group badge and its
       // sub-badges are visually identical. Every glyph here now carries 6% of
       // transparent viewBox padding, so they all take the same 6% bump.
-      const SIZE = variables?.icon_size || '72%';
+      const RAW = variables?.icon_size || '72%';
+      // The door glyphs are the exception - no padding in their viewBox, so they
+      // need the 6% taken back out to match the locks.
+      const SIZE = (isDoor && dom !== 'lock' && /%\s*$/.test(RAW))
+        ? (parseFloat(RAW) * 0.944).toFixed(1) + '%'
+        : RAW;
 
       return `:host{display:${(!enabled || dead) ? 'none' : 'inline-block'} !important;}
         #img-cell, .img-cell{ position: relative; }

@@ -11,6 +11,9 @@ import json
 import logging
 import os
 
+from aiohttp import web
+from homeassistant.components.http import HomeAssistantView
+from homeassistant.core import HomeAssistant
 from homeassistant.util.yaml import load_yaml
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,3 +189,40 @@ def rebuild_if_stale(config_dir: str) -> bool:
 
     _LOGGER.info("Hemma: rebuilt the template bundle (%d templates)", len(bundle["templates"]))
     return True
+
+
+class HemmaTemplatesView(HomeAssistantView):
+    """The template bundle, rebuilt on the way out.
+
+    It used to be a static file, so rebuild_if_stale ran only at setup. Editing
+    a template and hitting Save in the panel then wrote the PREVIOUS bundle and
+    still reported "refreshed 79 template(s)" - the edit was simply absent, with
+    nothing to say so. Rebuilding here means a Save always writes what is on
+    disk, and the reload-before-save step stops existing.
+    """
+
+    url = "/api/hemma/templates"
+    name = "api:hemma:templates"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        out = os.path.join(hass.config.config_dir, BUNDLE)
+
+        def _read() -> str | None:
+            rebuild_if_stale(hass.config.config_dir)
+            try:
+                with open(out, encoding="utf-8") as handle:
+                    return handle.read()
+            except OSError:
+                return None
+
+        body = await hass.async_add_executor_job(_read)
+        if body is None:
+            return web.Response(status=404, text="no template bundle")
+        # No caching: the point of this view is that it is never behind.
+        return web.Response(
+            body=body.encode("utf-8"),
+            content_type="application/json",
+            headers={"Cache-Control": "no-store"},
+        )

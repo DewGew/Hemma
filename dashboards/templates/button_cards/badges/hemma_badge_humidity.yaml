@@ -85,7 +85,7 @@ hemma_badge_humidity:
       }
 
       return `
-        :host{display:${hide ? 'none' : 'inline-block'} !important;}
+        :host{display:${hide ? 'none' : 'inline-block'} !important;order:var(--hemma-badge-order-climate,1);}
         #img-cell, .img-cell { position: relative; }
         #img-cell #icon, .img-cell #icon { color: transparent !important; opacity: 0 !important; }
         #img-cell::before, .img-cell::before {

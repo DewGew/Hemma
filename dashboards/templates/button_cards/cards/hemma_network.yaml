@@ -3,10 +3,16 @@
 # The card entity should be the WAN download-speed sensor; set upload_sensor (or
 # entity_upload) to the matching WAN upload-speed sensor.
 #
-# LAN stat sensors (entity_stat_1–4) are informational only — they appear as tiles
+# LAN stat sensors (entity_stat_1-4) are informational only - they appear as tiles
 # in the popup but do NOT affect the badge label or active state. This ensures the
 # card only lights up for actual internet traffic, not local LAN activity (e.g. a
 # local media server stream).
+#
+# Those four are POSITIONAL, not interchangeable: hemma_popup_network lays them
+# out as a 2x2 grid with its own scale ceiling per cell -
+#   entity_stat_1  Wired download  (1000 Mbps)   entity_stat_3  Wi-Fi download (500)
+#   entity_stat_2  Wired upload    (200)         entity_stat_4  Wi-Fi upload   (200)
+# entity_stat_2 also stands in for entity_upload in the popup when that is unset.
 #
 # Variables:
 #   upload_sensor    - entity ID for the WAN upload speed sensor
@@ -87,7 +93,7 @@ hemma_network:
 
       const fit = (t) => window.hemmaStateFit?.(t) ?? t;
 
-      // WAN sensors only — LAN stat sensors (stat1-4) are informational tiles
+      // WAN sensors only - LAN stat sensors (stat1-4) are informational tiles
       // and must not factor into the tier/direction here.
       const allVals = [safe(dlId), safe(ulId)].filter(v => v != null);
       const max = allVals.length > 0 ? Math.max(...allVals) : 0;
@@ -130,7 +136,7 @@ hemma_network:
           - --hemma-entity-top-gradient: none
           - box-shadow: var(--hemma-button-card-box-shadow-active-current, var(--button-card-box-shadow-active, var(--button-card-box-shadow))) !important
           - --hemma-icon-color-current: "var(--hemma-popup-primary-color, #00c3d0)"
-          - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl('wifi')}')`; ]]]"
+          - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl(variables.icon || 'wifi')}')`; ]]]"
           - --hemma-icon-use-mask: "1"
           - --hemma-icon-circle-bg: var(--hemma-icon-color-current)
           - --hemma-icon-mask-active: "0"
@@ -165,7 +171,7 @@ hemma_network:
           - --hemma-entity-top-gradient: none
           - box-shadow: var(--hemma-button-card-box-shadow-active-current, var(--button-card-box-shadow-active, var(--button-card-box-shadow))) !important
           - --hemma-icon-color-current: "var(--hemma-popup-yellow-color, #ffd600)"
-          - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl('wifi')}')`; ]]]"
+          - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl(variables.icon || 'wifi')}')`; ]]]"
           - --hemma-icon-use-mask: "1"
           - --hemma-icon-circle-bg: var(--hemma-icon-color-current)
           - --hemma-icon-mask-active: "0"
@@ -183,7 +189,7 @@ hemma_network:
 
   styles:
     card:
-      # wifi.svg's viewBox origin is negative — ~8% transparent padding baked
+      # wifi.svg's viewBox origin is negative - ~8% transparent padding baked
       # into the artwork, so it needs 60% * 1.08 to match every other icon.
       - --hemma-icon-mask-scale: 64.8%
       - --hemma-icon-inactive-color: |

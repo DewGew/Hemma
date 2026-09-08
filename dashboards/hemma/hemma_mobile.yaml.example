@@ -84,16 +84,16 @@ views:
             template: hemma_mobile_filter_badges
             variables:
 
-              # CLIMATE (temp_sensor required; _2.._5 optional extra sensors —
+              # CLIMATE (temp_sensor_1 required; _2.._5 optional extra sensors —
               # with more than one, the pill shows a min–max range)
-              temp_sensor: sensor.YOUR_HOME_TEMPERATURE
+              temp_sensor_1: sensor.YOUR_HOME_TEMPERATURE
               # temp_sensor_2: sensor.YOUR_TEMPERATURE_2
               # temp_sensor_3: sensor.YOUR_TEMPERATURE_3
               # temp_sensor_4: sensor.YOUR_TEMPERATURE_4
               # temp_sensor_5: sensor.YOUR_TEMPERATURE_5
               humidity_sensor: sensor.YOUR_HUMIDITY
               quality_sensor: sensor.YOUR_AIR_QUALITY
-              climate_entity: climate.YOUR_THERMOSTAT
+              climate_entity_1: climate.YOUR_THERMOSTAT
               # climate_entity_2: climate.YOUR_THERMOSTAT_2
 
               # LIGHTS (a group of all lights + per-room groups)
@@ -107,27 +107,27 @@ views:
               # presence_entity_2: sensor.YOUR_PERSON_2_STATUS
 
               # MEDIA (any mix of media players; all optional, up to 5)
-              media_entity_1: media_player.YOUR_MEDIA_PLAYER_1
-              # media_entity_2: media_player.YOUR_MEDIA_PLAYER_2
-              # media_entity_3: media_player.YOUR_MEDIA_PLAYER_3
-              # media_entity_4: media_player.YOUR_MEDIA_PLAYER_4
-              # media_entity_5: media_player.YOUR_MEDIA_PLAYER_5
+              media_player_1: media_player.YOUR_MEDIA_PLAYER_1
+              # media_player_2: media_player.YOUR_MEDIA_PLAYER_2
+              # media_player_3: media_player.YOUR_MEDIA_PLAYER_3
+              # media_player_4: media_player.YOUR_MEDIA_PLAYER_4
+              # media_player_5: media_player.YOUR_MEDIA_PLAYER_5
               # Optional Plex / PSN / PC activity:
               # plex_stream_1: sensor.YOUR_PLEX_STREAM_1_INFO
               # plex_stream_2: sensor.YOUR_PLEX_STREAM_2_INFO
-              # psn_entity_1: sensor.YOUR_PSN_SESSION
-              # psn_entity_2: sensor.YOUR_PSN_SESSION_2
-              # discord_online_entity: sensor.YOUR_DISCORD_STATUS
-              # discord_game_entity: sensor.YOUR_DISCORD_GAME
-              # steam_online_entity: sensor.YOUR_STEAM_ACCOUNT
-              # steam_game_entity: sensor.YOUR_STEAM_GAME
+              # psn_1: sensor.YOUR_PSN_SESSION
+              # psn_2: sensor.YOUR_PSN_SESSION_2
+              # discord_online: sensor.YOUR_DISCORD_STATUS
+              # discord_game: sensor.YOUR_DISCORD_GAME
+              # steam_online: sensor.YOUR_STEAM_ACCOUNT
+              # steam_game: sensor.YOUR_STEAM_GAME
 
               # SECURITY (locks — the pill shows a combined locked/unlocked state)
-              lock_entity: lock.YOUR_LOCK
-              # lock_entity_2: lock.YOUR_LOCK_2
+              security_lock_entity: lock.YOUR_LOCK
+              # security_lock_entity_2: lock.YOUR_LOCK_2
 
               # ENERGY (whole-home current consumption)
-              power_entity: sensor.YOUR_HOME_POWER
+              energy_power_entity: sensor.YOUR_HOME_POWER
 
           # ── CATEGORY FILTER POPUPS ── no configuration needed: each popup
           # auto-collects the matching cards from your room sections below.
@@ -326,7 +326,7 @@ views:
           # hemma_camera, hemma_vacuum, hemma_plant, hemma_air_purifier,
           # hemma_humidifier, hemma_battery, hemma_network, hemma_updates,
           # hemma_motion, hemma_presence, hemma_entity_actions,
-          # hemma_plex_recently_added, hemma_scenes.
+          # hemma_plex_recently_added.
           # ══════════════════════════════════════════════════════════════════
 
           # ── LIVING ROOM ──

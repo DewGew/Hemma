@@ -53,13 +53,44 @@
   };
 
   // Scroll-header mode tunables.
+  // Once the popup is on screen a sub-pixel Now Playing nudge reads as a twitch,
+  // not as an alignment fix, so late passes ignore anything under this.
+  const NP_LATE_DEAD_ZONE  = 1.25;
   const COMPACT_BAR_HEIGHT = 44; // compact nav title content height, below the safe-area inset
   const BADGE_LOCK_GAP     = 6;  // gap between compact bar bottom and the pinned badge row
   // Inactive pill background while the popup is open. Mirrors the themes'
-  // badge-background — update both together.
+  // badge-background - update both together.
   const BADGE_INACTIVE_BG  = 'rgba(46,48,56,0.78)';
 
+  window._hemmaFilterOverlayBuild = '2026-08-20-np-order';
+
   let _movedBadgeRow = null; // { owner, wrapper, el, parent, sibling }
+  // Set at discovery so _hemmaNpTrace() can sample the row without piercing
+  // the smart-row shadow DOM by hand.
+  let _npTraceTarget = null;
+
+  // Per-frame sampler: call it, then tap the Media badge, and it prints one
+  // line per frame in which Now Playing's top or margin actually changed.
+  window._hemmaNpTrace = function (ms) {
+    const w = _npTraceTarget;
+    if (!w) { console.log('np-trace: open the Media popup once first'); return; }
+    const t0 = performance.now(), out = [];
+    let last = null, frame = 0;
+    const tick = () => {
+      const top = w.getBoundingClientRect().top;
+      const mt  = w.style.getPropertyValue('margin-top') || '-';
+      const key = top.toFixed(2) + '|' + mt;
+      if (key !== last) {
+        out.push('f' + frame + ' +' + (performance.now() - t0).toFixed(0) +
+                 'ms top=' + top.toFixed(2) + ' mt=' + mt);
+        last = key;
+      }
+      frame++;
+      if (performance.now() - t0 < (ms || 2500)) requestAnimationFrame(tick);
+      else console.log('np-trace (' + window._hemmaFilterOverlayBuild + ')\n' + out.join('\n'));
+    };
+    requestAnimationFrame(tick);
+  };
   // The dashboard badge row's resting top, so the adopted row lands on the same
   // pixel instead of a hand-tuned margin. { top, vw, vh }
   let _badgeNaturalTop = null;
@@ -84,15 +115,32 @@
 
   // Folds the measured drift into the wrapper's margin. Guarded so a bad
   // measurement leaves the hand-tuned fallback margin in place.
-  function _alignAdoptedBadgeRow(badgeW, badgeEl, natural, maxShift = 12) {
+  function _alignAdoptedBadgeRow(badgeW, badgeEl, natural, maxShift = 12, dead = 0.1) {
     if (!badgeW || !badgeEl || !natural) return;
     const card  = badgeEl.shadowRoot?.querySelector('ha-card') || badgeEl;
     const rect  = card.getBoundingClientRect();
     if (!rect.height) return;
-    const shift = natural.top - rect.top;
-    if (Math.abs(shift) <= 0.1 || Math.abs(shift) > maxShift) return;
-    const cur = parseFloat(badgeW.style.getPropertyValue('margin-top')) || 0;
-    badgeW.style.setProperty('margin-top', `${(cur + shift).toFixed(2)}px`, 'important');
+    _alignAdoptedEl(badgeW, natural.top, maxShift, dead, rect.top);
+  }
+
+  // Same fold against a wrapper's own top edge, for Now Playing.
+  function _alignAdoptedEl(w, naturalTop, maxShift = 12, dead = 0.05, measuredTop) {
+    if (!w || naturalTop == null) return 0;
+    const top = measuredTop != null ? measuredTop : w.getBoundingClientRect().top;
+    const shift = naturalTop - top;
+    if (Math.abs(shift) <= dead || Math.abs(shift) > maxShift) return 0;
+    const cur = parseFloat(w.style.getPropertyValue('margin-top')) || 0;
+    w.style.setProperty('margin-top', `${(cur + shift).toFixed(2)}px`, 'important');
+    return shift;
+  }
+
+  // button-card renders on lit's microtask, which lands after the callback that
+  // set hass but still inside the frame it paints. Anything measuring a moved
+  // row has to force that render down first or it reads the pre-render height.
+  function _flushRender(el) {
+    try {
+      if (el && typeof el.performUpdate === 'function') el.performUpdate();
+    } catch (_) {}
   }
   // iOS decides a pan gesture's fate at touchstart, and mutating layout inside
   // the scroller while a finger is down kills it until the finger lifts.
@@ -126,7 +174,7 @@
     el.style.removeProperty('width');
     el.style.removeProperty('z-index');
     el.style.removeProperty('--ha-card-backdrop-filter');
-    // DOM moves reset descendant scroll positions — preserve the pills' scroll.
+    // DOM moves reset descendant scroll positions - preserve the pills' scroll.
     const scroller = el.shadowRoot?.querySelector('#badges');
     const keepSL   = scroller ? scroller.scrollLeft : 0;
     if (parent) {
@@ -251,7 +299,7 @@
     const ext = _rowContentRight(row) - inner.getBoundingClientRect().left;
     if (ext > row.clientWidth + 4 && ext <= cap &&
         Math.abs(ext - inner.getBoundingClientRect().width) > 4) {
-      // Needs !important — the template's own max-content rule beats a plain
+      // Needs !important - the template's own max-content rule beats a plain
       // inline style.
       inner.style.setProperty('width', `${Math.ceil(ext)}px`, 'important');
     }
@@ -384,7 +432,7 @@
       } catch (_) {}
     }
 
-    // Masks anchor to the safe-area inset. The stop has to be hard — any
+    // Masks anchor to the safe-area inset. The stop has to be hard - any
     // falloff renders as partial blur above the hairline.
     const st = (px) => `calc(env(safe-area-inset-top, 0px) + ${px}px)`;
     const hardStop = (px, maxA = 1) => {
@@ -718,7 +766,7 @@
       this._appendTarget = appendTarget;
 
 
-      // html/body scrollbar hiding — always in document.head (not shadow root scoped)
+      // html/body scrollbar hiding - always in document.head (not shadow root scoped)
       if (!this._bodyScrollStyle) {
         const s = document.createElement('style');
         s.textContent = 'html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important}html,body{scrollbar-width:none!important;-ms-overflow-style:none!important}';
@@ -726,7 +774,7 @@
         this._bodyScrollStyle = s;
       }
 
-      // Must be injected here, not document.head — those styles don't reach
+      // Must be injected here, not document.head - those styles don't reach
       // into a shadow root.
       if (!this._noScrollStyle) {
         const s = document.createElement('style');
@@ -904,7 +952,7 @@
         if (!card) continue;
         if (this._hass) { try { card.hass = this._hass; } catch (_) {} }
         // Built fresh, not DOM-moved, so there is no wrapper to tag.
-        // Fail-safe against a stale hemma-core.js — see smart-row.js.
+        // Fail-safe against a stale hemma-core.js - see smart-row.js.
         const cardSize = window.hemmaCardSize?.(cardCfg)
           || (String(cardCfg?.variables?.size || '').toLowerCase() === 'large' ? 'large' : 'small');
         if (cardSize === 'large') card.dataset.hemmaSize = 'large';
@@ -1163,7 +1211,7 @@
       // The badge row is restored instantly, never animated, so it reads as a
       // fixed anchor while everything else springs in around it.
       if (_movedBadgeRow && _movedBadgeRow.owner === this) _restoreBadgeRow();
-      // Idempotent — a filter-to-filter switch forces this from the next
+      // Idempotent - a filter-to-filter switch forces this from the next
       // overlay's _animIn too.
       const npWasMoved = !!this._npSaved;
       this._restoreMovedWrappers();
@@ -1318,7 +1366,7 @@
         for (const mut of mutations) {
           const t = mut.target;
           if (t.style.display === 'none') t.style.display = '';
-          // Leave !important alone — that's our own suppression stamp.
+          // Leave !important alone - that's our own suppression stamp.
           if (t.style.opacity === '0' && !t.style.getPropertyPriority('opacity')) {
             t.style.removeProperty('opacity');
             t.style.removeProperty('pointer-events');
@@ -1346,7 +1394,7 @@
         if (this._showing) return;
         blurEl.style.transition = `opacity 0.50s ${EASE_OUT}`;
         blurEl.style.opacity    = '0';
-        // Springs only when actually revealing the dashboard — not when another
+        // Springs only when actually revealing the dashboard - not when another
         // overlay took the stage (its blur is fading IN over all of this).
         if (_activeOverlay) return;
         // Header springs in from a zoomed-out/below position.
@@ -1361,7 +1409,7 @@
           el.style.transform  = 'scale(1) translateY(0px)';
           el.style.opacity    = '1';
         }
-        // Entity rows spring too — transform only, opacity untouched.
+        // Entity rows spring too - transform only, opacity untouched.
         for (const el of scalableEls) {
           if (el === headerWrapper || zoomHeaderSet.has(el)) continue;
           if (npHoldSet.has(el)) continue; // NP: held visible, no spring
@@ -1409,7 +1457,7 @@
         overlayEl.style.clipPath   = '';
         overlayEl.style.opacity    = '1';
         overlayEl.style.overflow   = '';
-        // Skip if another overlay opened meanwhile — it has already applied its
+        // Skip if another overlay opened meanwhile - it has already applied its
         // own positioning to this same shared badge row.
         if (badgeRowEl && !_activeOverlay) {
           badgeRowEl.style.removeProperty('z-index');
@@ -1553,7 +1601,7 @@
           const bc = this._getBC(kids[i]);
           const t  = bc?._config?.template;
           const has = (name) => t === name || (Array.isArray(t) && t.includes(name));
-          if (has('hemma_mobile_now_playing')) { this._npWrapper = kids[i]; break; }
+          if (has('hemma_mobile_now_playing')) { this._npWrapper = _npTraceTarget = kids[i]; break; }
           if (has('hemma_mobile_header')) break; // reached Favorites/rooms
         }
       }
@@ -1578,6 +1626,7 @@
           w.style.removeProperty('width');
           w.style.removeProperty('margin-top');
           w.style.removeProperty('padding-left');
+          w.style.removeProperty('transition');
           if (parent) {
             if (sibling && sibling.parentNode === parent) parent.insertBefore(w, sibling);
             else parent.appendChild(w);
@@ -1616,7 +1665,7 @@
       this._subBadgesSavedParent = this._subBadgesSavedSibling = null;
     }
 
-    // Shadow DOM section/entity wrappers — scaled during open for depth effect
+    // Shadow DOM section/entity wrappers - scaled during open for depth effect
     _findScalableEls() {
       if (!this._container) return [];
       const kids  = Array.from(this._container.children);
@@ -1790,7 +1839,7 @@
           'width:40px', 'height:40px', 'border-radius:50%',
           'display:flex', 'align-items:center', 'justify-content:center',
           // Transparent fill with a convex sheen lit from above. No drop
-          // shadow — the rim and outer wraps do the grounding.
+          // shadow - the rim and outer wraps do the grounding.
           'background-image:radial-gradient(140% 90% at 50% -20%,' +
             'rgba(255,255,255,0.14), rgba(255,255,255,0.04) 45%, transparent 62%)',
           'background-color:rgba(255,255,255,0.07)',
@@ -1981,33 +2030,17 @@
           };
           this._npWrapper.style.setProperty('width', '100%', 'important');
           this._npWrapper.style.setProperty('padding-left', LANDSCAPE_GUTTER_CALC, 'important');
+          this._npWrapper.style.removeProperty('margin-top');
+          // The alignment below stamps margin-top; a transition on it from any
+          // stylesheet turns that stamp into a visible glide.
+          this._npWrapper.style.setProperty('transition', 'none', 'important');
           this._contentEl.insertBefore(this._npWrapper, this._subBadgesWrapper.nextSibling);
-          if (!isLandscapePhone()) {
-            const shift = npNaturalTop - this._npWrapper.getBoundingClientRect().top;
-            if (Math.abs(shift) > 0.1 && Math.abs(shift) <= 160) {
-              this._npWrapper.style.setProperty('margin-top', `${shift.toFixed(2)}px`, 'important');
-            }
-            requestAnimationFrame(() => {
-              if (!this._showing || this._npWrapper?.parentNode !== this._contentEl) return;
-              const resid = npNaturalTop - this._npWrapper.getBoundingClientRect().top;
-              if (Math.abs(resid) > 0.1 && Math.abs(resid) <= 12) {
-                const cur = parseFloat(this._npWrapper.style.getPropertyValue('margin-top')) || 0;
-                this._npWrapper.style.setProperty('margin-top', `${(cur + resid).toFixed(2)}px`, 'important');
-              }
-            });
-          }
         }
 
-        if (badgeNaturalTop && _movedBadgeRow?.owner === this &&
-            this._badgeRowWrapper?.parentNode === this._contentEl) {
-          const badgeW  = this._badgeRowWrapper;
-          const badgeEl = this._badgeRowEl;
-          _alignAdoptedBadgeRow(badgeW, badgeEl, badgeNaturalTop);
-          requestAnimationFrame(() => {
-            if (!this._showing || badgeW.parentNode !== this._contentEl) return;
-            if (_movedBadgeRow?.owner !== this) return;
-            _alignAdoptedBadgeRow(badgeW, badgeEl, badgeNaturalTop, 4);
-          });
+        const badgeAdopted = !!(badgeNaturalTop && _movedBadgeRow?.owner === this &&
+          this._badgeRowWrapper?.parentNode === this._contentEl);
+        if (badgeAdopted) {
+          _alignAdoptedBadgeRow(this._badgeRowWrapper, this._badgeRowEl, badgeNaturalTop);
         }
 
         for (const w of [this._subBadgesWrapper, this._npWrapper]) {
@@ -2017,7 +2050,30 @@
             w.style.removeProperty('pointer-events');
           }
           const bc = this._getBC(w);
-          if (bc && this._hass) { try { bc.hass = this._hass; } catch (_) {} }
+          if (bc && this._hass) {
+            try { bc.hass = this._hass; } catch (_) {}
+            _flushRender(bc);
+          }
+        }
+
+        // Both of the above move what sits over Now Playing, so its offset is
+        // measured only once nothing above it can still shift this frame.
+        const npAdopted = seamlessNp && !isLandscapePhone() &&
+          this._npWrapper?.parentNode === this._contentEl;
+        if (npAdopted) _alignAdoptedEl(this._npWrapper, npNaturalTop, 160);
+
+        if (badgeAdopted || npAdopted) {
+          requestAnimationFrame(() => {
+            if (!this._showing) return;
+            if (badgeAdopted && _movedBadgeRow?.owner === this &&
+                this._badgeRowWrapper?.parentNode === this._contentEl) {
+              _alignAdoptedBadgeRow(this._badgeRowWrapper, this._badgeRowEl,
+                badgeNaturalTop, 4, NP_LATE_DEAD_ZONE);
+            }
+            if (npAdopted && this._npWrapper?.parentNode === this._contentEl) {
+              _alignAdoptedEl(this._npWrapper, npNaturalTop, 12, NP_LATE_DEAD_ZONE);
+            }
+          });
         }
 
         if (seamlessNp) {
@@ -2094,7 +2150,7 @@
             }
           }
 
-          // Entry settled — engage the scroll-linked header.
+          // Entry settled - engage the scroll-linked header.
           setTimeout(() => {
             if (this._showing && overlayEl) {
               overlayEl.style.transition = 'none';
@@ -2308,7 +2364,10 @@
       // reconnect.
       for (const w of [this._subBadgesWrapper, this._npWrapper]) {
         const bc = w && this._getBC(w);
-        if (bc && this._hass) { try { bc.hass = this._hass; } catch (_) {} }
+        if (bc && this._hass) {
+          try { bc.hass = this._hass; } catch (_) {}
+          _flushRender(bc);
+        }
       }
 
       if (this._npNaturalTop != null && this._npWrapper?.parentNode === contentEl) {
@@ -2316,12 +2375,7 @@
           if (!this._showing || overlayEl.scrollTop > 1) return;
           if (this._npWrapper?.parentNode !== contentEl) return;
           if (isLandscapePhone()) return;
-          for (let i = 0; i < 2; i++) {
-            const resid = this._npNaturalTop - this._npWrapper.getBoundingClientRect().top;
-            if (Math.abs(resid) <= 0.1 || Math.abs(resid) > 12) break;
-            const cur = parseFloat(this._npWrapper.style.getPropertyValue('margin-top')) || 0;
-            this._npWrapper.style.setProperty('margin-top', `${(cur + resid).toFixed(2)}px`, 'important');
-          }
+          _alignAdoptedEl(this._npWrapper, this._npNaturalTop, 12, NP_LATE_DEAD_ZONE);
         };
         fixNp();
         setTimeout(fixNp, 350);

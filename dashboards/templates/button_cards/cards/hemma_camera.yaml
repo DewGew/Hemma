@@ -27,7 +27,7 @@ hemma_camera:
 
   styles:
     card:
-      # doorbell.svg's viewBox origin is negative — ~6% transparent padding
+      # doorbell.svg's viewBox origin is negative - ~6% transparent padding
       # baked into the artwork, so it needs 60% * 1.06 to match every other icon.
       - --hemma-icon-mask-scale: 63.6%
     img_cell:

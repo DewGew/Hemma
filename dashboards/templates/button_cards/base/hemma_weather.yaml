@@ -1,9 +1,9 @@
 # Weather Widget
 #
-# hero_mode: false (default) — compact, right-aligned, mobile portrait weather area
-# hero_mode: true            — large, left-aligned, desktop/tablet temperature widget
+# hero_mode: false (default) - compact, right-aligned, mobile portrait weather area
+# hero_mode: true            - large, left-aligned, desktop/tablet temperature widget
 #
-# weather_temp_sensor — entity_id of current temp sensor override
+# weather_temp_sensor - entity_id of current temp sensor override
 hemma_weather:
   variables:
     show_icon: true
@@ -106,6 +106,8 @@ hemma_weather:
       - white-space: nowrap
       - overflow: hidden
       - text-overflow: ellipsis
+      - padding-block: 0.16em
+      - margin-block: -0.16em
       - max-width: 100%
       - opacity: 1
 

@@ -31,11 +31,32 @@ const EASE_BACK     = 'cubic-bezier(0.4, 0, 0.2, 1)';
 const STAGGER_MS    = 0;    // all cards move together
 
 // A `type: conditional` wrapper carries no entity, template or variables of its
-// own — everything this file reads about a card lives under cfg.card.
+// own - everything this file reads about a card lives under cfg.card.
 function resolveCardConfig(cfg) {
   let c = cfg, depth = 0;
   while (c?.type === 'conditional' && c.card && depth++ < 4) c = c.card;
   return c;
+}
+
+// Whether the CONFIG says this card is off. The panel writes
+// `variables.enabled: false` for a tile turned off in Hemma Studio, and
+// hemma_entity's `hidden:` template reads the same key - but a template is only
+// evaluated once button-card has hass and has merged its templates, so there is
+// a window on first render where the card is not yet hidden and paints. The
+// config is true before any of that happens, so start from it.
+function isCardDisabled(cfg) {
+  const c = resolveCardConfig(cfg);
+  const v = c && c.variables && c.variables.enabled;
+  return v === false || v === 'false' || v === 0 || v === '0';
+}
+
+// A card set to show only while it is active starts closed. Its `hidden:`
+// template cannot be evaluated until button-card has hass and has merged its
+// templates, and until then the card reads as visible and paints - so the
+// reveal waits for the card's own answer rather than flashing before it.
+function startsClosed(cfg) {
+  const c = resolveCardConfig(cfg);
+  return String(c?.variables?.show_when || '') === 'active';
 }
 
 // Returns the card's filter category, or null if it should always be shown.
@@ -112,6 +133,7 @@ class HemmaSmartRow extends HTMLElement {
     this._wrappers        = [];
     this._haCards         = [];  // per-index ha-card cache for _isActiveByDom
     this._hiddenState     = [];  // last observed per-index hidden state
+    this._reported        = new Set();  // indices whose card has announced its visibility
     this._cardsCreated    = false;
     this._initialized     = false;
     this._initializing    = false;
@@ -130,6 +152,18 @@ class HemmaSmartRow extends HTMLElement {
 
   connectedCallback() {
     (window._hemmaSmartRows = window._hemmaSmartRows || new Set()).add(this);
+    // button-card and hui-conditional-card both announce this the moment they
+    // turn themselves off. Without it the row only notices on the next hass
+    // update or one of the timed retries, which is long enough to see.
+    if (!this._onVisChange) {
+      this._onVisChange = (ev) => {
+        const el = ev.composedPath ? ev.composedPath()[0] : ev.target;
+        const i = this._cards.indexOf(el);
+        if (i >= 0) this._reported.add(i);
+        this._updateWrapperVisibility();
+      };
+      this.addEventListener('card-visibility-changed', this._onVisChange);
+    }
     if (!this._initialized || !this._wrappers.length) return;
     if (isDesktop()) this.scrollTo({ left: 0, behavior: 'instant' });
 
@@ -192,17 +226,40 @@ class HemmaSmartRow extends HTMLElement {
   }
 
   // WebKit's getComputedStyle reports display:none for EVERY element inside a
-  // display:none subtree, not just the hidden ancestor — so the moment a wrapper
+  // display:none subtree, not just the hidden ancestor - so the moment a wrapper
   // is hidden, the card inside it stops reporting its own display and can never
   // be shown again. Blink returns the element's own value, which is why this
   // only bites in Safari and the iOS app.
   //
   // hui-conditional-card states its intent explicitly (it sets both the hidden
-  // attribute and inline display), so trust that first — no layout needed. Cards
+  // attribute and inline display), so trust that first - no layout needed. Cards
   // that hide themselves through their own CSS give no such signal, so put the
   // wrapper back in flow just long enough to read a truthful value, then restore
   // it and let the caller decide.
+  // The card stating outright that it is off: the hidden attribute (button-card
+  // sets it from its `hidden:` template, hui-conditional-card from its
+  // conditions) or an inline display:none. Unlike the computed read below this
+  // never returns true for a card that is merely mid-render, so it can be acted
+  // on the instant it appears.
+  _isCardHiddenExplicit(card, wrapper) {
+    if (wrapper && wrapper.dataset.off === '1') return true;
+    return !!card && (card.hidden || card.style.display === 'none');
+  }
+
+  // Still waiting on the first answer from a card that starts closed. Not
+  // dataset.off, which is permanent - this lifts the moment the card speaks,
+  // and the 500ms sweep lifts it regardless for a card that never does.
+  _heldClosed(i) {
+    if (this._reported.has(i)) return false;
+    return startsClosed(this._config.cards[i]);
+  }
+
   _isCardHidden(card, wrapper) {
+    // Turned off in the panel. Asked first and answered from the CONFIG, so it
+    // holds during the window before button-card has evaluated its `hidden:`
+    // template - which is when the card would otherwise read as visible and be
+    // shown. Every path that decides a wrapper's fate comes through here.
+    if (wrapper && wrapper.dataset.off === '1') return true;
     if (!card) return false;
     if (card.hidden || card.style.display === 'none') return true;
     if (!wrapper || wrapper.style.display !== 'none') {
@@ -218,7 +275,7 @@ class HemmaSmartRow extends HTMLElement {
     if (!this._initialized) return;
 
     // The filter entity is global, so a filter left set on the phone must not
-    // hide cards on a desktop row — only scroll_mode rows honour it. Desktop
+    // hide cards on a desktop row - only scroll_mode rows honor it. Desktop
     // still runs this pass to collapse wrappers of hidden conditional cards.
     const filter = this._scrollMode
       ? this._hass?.states['input_select.hemma_mobile_filter']?.state
@@ -240,7 +297,8 @@ class HemmaSmartRow extends HTMLElement {
         this._wrappers.forEach((wrapper, i) => {
           const card = this._cards[i];
           if (!card) return;
-          const hide = isFilterHidden(card) || this._isCardHidden(card, wrapper);
+          const hide = isFilterHidden(card) || this._isCardHidden(card, wrapper)
+            || this._heldClosed(i);
           wrapper.style.display = hide ? 'none' : '';
         });
       };
@@ -254,7 +312,7 @@ class HemmaSmartRow extends HTMLElement {
     const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
     // Desktop lays the row out as a horizontal flex strip, so a collapse there
-    // animates width, not height — and has to eat the container's column gap on
+    // animates width, not height - and has to eat the container's column gap on
     // the way out, or the row keeps 8px of the departed card's slot. Mobile's
     // two-column grid keeps the original height collapse.
     const horizontal = isDesktop();
@@ -274,7 +332,7 @@ class HemmaSmartRow extends HTMLElement {
       if (card) {
         card.style.width = '';
         // Only reclaim what we set. hui-conditional-card owns this property and
-        // may have written display:none in the meantime — clearing that blindly
+        // may have written display:none in the meantime - clearing that blindly
         // would flash the card back on screen.
         if (card.style.display === 'block') card.style.display = '';
       }
@@ -291,7 +349,7 @@ class HemmaSmartRow extends HTMLElement {
       this._animHiding.add(wrapper);
       const axis = horizontal ? 'width' : 'height';
       const size = horizontal ? wrapper.offsetWidth : wrapper.offsetHeight;
-      // No need to pin the card on the way out — anything being collapsed is
+      // No need to pin the card on the way out - anything being collapsed is
       // already invisible, so only the closing gap is on screen.
       if (horizontal) {
         wrapper.style.flex  = `0 0 ${size}px`;
@@ -344,7 +402,7 @@ class HemmaSmartRow extends HTMLElement {
       const card = wrapper.firstElementChild;
       if (horizontal && card) {
         // hui-conditional-card carries no styles of its own, so it is display:
-        // inline and a width on it would be ignored — block it out, or the card
+        // inline and a width on it would be ignored - block it out, or the card
         // reflows its text as the wrapper widens instead of wiping into view.
         card.style.display = 'block';
         card.style.width   = size + 'px';
@@ -399,10 +457,16 @@ class HemmaSmartRow extends HTMLElement {
         if (hidden) {
           // Collapse only once this card has actually been seen visible. A card
           // that is merely mid-render reads as hidden too, and snapping its
-          // wrapper shut on that would flicker — the 500ms sweep settles those.
-          if (was === false) hideWrapper(wrapper, !snap);
+          // wrapper shut on that would flicker - the 500ms sweep settles those.
+          // An EXPLICIT hidden is not a guess, so it skips that wait: a card
+          // disabled in the panel would otherwise sit on screen until the sweep
+          // every time a popup handed its wrapper back.
+          if (was === false || this._isCardHiddenExplicit(card, wrapper)) {
+            hideWrapper(wrapper, !snap && was === false);
+          }
           return;
         }
+        if (this._heldClosed(i)) return;
         showWrapper(wrapper, !snap && (was === true || (firstCall && filterChanged)));
       });
       this.style.display = '';
@@ -422,6 +486,9 @@ class HemmaSmartRow extends HTMLElement {
     this._vizSweep = setTimeout(() => {
       this._vizSweep = null;
       if (!this._initialized) return;
+      // Backstop: a slot holding something that never announces itself must not
+      // stay shut on the strength of one config key.
+      this._config.cards.forEach((_, i) => this._reported.add(i));
       let anyVisible = false;
       this._wrappers.forEach((wrapper, i) => {
         const card = this._cards[i];
@@ -530,6 +597,8 @@ class HemmaSmartRow extends HTMLElement {
     // Sort disabled: render in config order, no detection or reordering.
     if (!this._sortEnabled) {
       this._cards = this._config.cards.map((cfg) => {
+        // Same rule as the sorted path below: an off card is never built.
+        if (isCardDisabled(cfg)) return null;
         try {
           const card = this._helpers.createCardElement(cfg);
           card.hass = this._hass;
@@ -546,6 +615,14 @@ class HemmaSmartRow extends HTMLElement {
         wrapper.style.setProperty('--hemma-position-index', String(i));
         if (cardFlag(this._config.cards[i], 'full_width')) wrapper.dataset.fullwidth = '1';
         if (cardFlag(this._config.cards[i], 'collapsed_spacer')) wrapper.dataset.collapsedSpacer = '1';
+        if (isCardDisabled(this._config.cards[i])) {
+          wrapper.dataset.off = '1';
+          wrapper.style.display = 'none';
+          this._hiddenState[i] = true;
+        } else if (startsClosed(this._config.cards[i])) {
+          wrapper.style.display = 'none';
+          this._hiddenState[i] = true;
+        }
         if (card) wrapper.appendChild(card);
         container.appendChild(wrapper);
         return wrapper;
@@ -565,15 +642,25 @@ class HemmaSmartRow extends HTMLElement {
     this._wrappers    = [];
     this._haCards     = [];
     this._hiddenState = [];
+    this._reported.clear();
     let budget = performance.now();
 
     for (let i = 0; i < this._config.cards.length; i++) {
       const cfg = this._config.cards[i];
       let card = null;
-      try {
-        card = this._helpers.createCardElement(cfg);
-      } catch (e) {
-        console.warn('hemma-smart-row: failed to create card', cfg, e);
+      // Off in Hemma Studio: the element is never built. Hiding it is a race
+      // with everything that can show a wrapper - the visibility pass, the
+      // filter, a popup handing a card back - and a card that does not exist
+      // cannot lose that race, cannot be DOM-moved into a popup, and cannot
+      // paint in any frame. The row keeps the empty wrapper so the indices,
+      // the config and the sort all still line up.
+      const off = isCardDisabled(cfg);
+      if (!off) {
+        try {
+          card = this._helpers.createCardElement(cfg);
+        } catch (e) {
+          console.warn('hemma-smart-row: failed to create card', cfg, e);
+        }
       }
 
       const wrapper = document.createElement('div');
@@ -585,6 +672,17 @@ class HemmaSmartRow extends HTMLElement {
       if (getCardSize(cfg) === 'large') {
         wrapper.dataset.size = 'large';
         this._scheduleLargeFill(wrapper);
+      }
+      // Off in the panel means off from the first frame, not from whenever the
+      // card gets round to saying so. _hiddenState too, or the visibility pass
+      // reads this as a card it has never seen and leaves the wrapper open.
+      if (off) {
+        wrapper.dataset.off = '1';
+        wrapper.style.display = 'none';
+        this._hiddenState[i] = true;
+      } else if (startsClosed(cfg)) {
+        wrapper.style.display = 'none';
+        this._hiddenState[i] = true;
       }
       wrapper.style.setProperty('--hemma-init-play', 'paused');
       if (card) wrapper.appendChild(card);
@@ -610,7 +708,7 @@ class HemmaSmartRow extends HTMLElement {
 
     setTimeout(() => {
       // Collapse already-hidden cards before the entrance animation is released.
-      // _updateWrapperVisibility can't do it — it's gated on _initialized, which
+      // _updateWrapperVisibility can't do it - it's gated on _initialized, which
       // isn't set until PAGE_ANIM_MS later, so a conditional card whose condition
       // is unmet would hold an empty slot open for the first second of the load.
       this._wrappers.forEach((wrapper, i) => {
@@ -700,6 +798,7 @@ class HemmaSmartRow extends HTMLElement {
   _isActive(index) {
     // A conditional card whose condition is unmet still occupies its slot, so
     // check the card's own visibility before trusting either detector.
+    if (this._heldClosed(index)) return false;
     if (this._isCardHidden(this._cards[index], this._wrappers[index])) return false;
     const dom = this._isActiveByDom(index);
     return dom !== null ? dom : this._isActiveByState(index);
@@ -814,13 +913,17 @@ class HemmaSmartRow extends HTMLElement {
   _css() {
     return `
       :host {
+        --hsr-rail: var(--hemma-entity-left-inset-current, var(--hemma-entity-left-inset-desktop, var(--hemma-rail-left, var(--page-gutter, 8vw))));
         display: block;
         position: absolute;
         z-index: 3;
+        /* Rail lives in the container's padding, so cards leave at the display
+           edge instead of clipping on a line mid-screen. */
         inset: auto
           var(--hemma-entity-right-inset-current, var(--hemma-entity-right-inset-desktop, var(--hemma-rail-left, var(--page-gutter, 8vw))))
           var(--hemma-entity-bottom-current, var(--hemma-entity-bottom-desktop, 0px))
-          var(--hemma-entity-left-inset-current, var(--hemma-entity-left-inset-desktop, var(--hemma-rail-left, var(--page-gutter, 8vw))));
+          0;
+        scroll-padding-left: var(--hsr-rail);
         box-sizing: border-box;
         overflow-x: auto;
         overflow-y: clip;
@@ -844,7 +947,7 @@ class HemmaSmartRow extends HTMLElement {
         flex-direction: row;
         align-items: flex-end;
         gap: 8px;
-        padding: 20px var(--hemma-entity-shadow-pad-right-current, var(--hemma-entity-shadow-pad-right-desktop, 0px)) 40px 0;
+        padding: 20px var(--hemma-entity-shadow-pad-right-current, var(--hemma-entity-shadow-pad-right-desktop, 0px)) 40px var(--hsr-rail);
         min-width: max-content;
         box-sizing: border-box;
       }
@@ -895,10 +998,15 @@ class HemmaSmartRow extends HTMLElement {
         }
         .card-wrapper { flex: unset; width: auto; scroll-snap-align: none; will-change: auto; }
         ${this._sortEnabled ? `
-        /* Child combinator load-bearing — see the collapsed-spacer rule below. */
+        /* Child combinator load-bearing - see the collapsed-spacer rule below. */
         #container > .card-wrapper[data-size="large"] { grid-row: span 2; }
         /* Passes the track height down for the card's own height:100%. */
         #container > .card-wrapper > * { display: block; height: 100%; }
+        /* That display beats the hidden attribute's UA display:none, so a card
+           that has turned itself off still paints whenever its wrapper is open.
+           Collapsing the wrapper is what normally keeps it off screen, and that
+           is a JS pass with retries - it has a window. This closes it. */
+        #container > .card-wrapper > *[hidden] { display: none; }
         ` : ''}
         .card-wrapper[data-fullwidth="1"] { grid-column: 1 / -1 !important; width: 100% !important; flex: none !important; }
         /* Now Playing collapses its own content to ~0 height when nothing's
@@ -938,6 +1046,13 @@ class HemmaSmartRow extends HTMLElement {
         #container > .card-wrapper[data-collapsed-spacer] {
           display: none;
         }
+        /* Turned off in Hemma Studio. UNSCOPED and !important, unlike the
+           collapsed-spacer rule above, and both are deliberate: this must hold
+           wherever the card ends up, popups included, and it must beat the
+           plain CSSOM assignments hideWrapper/showWrapper make - a stylesheet
+           !important outranks a non-important inline style. Off in the panel
+           means off, with no frame anywhere in which it is not. */
+        .card-wrapper[data-off] { display: none !important; }
       }
 
       /* Landscape has enough width for a third column of entity cards. */

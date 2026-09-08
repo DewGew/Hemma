@@ -1,7 +1,7 @@
 # Lock Group Sub-Badge  (Home dashboard)
 # Aggregates every lock into one "Locks" badge and opens the shared lock group
 # popup, the way the Lights badge aggregates lights. Rooms keep using
-# hemma_badge_security with their own single lock — this is for the Home view,
+# hemma_badge_security with their own single lock - this is for the Home view,
 # which covers the whole house.
 #
 # Variables:

@@ -1,6 +1,6 @@
 hemma_mobile_header:
   variables:
-    # window.hemmaIconUrl load-race guard — see hemma_default.yaml for why.
+    # window.hemmaIconUrl load-race guard - see hemma_default.yaml for why.
     hemma_icon_url_guard:
       force_eval: true
       value: |
@@ -15,7 +15,7 @@ hemma_mobile_header:
     mobile_filter_categories: null
     room_key: null
     # Favorites auto-hides its own caret by name (see tap_action/arrow below)
-    # — this is a manual override for any OTHER non-tappable section.
+    # - this is a manual override for any OTHER non-tappable section.
     hide_caret: false
     motion_helper_entity: null
 
@@ -35,7 +35,7 @@ hemma_mobile_header:
   tap_action:
     action: |
       [[[
-        // Favorites has no matching popup — never tappable, no hide_caret
+        // Favorites has no matching popup - never tappable, no hide_caret
         // variable needed to say so.
         if (this._config?.name === 'Favorites') return 'none';
         const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');

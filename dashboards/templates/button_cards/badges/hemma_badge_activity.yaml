@@ -31,8 +31,8 @@ hemma_badge_activity:
       - --hemma-badge-opacity: >
           [[[
             // Mirror onto the host as well as ha-card. styles.card writes only
-            // to ha-card, but :host rules — and the media rim, which reads its
-            // vars from :host — need this value too, or the rim animates on a
+            // to ha-card, but :host rules - and the media rim, which reads its
+            // vars from :host - need this value too, or the rim animates on a
             // different gate from the card it outlines.
             const P = (v) => { try { this.style.setProperty('--hemma-badge-opacity', v); } catch (e) {} return v; };
             return P((() => {
@@ -160,7 +160,7 @@ hemma_badge_activity:
       const title = norm(a.full_title) || norm(a.media_title) || norm(a.title)
         || norm(a.friendly_name) || 'Activity';
 
-      // friendly_name ("PS5"), not a.source — that is the verbose
+      // friendly_name ("PS5"), not a.source - that is the verbose
       // "PlayStation Network", which says nothing the console name doesn't.
       const device = norm(a.friendly_name) || norm(a.source);
       const who    = norm(a.user);

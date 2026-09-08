@@ -5,6 +5,12 @@ hemma_updates:
 
   variables:
     icon: updates
+    show_when: active
+    idle: |
+      [[[
+        const n = Number(entity?.state);
+        return !(Number.isFinite(n) && n > 0);
+      ]]]
 
   icon_tap_action:
     action: more-info

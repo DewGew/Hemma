@@ -4,7 +4,7 @@
 //
 // ON BY DEFAULT, and narrowly scoped.
 // Without it, a phone opening the DESKTOP Hemma dashboard gets desktop content
-// wearing the mobile CSS from hemma_shared's max-width:767px blocks — it looks
+// wearing the mobile CSS from hemma_shared's max-width:767px blocks - it looks
 // like a broken mobile dashboard rather than a desktop one, which is worse than
 // either. Turn off input_boolean.hemma_dashboard_redirect to disable.
 //
@@ -16,7 +16,7 @@
 // the boolean is 'on'. If `hass` isn't ready, or the helper doesn't exist,
 // nothing happens. Never "redirect unless proven otherwise".
 //
-// This file is genuinely OPTIONAL — skipping it costs you nothing but the
+// This file is genuinely OPTIONAL - skipping it costs you nothing but the
 // routing. The mobile wallpaper used to live here too, which made an optional
 // resource load-bearing for a required feature; it now lives in hemma-core.js.
 (function () {
@@ -30,7 +30,7 @@
   // Matches any path on the desktop dashboard, but NOT /dashboard-hemma-mobile:
   // after "dashboard-hemma" the next character there is "-", which is neither a
   // slash nor end-of-string. This is also what keeps the redirect off anybody
-  // else's dashboards — it only ever acts on a path that is already Hemma's.
+  // else's dashboards - it only ever acts on a path that is already Hemma's.
   const DESKTOP_RE = /^\/dashboard-hemma(\/|$)/;
   const MOBILE_RE  = /^\/dashboard-hemma-mobile(\/|$)/;
   // Same breakpoints the card templates use for "mobile": narrow (phone
@@ -66,7 +66,7 @@
     if (MOBILE_MQ.matches && DESKTOP_RE.test(path) && panelExists(hass, MOBILE_PANEL)) {
       target = MOBILE_HOME;
     } else if (!MOBILE_MQ.matches && MOBILE_RE.test(path) && panelExists(hass, DESKTOP_PANEL)) {
-      // Mobile dashboard has only one view (home) — always land on desktop home.
+      // Mobile dashboard has only one view (home) - always land on desktop home.
       target = DESKTOP_HOME;
     }
     if (target && path !== target) {

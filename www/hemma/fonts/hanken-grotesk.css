@@ -45,3 +45,14 @@
   font-style: normal;
   font-display: swap;
 }
+
+/* Inter, variable weight 400-900, latin subset. SIL Open Font License 1.1.
+   One file covers every weight, so there is nothing to add when a new one
+   gets used. */
+@font-face {
+  font-family: 'Inter';
+  src: url('/local/hemma/fonts/inter-v20-latin-variable.woff2') format('woff2');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}

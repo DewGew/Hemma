@@ -21,8 +21,7 @@ URL_BASE = "/hemma_panel"
 # so the URL is stable and a resource entry is set once and never bumped.
 #
 # Every other frontend module on a typical install already works this way:
-# HACS serves its cards from /hacsfiles with its own tag, and browser_mod
-# registers /browser_mod.js itself.
+# HACS serves its cards from /hacsfiles with its own tag.
 SCRIPTS_URL_BASE = "/hemma_scripts"
 SCRIPTS_DIR = "www/hemma/scripts"
 

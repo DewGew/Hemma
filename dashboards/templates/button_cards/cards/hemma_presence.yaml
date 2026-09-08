@@ -1,6 +1,6 @@
 # Presence Card
 # Displays home/away status for a single person sensor (e.g. sensor.will_status).
-# Read-only — no tap controls.
+# Read-only - no tap controls.
 #
 # Variables:
 #   person_name  - display name override (defaults to first word of friendly_name,

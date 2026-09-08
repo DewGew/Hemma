@@ -17,7 +17,7 @@ hemma_now_playing_controls:
     gap_size: null
     ring: false
     only_toggle: false
-    # ── GLYPH SIZE — tune this ── Ink height of the Apple glyphs. Defaults below are ~47% of the
+    # ── GLYPH SIZE - tune this ── Ink height of the Apple glyphs. Defaults below are ~47% of the
     # button box (16px in 34px desktop, 18px in 44px compact), matching Apple's transport proportions.
     glyph_size: null
     glyph_size_primary: null
@@ -84,13 +84,13 @@ hemma_now_playing_controls:
         if (!variables.ring || !variables.src?.controls?.toggle) return '';
         const s = variables.src;
         const SW = 2.2;
-        // 0.5 units of clearance between the stroke's outer edge and the viewBox boundary — sitting
+        // 0.5 units of clearance between the stroke's outer edge and the viewBox boundary - sitting
         // exactly on the boundary leaves the outermost half-pixel to any ancestor's clip.
         const R = 20 - (SW / 2) - 0.5;
         const C = 2 * Math.PI * R;
 
         // Idle/on/standby players keep reporting a stale dur and pos, so the state has to gate the
-        // arc too — otherwise an app sitting on a loaded-but-unplayed item draws a bare track.
+        // arc too - otherwise an app sitting on a loaded-but-unplayed item draws a bare track.
         const st = String(s.state || '').toLowerCase();
         const trackable = st === 'playing' || st === 'buffering' || st === 'paused';
 

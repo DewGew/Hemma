@@ -11,66 +11,54 @@ hemma_light:
     haptic: medium
     action: >
       [[[
-        return typeof window.browser_mod !== 'undefined' ? 'fire-dom-event' : 'more-info';
+        return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
-    browser_mod:
-      service: browser_mod.popup
-      data:
-        tag: '[[[ return (entity?.entity_id || "hemma_light").replace(/\./g, "_") + "_popup"; ]]]'
-        title: ""
-        dismissable: true
-        adaptive: true
-        size: auto
-        style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
-        popup_styles:
-          - style: all
-            styles: |
-              :host {
-                --dialog-surface-margin-top: 100px;
-                --ha-ripple-hover-opacity: 0;
-                --ha-ripple-pressed-opacity: 0.04;
-                opacity: 0;
-                animation: hemma-popup-reveal 0s 0.8s ease forwards;
-              }
-              @keyframes hemma-popup-reveal { to { opacity: 1; } }
-              .content .container > * {
-                width: 100% !important;
-                max-width: none !important;
-                box-sizing: border-box !important;
-              }
-              .content .container {
-                scrollbar-width: none;
-                overscroll-behavior: contain;
-                touch-action: pan-y;
-                padding-bottom: 24px !important;
-              }
-              .content .container::-webkit-scrollbar { display: none; }
-              @media (max-width: 768px) {
-                :host { --dialog-surface-margin-top: 0px; }
-                wa-drawer {
-                  --size: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                  height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                }
-                .content .container {
-                  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                }
-                wa-drawer.hemma-h-auto {
-                  --size: var(--ha-bottom-sheet-height, auto) !important;
-                  height: auto !important;
-                  min-height: 0 !important;
-                }
-                wa-drawer.hemma-h-auto .content .container {
-                  min-height: 0 !important;
-                }
-              }
-        content: |
-          [[[
-            if (typeof window._hemmaLPC === 'function') {
-              return window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables);
+    hemma_popup:
+      title: ""
+      dismissable: true
+      style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
+      popup_styles:
+        - style: all
+          styles: |
+            .content .container > * {
+              width: 100% !important;
+              max-width: none !important;
+              box-sizing: border-box !important;
             }
-            return null;
-          ]]]
+            .content .container {
+              scrollbar-width: none;
+              overscroll-behavior: contain;
+              touch-action: pan-y;
+              padding-bottom: 24px !important;
+            }
+            .content .container::-webkit-scrollbar {
+             display: none;
+            }
+            @media (max-width: 768px) {
+            wa-drawer {
+                --size: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+                height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+            }
+            .content .container {
+                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+            }
+            wa-drawer.hemma-h-auto {
+                --size: var(--ha-bottom-sheet-height, auto) !important;
+                height: auto !important;
+                min-height: 0 !important;
+            }
+            wa-drawer.hemma-h-auto .content .container {
+                min-height: 0 !important;
+            }
+            }
+      content: |
+        [[[
+          if (typeof window._hemmaLPC === 'function') {
+            return window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables);
+          }
+          return null;
+        ]]]
 
   icon_tap_action:
     action: call-service

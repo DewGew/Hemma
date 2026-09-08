@@ -4,7 +4,31 @@
 // Kept in step with manifest.json by harnesses/versioncheck.js - the panel is
 // served as a static file and cannot read the manifest at runtime.
 const PANEL_VERSION = "2.1.0";
-const TEMPLATES_URL = "/hemma_panel/hemma-templates.json";
+// The view rebuilds the bundle before answering, so a Save cannot write
+// templates older than the files on disk. The static copy is the fallback
+// for anyone whose integration predates the view.
+const TEMPLATES_URL = "/api/hemma/templates";
+const TEMPLATES_URL_STATIC = "/hemma_panel/hemma-templates.json";
+
+// What Hemma needs that it does not ship. Its own cards - hemma-nav,
+// hemma-smart-row, hemma-filter-overlay - and its layout-card copy come with
+// it; these do not. A missing one renders as an empty card with no
+// explanation, so the panel is the one place that can say what is wrong.
+//
+// uix provides card_mod, which 21 of the templates use, so without it nothing
+// looks right. That one blocks. A missing card costs you one popup, so it
+// warns instead.
+const REQUIREMENTS = [
+  { kind: "integration", id: "uix", label: "UI eXtension",
+    why: "provides card_mod, which Hemma's templates use throughout",
+    repo: "Lint-Free-Technology/uix", docs: "https://uix.lf.technology" },
+  { kind: "card", id: "button-card", label: "button-card",
+    why: "every Hemma tile is one", repo: "custom-cards/button-card" },
+  { kind: "card", id: "apexcharts-card", label: "apexcharts-card",
+    why: "the energy popup's charts", repo: "RomRider/apexcharts-card" },
+  { kind: "card", id: "bar-card", label: "bar-card",
+    why: "the plant and battery popups", repo: "spacerokk/bar-card" },
+];
 
 
 const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
@@ -913,7 +937,13 @@ const R = (id, label, max, fields, menuGroup, kinds) => ({ id, label, max, field
 // sectionFields caches its flattening on the section it was called with.
 const mediaRepeats = () => [
   R("player", "Media player", 10, [{ ...E("media_player_%", "Media player %", ["media_player"]), ord: 10 }]),
-  R("plex", "Plex stream", 2, [{ ...E("plex_stream_%", "Plex stream %", ["sensor"]), ord: 12 }]),
+  R("plex", "Plex stream", 2, [{ ...E("plex_stream_%", "Plex stream %", ["sensor"]), ord: 12,
+    hint: "A Tautulli session sensor - title, viewer and poster all follow" }]),
+  // Sessions land on whichever slot is free, so hiding a viewer has to be a
+  // property of the source rather than of one slot.
+  { ...T("plex_hide_users", "Hide these viewers"), unit: "plex", advanced: true, ord: 13,
+    placeholder: "yourname, someone",
+    hint: "Plex usernames to leave off the dashboard, comma separated" },
   // Either shape works: the collector reads the title from an attribute or,
   // failing that, from the state.
   R("psn", "PlayStation", 2, [{ ...E("psn_%", "PlayStation %", ["sensor"]), ord: 14,
@@ -932,9 +962,10 @@ const mediaSources = () => [
       + "If it never shows a game, enable your bot's Presence intent in Discord" },
   { ...T("discord_label", "Discord shown as"), unit: "discord", advanced: true, ord: 25, placeholder: "PC" },
 
-  { ...E("steam_game", "Steam game", ["sensor"]), unit: "steam", unitLabel: "Steam", ord: 30 },
-  { ...E("steam_online", "Steam presence", ["sensor", "binary_sensor"]), unit: "steam", ord: 31 },
-  { ...E("steam_image", "Steam artwork", ["sensor"]), unit: "steam", ord: 32 },
+  // One entity: the account sensor carries presence, game and artwork.
+  // steam_game and its siblings still work as overrides, just aren't offered.
+  { ...E("steam_account", "Steam account", ["sensor"]), unit: "steam", unitLabel: "Steam", ord: 30,
+    hint: "Your account sensor from Steam - game and artwork follow" },
   { ...T("steam_label", "Steam shown as"), unit: "steam", advanced: true, ord: 33, placeholder: "Steam" },
   { key: "duplicate_game", label: "Same game on both", type: "select", advanced: true, ord: 34,
     options: ["", "discord", "steam", "both"], needs: "steam",
@@ -1341,7 +1372,23 @@ function refreshTemplates(current, bundleTemplates) {
     adopted.push(k);
   });
 
-  return { templates: next, prints, adopted, updated, added, kept: 0 };
+  // A template retired upstream used to live in the dashboard forever, because
+  // this only ever added and overwrote. Every template Hemma ships is
+  // hemma_-prefixed, so an orphan in that namespace is one we dropped and can
+  // drop here too. Anything outside it is somebody's own work and is left
+  // alone - a custom tile has to survive a save. The fingerprint map cannot
+  // answer this: it is rewritten from the current bundle each time, so it has
+  // no memory of what we used to ship.
+  const removed = [];
+  const foreign = [];
+  Object.keys(next).forEach((k) => {
+    if (bundleTemplates[k] !== undefined) return;
+    if (k.indexOf("hemma_") === 0) { delete next[k]; removed.push(k); }
+    else foreign.push(k);
+  });
+
+  return { templates: next, prints, adopted, updated, added, kept: 0,
+    removed, foreign };
 }
 
 const slug = (s) =>
@@ -2486,6 +2533,16 @@ const npStarted = (s) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+// Mirrors window._hemmaPlexHidden in hemma-core. The preview has no resource
+// loaded, so it cannot call it.
+const npPlexHidden = (V, user) => {
+  const raw = String((V || {}).plex_hide_users || "");
+  const u = String(user == null ? "" : user).trim().toLowerCase();
+  if (!raw.trim() || !u) return false;
+  return raw.split(",").map((x) => x.trim().toLowerCase())
+    .filter(Boolean).indexOf(u) !== -1;
+};
+
 const npSource = (kind, id, states) => {
   const s = id && states[id];
   if (!s) return null;
@@ -2679,23 +2736,28 @@ const npActivitySources = (V, states) => {
     }
   }
 
-  // steam_game is the gate; steam_online is an optional presence guard.
-  if (V.steam_game) {
-    const status = low((states[V.steam_online] || {}).state);
-    const live = !V.steam_online
+  // One sensor again: steam_online's account entity carries game and artwork.
+  if (V.steam_account || V.steam_game) {
+    const stU = V.steam_account && states[V.steam_account];
+    const stA = (stU && stU.attributes) || {};
+    const status = low((V.steam_online ? states[V.steam_online] : stU || {}).state);
+    const live = !(V.steam_account || V.steam_online)
       || (!!status && !["offline", "unknown", "unavailable", "none"].includes(status));
-    const game = norm((states[V.steam_game] || {}).state);
+    const game = norm(V.steam_game ? (states[V.steam_game] || {}).state : stA.game);
     if (live && !dead(game)) {
       const imgS = V.steam_image && states[V.steam_image];
       const ia = (imgS && imgS.attributes) || {};
-      // These are template sensors whose STATE is the artwork URL.
-      const raw = ia.entity_picture_local || ia.entity_picture || ia.image_url
-        || (String((imgS || {}).state || "").indexOf("http") === 0 ? imgS.state : "");
+      const http = (...xs) => xs.find((x) => x && String(x).indexOf("http") === 0) || "";
+      // An override may be a template sensor whose STATE is the artwork URL.
+      const raw = V.steam_image
+        ? (ia.entity_picture_local || ia.entity_picture || ia.image_url
+           || (String((imgS || {}).state || "").indexOf("http") === 0 ? imgS.state : ""))
+        : http(stA.game_image_main, stA.game_image_header, stA.game_icon);
       out.push({
         key: "steam", kind: "activity", playing: true,
         art: npAbs(raw), title: game, subtitle: "",
         source: norm(V.steam_label) || "Steam",
-        started: started(V.steam_game), controls: NONE,
+        started: started(V.steam_game || V.steam_account), controls: NONE,
       });
     }
   }
@@ -3008,8 +3070,22 @@ class HemmaPanel extends HTMLElement {
     // Heuristic freshness: the static handler sets no Cache-Control, so a bundle
     // that has sat unchanged for hours gets reused without asking the server.
     // That silently feeds refreshTemplates yesterday's templates.
-    const res = await fetch(TEMPLATES_URL, { cache: "no-cache" });
-    if (!res.ok) throw new Error(`templates ${res.status}`);
+    let res = null;
+    try {
+      res = this._hass && this._hass.fetchWithAuth
+        ? await this._hass.fetchWithAuth(TEMPLATES_URL)
+        : await fetch(TEMPLATES_URL, { cache: "no-cache" });
+    } catch (e) {
+      res = null;
+    }
+    if (!res || !res.ok) {
+      // Heuristic freshness only: this copy is whatever the last integration
+      // reload built, which is what the view exists to stop mattering.
+      res = await fetch(TEMPLATES_URL_STATIC, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`templates ${res.status}`);
+      this._log("template bundle read from the static copy - reload the Hemma "
+        + "integration if a template edit is missing", "warn");
+    }
     this._bundle = await res.json();
     return this._bundle;
   }
@@ -6663,6 +6739,10 @@ class HemmaPanel extends HTMLElement {
           group: "Dashboard",
         })) : []),
         { id: "create", label: "Create dashboard\u2026", group: "Dashboard" },
+        // Only where there is a YAML dashboard to import. Everyone upgrading
+        // from before Studio has one; nobody who started here does.
+        ...(this._yamlCandidates().length
+          ? [{ id: "import", label: "Import from YAML\u2026", group: "Dashboard" }] : []),
         { id: "delete", label: "Delete dashboard", group: "Dashboard" },
         // Only where there is one to add. Pair creation happens on Create, so
         // this is the way in for every dashboard made before that existed -
@@ -6681,6 +6761,7 @@ class HemmaPanel extends HTMLElement {
         // A second menu on the same anchor: let the first finish closing, or
         // _menuAt sees its own anchor and treats the request as a toggle.
         if (id === "create") return this._createForm();
+        if (id === "import") return this._importForm();
         if (id.indexOf("dash:") === 0) {
           const p = id.slice(5);
           if (p === this._dashUrl) return;
@@ -7491,11 +7572,325 @@ class HemmaPanel extends HTMLElement {
     }
   }
 
+  // ── import a YAML dashboard ───────────────────────────────────────────────
+
+  // A YAML dashboard is declared in configuration.yaml, so it is not in the
+  // storage collection lovelace/dashboards/list returns. It exists only as a
+  // registered panel, which is why nothing here had ever seen one.
+  _yamlCandidates() {
+    const out = [];
+    try {
+      const panels = (this._hass && this._hass.panels) || {};
+      const storage = new Set((this._dashList || []).map((d) => d.url_path));
+      Object.keys(panels).forEach((k) => {
+        const p = panels[k] || {};
+        if (p.component_name !== "lovelace") return;
+        const url_path = p.url_path || k;
+        if (!url_path || storage.has(url_path)) return;
+        out.push({ url_path, title: p.title || url_path });
+      });
+    } catch (e) {
+      // The panel object has moved between versions. A menu entry is not worth
+      // taking the editor down for.
+    }
+    return out;
+  }
+
+  // Which of them are Hemma's. One read each, once per session.
+  async _yamlHemma(fresh) {
+    if (this._yamlCache && !fresh) return this._yamlCache;
+    const found = [];
+    for (const c of this._yamlCandidates()) {
+      try {
+        const cfg = await this._hass.callWS({
+          type: "lovelace/config", url_path: c.url_path });
+        if (isMobileConfig(cfg)) { found.push({ ...c, kind: "mobile", cfg }); continue; }
+        if ((cfg.views || []).some((v) => (((v.cards || [])[0]) || {}).template === "hemma_room")) {
+          found.push({ ...c, kind: "wide", cfg });
+        }
+      } catch (e) {
+        // Unreadable means not importable. Nothing to say about it.
+      }
+    }
+    this._yamlCache = found;
+    return found;
+  }
+
+  _freePath(base) {
+    const taken = new Set((this._dashList || []).map((d) => d.url_path)
+      .concat(this._yamlCandidates().map((d) => d.url_path)));
+    if (!taken.has(base)) return base;
+    for (let n = 2; n < 50; n++) if (!taken.has(base + "-" + n)) return base + "-" + n;
+    return base + "-" + Date.now();
+  }
+
+  async _importForm() {
+    this._saveBlocked = true;
+    this._markDirty();
+    this.$("rooms").innerHTML = "";
+    this.$("tilespane").innerHTML = "";
+    this._status("reading YAML dashboards…");
+    const all = await this._yamlHemma(true);
+    const wides = all.filter((d) => d.kind === "wide");
+    this._status("");
+
+    if (!wides.length) {
+      this.$("pane").innerHTML = `
+        <div class="empty">
+          <h2>Nothing to import</h2>
+          <p>No YAML dashboard here looks like a Hemma dashboard.<br>
+             Create one instead, and pick the rooms you want.</p>
+        </div>`;
+      return;
+    }
+
+    this.$("pane").innerHTML = `
+      <section class="card">
+        <h2>Import a dashboard</h2>
+        <div class="hint">Your YAML dashboard is left exactly as it is. This
+          builds a second one you can edit here, so you can compare them and
+          keep whichever you prefer.</div>
+        <div class="areas" id="i_srcs"></div>
+      </section>
+      <section class="card">
+        <h2>What comes across</h2>
+        <div id="i_summary" class="hint">Reading…</div>
+      </section>
+      <section class="card">
+        <h2>The new dashboard</h2>
+        <div class="row"><label>Name</label><input id="i_title" value="Hemma"></div>
+        <div class="adv" id="i_adv">
+          <button class="advsum" type="button" id="i_advsum">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                 stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+            <span>Address</span>
+          </button>
+          <div class="advbody">
+            <div class="row"><label>Address</label><input id="i_path" value=""></div>
+          </div>
+        </div>
+        <div class="addbar">
+          <button id="i_go">Import</button>
+          <button id="i_cancel" class="ghost">Cancel</button>
+        </div>
+      </section>`;
+
+    const srcBox = this.$("i_srcs");
+    wides.forEach((d, n) => {
+      const w = document.createElement("label");
+      w.className = "area";
+      const rb = document.createElement("input");
+      rb.type = "radio"; rb.name = "i_src"; rb.checked = n === 0;
+      rb.dataset.path = d.url_path;
+      rb.onchange = () => this._importPreview(d);
+      w.appendChild(rb);
+      w.appendChild(document.createTextNode(
+        (d.title || d.url_path) + "  (" + d.url_path + ")"));
+      srcBox.appendChild(w);
+    });
+
+    const sum = this.$("i_advsum");
+    if (sum) sum.onclick = () => this.$("i_adv").classList.toggle("open");
+    this.$("i_cancel").onclick = () => this._load();
+    this.$("i_go").onclick = () => {
+      const path = (this.$("i_path").value || "").trim();
+      const title = (this.$("i_title").value || "").trim() || "Hemma";
+      const chosen = srcBox.querySelector("input:checked");
+      const src = wides.find((d) => d.url_path === (chosen && chosen.dataset.path));
+      if (!src) return this._status("pick a dashboard to import", "err");
+      // Same rule and same wording as Create, so the two screens do not
+      // disagree about what a valid address is.
+      if (!/^[a-z0-9-]+$/.test(path) || !path.includes("-")) {
+        return this._status("URL path must be lowercase, and must contain a hyphen", "err");
+      }
+      this._import(src, path, title, all);
+    };
+    this._importPreview(wides[0]);
+  }
+
+  // What the import will produce, before it produces it. The warnings are the
+  // point: they are where a hand-edited dashboard differs from what Hemma
+  // knows how to read, and they are the only place anyone will see them.
+  _importPreview(src) {
+    const box = this.$("i_summary");
+    if (!box) return;
+    let ex;
+    try {
+      ex = extractAny(src.cfg);
+    } catch (e) {
+      box.textContent = "This dashboard cannot be read: " + e.message;
+      return;
+    }
+    const rooms = ex.compact.rooms || [];
+    const tiles = rooms.reduce((n, r) => n + ((r.tiles || []).length), 0);
+    const entities = rooms.reduce(
+      (n, r) => n + Object.keys(r.variables || {}).length, 0);
+
+    box.innerHTML = "";
+    const line = document.createElement("div");
+    line.textContent = rooms.length + " room" + (rooms.length === 1 ? "" : "s")
+      + ", " + tiles + " tile" + (tiles === 1 ? "" : "s")
+      + ", " + entities + " setting" + (entities === 1 ? "" : "s") + " carried over.";
+    box.appendChild(line);
+
+    const names = document.createElement("div");
+    names.style.marginTop = ".4rem";
+    names.textContent = rooms.map((r) => r.name || r.path).join(", ");
+    box.appendChild(names);
+
+    (ex.warnings || []).forEach((w) => {
+      const el = document.createElement("div");
+      el.style.marginTop = ".4rem";
+      el.textContent = "⚠ " + w;
+      box.appendChild(el);
+    });
+
+    const t = this.$("i_title");
+    if (t) t.value = src.title || "Hemma";
+    const p = this.$("i_path");
+    if (p) p.value = this._freePath("hemma-studio");
+  }
+
+  async _import(src, url_path, title, all) {
+    this.$("i_go").disabled = true;
+    this._clearLog();
+    this._status("importing…");
+    try {
+      const bundle = await this._bundleOnce();
+      const ex = extractAny(src.cfg);
+      const rooms = ex.compact.rooms || [];
+      this._log(`read ${rooms.length} room(s) from "${src.url_path}"`);
+      (ex.warnings || []).forEach((w) => this._log(w, "warn"));
+
+      // The user's rooms, the CURRENT templates. A YAML dashboard's templates
+      // came from the local tree; a storage one has to carry its own, and they
+      // should be today's rather than whatever was on disk when it was written.
+      const extras = { ...clone(ex.extras || {}) };
+      extras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
+      const built = expandConfig(ex.compact, ex.scaffold, extras, bundle.templates);
+      const fixed = retargetRoutes(built, url_path, rooms);
+      this._log(`rewrote ${fixed.rewritten} navigation route list(s)`);
+
+      await this._hass.callWS({
+        type: "lovelace/dashboards/create",
+        url_path, title, icon: "mdi:home",
+        show_in_sidebar: true, require_admin: false,
+      });
+      await this._hass.callWS({
+        type: "lovelace/config/save", url_path, config: fixed.config });
+      this._log(`created "${url_path}"`, "ok");
+
+      // The phone half, if they have one. It extracts the same way, so import
+      // it rather than building a blank one and losing their sections.
+      const sib = (all || []).find(
+        (d) => d.kind === "mobile" && d.url_path === src.url_path + "-mobile");
+      let paired = false;
+      if (sib) {
+        try {
+          const mex = extractMobileConfig(sib.cfg);
+          const mextras = { ...clone(mex.extras || {}) };
+          mextras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
+          const mcfg = expandAny(
+            { ...mex, surface: "mobile" },
+            { extras: mextras, templates: bundle.templates });
+          await this._hass.callWS({
+            type: "lovelace/dashboards/create",
+            url_path: url_path + "-mobile", title: title + " Mobile",
+            icon: "mdi:cellphone", show_in_sidebar: false, require_admin: false,
+          });
+          await this._hass.callWS({ type: "lovelace/config/save",
+            url_path: url_path + "-mobile", config: mcfg });
+          this._log(`imported phone layout with `
+            + `${(mex.compact.rooms || []).length} section(s)`, "ok");
+          paired = true;
+        } catch (e) {
+          this._log("phone layout not imported: " + e.message, "warn");
+        }
+      }
+      if (!paired) {
+        paired = await this._createMobileSibling(url_path, title,
+          rooms.filter((r) => r.path !== "home").map((r) => r.name || r.path), bundle);
+      }
+
+      this._status(`Imported ${rooms.length} room(s) into "${title}"`
+        + (paired ? " with its phone layout" : "")
+        + `. "${src.url_path}" is untouched.`, "ok");
+      await this._refreshDashboards(url_path);
+    } catch (e) {
+      this._status("import failed: " + e.message, "err");
+      this._log("import failed: " + e.message, "err");
+      const b = this.$("i_go");
+      if (b) b.disabled = false;
+    }
+  }
+
   // ── load / save ───────────────────────────────────────────────────────────
+
+  // Registered resources are the honest test for a card: HA loads them lazily,
+  // so customElements.get is empty until something of that type has rendered.
+  async _missingReqs() {
+    let urls = [];
+    try {
+      const res = await this._hass.callWS({ type: "lovelace/resources" });
+      urls = (res || []).map((r) => String(r.url || ""));
+    } catch (e) {
+      urls = null;   // cannot tell; do not accuse
+    }
+    const components = (this._hass && this._hass.config
+      && this._hass.config.components) || [];
+    return REQUIREMENTS.filter((r) => {
+      if (r.kind === "integration") return !components.includes(r.id);
+      if (customElements.get(r.id)) return false;
+      return urls === null ? false : !urls.some((u) => u.includes(r.id));
+    });
+  }
+
+  // Nothing Hemma can do about a missing card_mod, so say what to install and
+  // stop, rather than draw an editor whose preview cannot be trusted.
+  async _gateOnReqs() {
+    let missing = [];
+    try { missing = await this._missingReqs(); } catch (e) { return false; }
+    if (!missing.length) return false;
+
+    const blockers = missing.filter((r) => r.kind === "integration");
+    missing.filter((r) => r.kind === "card").forEach((r) => {
+      this._log(`${r.label} is not installed - ${r.why}`, "warn");
+    });
+    if (!blockers.length) {
+      const names = missing.map((r) => r.label).join(", ");
+      this._status(`Missing from HACS: ${names}. Hemma works, but parts of it `
+        + `will not render.`, "err");
+      return false;
+    }
+
+    // my.home-assistant.io deep-links straight into the reader's own HACS.
+    const rows = blockers.map((r) => {
+      const [owner, repository] = r.repo.split("/");
+      const link = "https://my.home-assistant.io/redirect/hacs_repository/?owner="
+        + encodeURIComponent(owner) + "&repository=" + encodeURIComponent(repository);
+      return `
+      <li><strong>${r.label}</strong> - ${r.why}<br>
+        <code>${r.repo}</code><br>
+        <a href="${link}" target="_blank" rel="noreferrer">Open in HACS</a></li>`;
+    }).join("");
+    this.$("rooms").innerHTML = "";
+    this.$("tilespane").innerHTML = "";
+    this.$("pane").innerHTML = `
+      <div class="empty">
+        <h2>One thing to install first</h2>
+        <p>Hemma needs this before the dashboard can render:</p>
+        <ul style="text-align:left; display:inline-block; margin:1rem 0;">${rows}</ul>
+        <p>Add it in HACS, restart Home Assistant, then come back.</p>
+      </div>`;
+    this._saveBlocked = true;
+    this._markDirty();
+    return true;
+  }
 
   async _load() {
     const url_path = this._dashUrl;
     if (!url_path) return;
+    if (await this._gateOnReqs()) return;
     this._clearLog();
     this._status("");
     try {
@@ -7985,6 +8380,14 @@ class HemmaPanel extends HTMLElement {
       extras[FINGERPRINT_KEY] = r.prints;
       if (r.updated || r.added) {
         this._log(`refreshed ${r.updated} template(s)` + (r.added ? `, added ${r.added}` : ""), "ok");
+      }
+      if (r.removed.length) {
+        this._log(`removed ${r.removed.length} retired template(s): `
+          + r.removed.join(", "), "ok");
+      }
+      if (r.foreign.length) {
+        this._log(`left ${r.foreign.length} template(s) alone, not Hemma's: `
+          + r.foreign.join(", "));
       }
       // The nav card lives in the scaffold, not in button_card_templates, so
       // refreshTemplates never reached it and a fix sat in the bundle forever.
@@ -11411,6 +11814,9 @@ class HemmaPanel extends HTMLElement {
       .concat([1, 2].map((n) => ["psn", V["psn_" + n], "psn" + n]))
       .filter((x) => x[1])
       .forEach(([k, id, key]) => {
+        // Hidden viewers drop here, where V is in hand - npSource only gets
+        // the entity. Same rule as hemma-core's _hemmaPlexHidden.
+        if (k === "plex" && npPlexHidden(V, (states[id] || {}).attributes?.user)) return;
         const found = npSource(k, id, states);
         if (found) { found.key = key; out.push(found); }
       });

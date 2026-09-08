@@ -7,7 +7,7 @@
 #   enabled                    - show/hide this badge (default: true)
 #   always_visible             - show even when nothing is active (default: false)
 #   pause_timeout_minutes      - minutes a paused player still counts as active (default: 10)
-#   entity_1 – entity_14       - media_player entity IDs to track
+#   entity_1 - entity_14       - media_player entity IDs to track
 #   pc_count                   - number of live PC sources (Discord/Steam); hemma_room computes it
 hemma_badge_media_group:
   template: [hemma_badge_base]
@@ -101,7 +101,7 @@ hemma_badge_media_group:
         return activeCount > 0 ? 'inline-grid' : 'none';
       })();
       const _hide = String(_d).trim() === 'none';
-      return `:host{display:${_hide ? 'none' : 'inline-block'} !important;}` + `
+      return `:host{display:${_hide ? 'none' : 'inline-block'} !important;order:var(--hemma-badge-order-media,4);}` + `
     #img-cell, .img-cell{ position: relative; }
 
     #img-cell #icon, .img-cell #icon{

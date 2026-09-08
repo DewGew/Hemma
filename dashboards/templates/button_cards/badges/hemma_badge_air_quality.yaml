@@ -91,7 +91,7 @@ hemma_badge_air_quality:
       }
 
       return `
-        :host{display:${hide ? 'none' : 'inline-block'} !important;}
+        :host{display:${hide ? 'none' : 'inline-block'} !important;order:var(--hemma-badge-order-climate,1);}
         #img-cell, .img-cell { position: relative; }
         #img-cell #icon, .img-cell #icon { color: transparent !important; opacity: 0 !important; }
         #img-cell::before, .img-cell::before {
@@ -138,7 +138,7 @@ hemma_badge_air_quality:
 
   name: >
     [[[
-      // entity is undefined during HA startup — formatEntityState(undefined) throws.
+      // entity is undefined during HA startup - formatEntityState(undefined) throws.
       const raw = (entity ? hass.formatEntityState(entity) : '') || entity?.state || 'Unknown';
       const nice = raw.charAt(0).toUpperCase() + raw.slice(1);
       const esc = (t) => String(t || '').replaceAll('"','&quot;');

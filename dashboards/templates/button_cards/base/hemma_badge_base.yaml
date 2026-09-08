@@ -1,6 +1,6 @@
 # Base Badge Template
 hemma_badge_base:
-  # window.hemmaIconUrl load-race guard — see hemma_default.yaml for why.
+  # window.hemmaIconUrl load-race guard - see hemma_default.yaml for why.
   variables:
     hemma_icon_url_guard:
       force_eval: true
@@ -79,7 +79,7 @@ hemma_badge_base:
           [[[
             // Stagger index over visible siblings only, so a hidden badge
             // doesn't leave a gap in the cascade. Only meaningful for
-            // layout-card rows — badges_media wraps each badge on its own,
+            // layout-card rows - badges_media wraps each badge on its own,
             // always lands on 0, and falls through to 'inherit'.
             const step = Number(variables?.enter_step ?? 22);
             let i = 0;

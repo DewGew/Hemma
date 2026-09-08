@@ -1,3 +1,8 @@
+# Vacuum Card
+#
+# Variables:
+#   icon - replaces the state-varying glyph (clean / charge / docked) in every
+#          state; leave it unset to keep all three.
 hemma_vacuum:
   template: [hemma_entity]
 
@@ -26,6 +31,7 @@ hemma_vacuum:
 
   entity_picture: |
     [[[
+      if (variables.icon) return window.hemmaIconUrl(variables.icon);
       const s = (entity?.state || '').toLowerCase();
       if (s === 'cleaning' || s === 'returning') return window.hemmaIconUrl('vacuum-clean');
       if (s === 'charging')                      return window.hemmaIconUrl('vacuum-charge');
@@ -42,6 +48,7 @@ hemma_vacuum:
     card:
       - --hemma-icon-mask-image: |
           [[[
+            if (variables.icon) return `url('${window.hemmaIconUrl(variables.icon)}')`;
             const s = (entity?.state || '').toLowerCase();
             if (s === 'cleaning' || s === 'returning') return `url('${window.hemmaIconUrl('vacuum-clean')}')`;
             if (s === 'charging')                      return `url('${window.hemmaIconUrl('vacuum-charge')}')`;

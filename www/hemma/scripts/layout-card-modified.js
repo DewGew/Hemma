@@ -1,5 +1,5 @@
 /*!
- * layout-card — https://github.com/thomasloven/lovelace-layout-card
+ * layout-card - https://github.com/thomasloven/lovelace-layout-card
  * This is a MODIFIED build, redistributed with Hemma. For the unmodified
  * original, see the upstream repository above.
  *

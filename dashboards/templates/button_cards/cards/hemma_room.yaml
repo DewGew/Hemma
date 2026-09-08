@@ -12,6 +12,23 @@ hemma_room:
     image_night:
     image_position:
 
+    # Dashboard-wide typeface. Unset leaves the theme's primary-font-family
+    # alone; 'inter', 'hanken' or 'system' override it for the whole document.
+    font:
+
+    # Per-group switches. A group needs its entities *and* its switch; the
+    # switch off hides it without disturbing what is configured underneath.
+    show_climate: true
+    show_lights: true
+    show_people: true
+    show_security: true
+    show_energy: true
+    show_media: true
+
+    # The bell in the chrome row. On by default: it is dashboard chrome, not a
+    # room feature, and it has content on any install with a lock or a doorbell.
+    show_notifications: true
+
     show_climate_inline: false  # true = show individual badges (temp/humidity/air quality) directly on the top row instead of the group badge
     climate_entity_1:
     climate_entity_2:
@@ -35,6 +52,11 @@ hemma_room:
     aqi_entity_co2:
     aqi_entity_temp:
     aqi_entity_humidity:
+
+    # The order the badge pills sit in, as a list of category ids:
+    # climate, lights, people, media, security, energy. Absent is the built-in
+    # order, and a list may name only the ones that moved.
+    badge_order:
 
     presence_entity_1:
     presence_entity_2:
@@ -61,9 +83,6 @@ hemma_room:
     psn_2:
 
     show_now_playing: false
-    # '0' = tiles float free, right-aligned, no container (default).
-    # '1' = tiles wrapped in a glass panel with a "Now Playing" header.
-    now_playing_panel: '0'
 
     energy_power_entity: null
     energy_usage_today: null
@@ -133,7 +152,7 @@ hemma_room:
     energy_cost_6: null
 
     # Security row. Any mix of lock / binary_sensor / camera / alarm_control_panel
-    # / cover — hemma_badge_security picks icon and wording from the domain.
+    # / cover - hemma_badge_security picks icon and wording from the domain.
     security_locks: null
     security_locks_label: null
     security_lock_batteries: null
@@ -179,6 +198,111 @@ hemma_room:
 
   styles:
     card:
+      # Badge order. Each badge's own extra_styles carries a static
+      # `order:var(--hemma-badge-order-<id>, N)`, so all this has to do is
+      # publish the six numbers - custom properties inherit from ha-card down
+      # through the layout-card and into every badge host, which is the only
+      # way to reach them: nothing in this card's CSS can SELECT a badge, and
+      # button-card's styles.card targets ha-card rather than the grid item.
+      #
+      # A category the list does not mention sits after the ones it does,
+      # keeping its relative default order. Slotting it back into its built-in
+      # POSITION instead walked an explicitly-listed badge to the end.
+      - "--hemma-badge-order-climate": >
+          [[[
+            const o = variables.badge_order;
+            if (!Array.isArray(o)) return 1;
+            const i = o.indexOf('climate');
+            return i < 0 ? o.length + 1 : i + 1;
+          ]]]
+      - "--hemma-badge-order-lights": >
+          [[[
+            const o = variables.badge_order;
+            if (!Array.isArray(o)) return 2;
+            const i = o.indexOf('lights');
+            return i < 0 ? o.length + 2 : i + 1;
+          ]]]
+      - "--hemma-badge-order-people": >
+          [[[
+            const o = variables.badge_order;
+            if (!Array.isArray(o)) return 3;
+            const i = o.indexOf('people');
+            return i < 0 ? o.length + 3 : i + 1;
+          ]]]
+      - "--hemma-badge-order-media": >
+          [[[
+            const o = variables.badge_order;
+            if (!Array.isArray(o)) return 4;
+            const i = o.indexOf('media');
+            return i < 0 ? o.length + 4 : i + 1;
+          ]]]
+      - "--hemma-badge-order-security": >
+          [[[
+            const o = variables.badge_order;
+            if (!Array.isArray(o)) return 5;
+            const i = o.indexOf('security');
+            return i < 0 ? o.length + 5 : i + 1;
+          ]]]
+      - "--hemma-badge-order-energy": >
+          [[[
+            const o = variables.badge_order;
+            if (!Array.isArray(o)) return 6;
+            const i = o.indexOf('energy');
+            return i < 0 ? o.length + 6 : i + 1;
+          ]]]
+
+      # How far left of the gutter the settings button sits: the waveform is
+      # the rightmost control, because the media panel expands from it and wants
+      # to align to the same edge. Zero on a YAML dashboard, which has no
+      # settings button at all, and zero when there is no waveform to make room
+      # for - a lone button parked 52px inboard reads as a mistake.
+      #
+      # Read from _hemmaNP's cache rather than calling it. Rebuilding its V by
+      # hand would have to reproduce every show_* flag exactly or the two
+      # callers compute different signatures and invalidate each other every
+      # render, which also runs its demotion bookkeeping twice. Unknown means
+      # 52px: a reserved gap is cosmetic, but 0px while the waveform is up puts
+      # the two buttons on top of each other. Costs one render's lag on first
+      # paint, before the panel has filled the cache.
+      # Unknown resolves to 0px, the same value the idle state resolves to, so
+      # an idle load never moves the button at all - it paints at the margin and
+      # stays. It used to answer 52px while the cache was still empty, out of a
+      # worry about overlapping the waveform, and that guess was the whole bug:
+      # the button appeared 52px inboard and snapped right a frame later.
+      # Nothing about the chrome row's spacing is set here. It used to be
+      # computed from config plus the Now Playing cache, and kept disagreeing
+      # with what was drawn - the panel showed its waveform while this read zero
+      # and the settings button landed on top of it. hemma-core.js measures
+      # which controls actually drew and writes --hemma-chrome-shift on each
+      # slot, so the buttons slide to meet whatever is really there.
+      # The font is a theme value, but the config panel edits the dashboard and
+      # has no way to write a theme file - so a dashboard that names a font
+      # writes it onto the document instead. It has to be a stylesheet rule with
+      # !important: HA sets theme variables as inline styles on <html> and
+      # rewrites them on every theme change, and a plain inline write here would
+      # just trade blows with it.
+      - --hemma-font-set: >
+          [[[
+            const STACKS = {
+              inter:  '"Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+              hanken: '"Hanken Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+              system: '-apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif'
+            };
+            const want = STACKS[String(variables.font || '').trim().toLowerCase()] || '';
+            const ID = 'hemma-font-v1';
+            let el = document.getElementById(ID);
+            if (!want) { if (el) el.remove(); return '0'; }
+            if (!el) {
+              el = document.createElement('style');
+              el.id = ID;
+              document.head.appendChild(el);
+            }
+            const css = 'html{--primary-font-family:' + want + ' !important;}';
+            // Compare before assigning: this runs on every render, and rewriting
+            // a stylesheet that has not changed restyles the whole document.
+            if (el.textContent !== css) el.textContent = css;
+            return '1';
+          ]]]
       - --hemma-badge-enter-ease: >
           [[[
             const st = states['input_select.hemma_expanded_row']?.state;
@@ -455,7 +579,7 @@ hemma_room:
                         } else {
                           const w = f.offsetWidth || 0;
                           // Badge leaves in full view first, then the gap closes
-                          // behind it — never clipped, so the rise is visible.
+                          // behind it - never clipped, so the rise is visible.
                           b._hemmaA = b.animate(
                             [{ '--hemma-badge-enter-p': 0 }, { '--hemma-badge-enter-p': 1 }],
                             { duration: 320, easing: OUT, fill: 'forwards' });
@@ -556,7 +680,7 @@ hemma_room:
         - max-width: 100%
         - margin-top: >
             [[[
-              if (!(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) || variables.show_climate_inline) return '0';
+              if (!(variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) || variables.show_climate_inline) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'climate'
                 ? 'var(--hemma-badge-subrow-gap-current, 6px)' : '0';
@@ -567,19 +691,19 @@ hemma_room:
         - height: auto !important
         - opacity: >
             [[[
-              if (!(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) || variables.show_climate_inline) return 0;
+              if (!(variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) || variables.show_climate_inline) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'climate' ? 1 : 0;
             ]]]
         - display: >
             [[[
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 'none';
-              if (!(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) || variables.show_climate_inline) return 'none';
+              if (!(variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) || variables.show_climate_inline) return 'none';
               return 'block';
             ]]]
         - max-height: >
             [[[
-              if (!(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) || variables.show_climate_inline) return '0';
+              if (!(variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) || variables.show_climate_inline) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'climate' ? '200px' : '0';
             ]]]
@@ -589,7 +713,7 @@ hemma_room:
         - overscroll-behavior-x: contain
         - --hemma-row-fade: >
             [[[
-              if (!(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) || variables.show_climate_inline) return 0;
+              if (!(variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) || variables.show_climate_inline) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'climate' ? 1 : 0;
             ]]]
@@ -651,7 +775,7 @@ hemma_room:
         - max-width: 100%
         - margin-top: >
             [[[
-              if (!!!variables.presence_entity_1) return '0';
+              if (variables.show_people===false || !!!variables.presence_entity_1) return '0';
               if (variables.presence_entity_1 && !variables.presence_entity_2) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'presence'
@@ -662,7 +786,7 @@ hemma_room:
         - height: auto !important
         - opacity: >
             [[[
-              if (!!!variables.presence_entity_1) return 0;
+              if (variables.show_people===false || !!!variables.presence_entity_1) return 0;
               if (variables.presence_entity_1 && !variables.presence_entity_2) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'presence' ? 1 : 0;
@@ -670,13 +794,13 @@ hemma_room:
         - display: >
             [[[
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 'none';
-              if (!!!variables.presence_entity_1) return 'none';
+              if (variables.show_people===false || !!!variables.presence_entity_1) return 'none';
               if (variables.presence_entity_1 && !variables.presence_entity_2) return 'none';
               return 'block';
             ]]]
         - max-height: >
             [[[
-              if (!!!variables.presence_entity_1) return '0';
+              if (variables.show_people===false || !!!variables.presence_entity_1) return '0';
               if (variables.presence_entity_1 && !variables.presence_entity_2) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'presence' ? '200px' : '0';
@@ -687,7 +811,7 @@ hemma_room:
         - overscroll-behavior-x: contain
         - --hemma-row-fade: >
             [[[
-              if (!!!variables.presence_entity_1) return 0;
+              if (variables.show_people===false || !!!variables.presence_entity_1) return 0;
               if (variables.presence_entity_1 && !variables.presence_entity_2) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'presence' ? 1 : 0;
@@ -743,7 +867,7 @@ hemma_room:
         - text-align: left !important
         - margin-top: >
             [[[
-              if (!(!variables.show_now_playing&&!!variables.media_player_1)) return '0';
+              if (!(variables.show_media!==false&&!variables.show_now_playing&&!!variables.media_player_1)) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'media'
                 ? 'var(--hemma-badge-subrow-gap-current, 6px)' : '0';
@@ -760,7 +884,7 @@ hemma_room:
         - height: auto !important
         - opacity: >
             [[[
-              if (!(!variables.show_now_playing&&!!variables.media_player_1)) return 0;
+              if (!(variables.show_media!==false&&!variables.show_now_playing&&!!variables.media_player_1)) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'media' ? 1 : 0;
             ]]]
@@ -770,12 +894,12 @@ hemma_room:
         - display: >
             [[[
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 'none';
-              if (!(!variables.show_now_playing&&!!variables.media_player_1)) return 'none';
+              if (!(variables.show_media!==false&&!variables.show_now_playing&&!!variables.media_player_1)) return 'none';
               return 'block';
             ]]]
         - max-height: >
             [[[
-              if (!(!variables.show_now_playing&&!!variables.media_player_1)) return '0';
+              if (!(variables.show_media!==false&&!variables.show_now_playing&&!!variables.media_player_1)) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'media' ? '500px' : '0';
             ]]]
@@ -785,7 +909,7 @@ hemma_room:
         - overscroll-behavior-x: contain
         - --hemma-row-fade: >
             [[[
-              if (!(!variables.show_now_playing&&!!variables.media_player_1)) return 0;
+              if (!(variables.show_media!==false&&!variables.show_now_playing&&!!variables.media_player_1)) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'media' ? 1 : 0;
             ]]]
@@ -799,7 +923,7 @@ hemma_room:
                 const s = states[e];
                 sig += (s ? s.state + '~' + String(s.attributes?.media_title || '') : '') + '|';
               }
-              for (const k of ['plex_stream_1','plex_stream_2','psn_1','psn_2','discord_game','steam_game','steam_online']) {
+              for (const k of ['plex_stream_1','plex_stream_2','psn_1','psn_2','discord_game','steam_account','steam_game','steam_online']) {
                 const e = variables[k];
                 const s = e ? states[e] : null;
                 sig += (s ? s.state + '~' + String(s.attributes?.media_title || '') : '') + '|';
@@ -892,7 +1016,7 @@ hemma_room:
         - max-width: 100%
         - margin-top: >
             [[[
-              if (!(!!variables.light_entity_1||!!variables.light_group_entity)) return '0';
+              if (!(variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity))) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'lights'
                 ? 'var(--hemma-badge-subrow-gap-current, 6px)' : '0';
@@ -903,19 +1027,19 @@ hemma_room:
         - height: auto !important
         - opacity: >
             [[[
-              if (!(!!variables.light_entity_1||!!variables.light_group_entity)) return 0;
+              if (!(variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity))) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'lights' ? 1 : 0;
             ]]]
         - display: >
             [[[
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 'none';
-              if (!(!!variables.light_entity_1||!!variables.light_group_entity)) return 'none';
+              if (!(variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity))) return 'none';
               return 'block';
             ]]]
         - max-height: >
             [[[
-              if (!(!!variables.light_entity_1||!!variables.light_group_entity)) return '0';
+              if (!(variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity))) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'lights' ? '200px' : '0';
             ]]]
@@ -925,7 +1049,7 @@ hemma_room:
         - overscroll-behavior-x: contain
         - --hemma-row-fade: >
             [[[
-              if (!(!!variables.light_entity_1||!!variables.light_group_entity)) return 0;
+              if (!(variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity))) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'lights' ? 1 : 0;
             ]]]
@@ -987,7 +1111,7 @@ hemma_room:
         - max-width: 100%
         - margin-top: >
             [[[
-              if (!(!!variables.security_lock_entity||!!variables.security_entity_1)) return '0';
+              if (!(variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length))) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'security'
                 ? 'var(--hemma-badge-subrow-gap-current, 6px)' : '0';
@@ -998,19 +1122,19 @@ hemma_room:
         - height: auto !important
         - opacity: >
             [[[
-              if (!(!!variables.security_lock_entity||!!variables.security_entity_1)) return 0;
+              if (!(variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length))) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'security' ? 1 : 0;
             ]]]
         - display: >
             [[[
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 'none';
-              if (!(!!variables.security_lock_entity||!!variables.security_entity_1)) return 'none';
+              if (!(variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length))) return 'none';
               return 'block';
             ]]]
         - max-height: >
             [[[
-              if (!(!!variables.security_lock_entity||!!variables.security_entity_1)) return '0';
+              if (!(variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length))) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'security' ? '200px' : '0';
             ]]]
@@ -1020,7 +1144,7 @@ hemma_room:
         - overscroll-behavior-x: contain
         - --hemma-row-fade: >
             [[[
-              if (!(!!variables.security_lock_entity||!!variables.security_entity_1)) return 0;
+              if (!(variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length))) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'security' ? 1 : 0;
             ]]]
@@ -1082,7 +1206,7 @@ hemma_room:
         - max-width: 100%
         - margin-top: >
             [[[
-              if (!!!variables.energy_power_entity) return '0';
+              if (window._hemmaEnergyOn ? !window._hemmaEnergyOn(variables) : (variables.show_energy===false || !!!variables.energy_power_entity)) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'energy'
                 ? 'var(--hemma-badge-subrow-gap-current, 6px)' : '0';
@@ -1093,19 +1217,19 @@ hemma_room:
         - height: auto !important
         - opacity: >
             [[[
-              if (!!!variables.energy_power_entity) return 0;
+              if (window._hemmaEnergyOn ? !window._hemmaEnergyOn(variables) : (variables.show_energy===false || !!!variables.energy_power_entity)) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'energy' ? 1 : 0;
             ]]]
         - display: >
             [[[
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 'none';
-              if (!!!variables.energy_power_entity) return 'none';
+              if (window._hemmaEnergyOn ? !window._hemmaEnergyOn(variables) : (variables.show_energy===false || !!!variables.energy_power_entity)) return 'none';
               return 'block';
             ]]]
         - max-height: >
             [[[
-              if (!!!variables.energy_power_entity) return '0';
+              if (window._hemmaEnergyOn ? !window._hemmaEnergyOn(variables) : (variables.show_energy===false || !!!variables.energy_power_entity)) return '0';
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return '0';
               return states['input_select.hemma_expanded_row']?.state === 'energy' ? '200px' : '0';
             ]]]
@@ -1115,7 +1239,7 @@ hemma_room:
         - overscroll-behavior-x: contain
         - --hemma-row-fade: >
             [[[
-              if (!!!variables.energy_power_entity) return 0;
+              if (window._hemmaEnergyOn ? !window._hemmaEnergyOn(variables) : (variables.show_energy===false || !!!variables.energy_power_entity)) return 0;
               if (states['input_boolean.hemma_mobile_navigation']?.state === 'on') return 0;
               return states['input_select.hemma_expanded_row']?.state === 'energy' ? 1 : 0;
             ]]]
@@ -1189,6 +1313,45 @@ hemma_room:
         - "-webkit-tap-highlight-color": transparent
         - filter: none
 
+      settings:
+        # The host stays hit-testable when the button hides itself, and with no
+        # button the reserve is 0px so this box lands exactly on the waveform.
+        - display: '[[[ return variables.hemma_ui_managed ? "block" : "none" ]]]'
+        - position: fixed
+        - top: var(--hemma-chrome-btn-top, 12px)
+        # Every chrome button rests on the gutter and slides left to make room
+        # for whatever is to its right, so one step size governs all the gaps.
+        - right: var(--hero-gutter)
+        - left: auto
+        # hemma-core writes --hemma-chrome-shift on this element, so the
+        # transition fires off its own inline style rather than an
+        # ancestor var, which has not reliably started one here.
+        - transform: "translateX(calc(-1 * var(--hemma-chrome-shift, 0px)))"
+        - transition: "transform 420ms cubic-bezier(0.32, 0.72, 0, 1)"
+        - width: var(--hemma-chrome-btn-size, 34px)
+        - height: var(--hemma-chrome-btn-size, 34px)
+        - z-index: 20
+        - pointer-events: auto
+
+      notifications:
+        # Left of the dots and the waveform. hemma-core MEASURES which of those
+        # actually drew, so a hidden neighbour collapses its own step rather
+        # than leaving a hole here.
+        - display: '[[[ return variables.show_notifications === false ? "none" : "block" ]]]'
+        - position: fixed
+        - top: var(--hemma-chrome-btn-top, 12px)
+        - right: var(--hero-gutter)
+        - left: auto
+        # hemma-core writes --hemma-chrome-shift on this element, so the
+        # transition fires off its own inline style rather than an
+        # ancestor var, which has not reliably started one here.
+        - transform: "translateX(calc(-1 * var(--hemma-chrome-shift, 0px)))"
+        - transition: "transform 420ms cubic-bezier(0.32, 0.72, 0, 1)"
+        - width: var(--hemma-chrome-btn-size, 34px)
+        - height: var(--hemma-chrome-btn-size, 34px)
+        - z-index: 21
+        - pointer-events: auto
+
       menu:
         - position: fixed
         - top: 8px
@@ -1214,6 +1377,20 @@ hemma_room:
       card:
         type: custom:button-card
         template: hemma_menu_icon
+
+    settings:
+      card:
+        type: custom:button-card
+        template: hemma_settings_button
+        variables:
+          shown: '[[[ return !!variables.hemma_ui_managed ]]]'
+
+    notifications:
+      card:
+        type: custom:button-card
+        template: hemma_notifications_button
+        variables:
+          shown: '[[[ return variables.show_notifications !== false ]]]'
 
     navigation:
       card: !include /config/dashboards/templates/includes/hemma_navigation.yaml
@@ -1255,15 +1432,19 @@ hemma_room:
       card:
         type: custom:button-card
         template: hemma_time
+        variables:
+          time_entity: '[[[ return variables.time_entity || "sensor.time" ]]]'
+          use_12h: '[[[ return variables.use_12h !== false ]]]'
+          time_suffix: '[[[ return variables.time_suffix || "" ]]]'
 
     now_playing:
       card:
         type: custom:button-card
         template: hemma_now_playing
         variables:
-          enabled: '[[[ return !!variables.show_now_playing ]]]'
-          shell_mode: '[[[ return String(variables.now_playing_panel ?? "0") ]]]'
+          enabled: '[[[ return variables.show_media!==false && !!variables.show_now_playing ]]]'
           pause_timeout_minutes: '[[[ return variables.pause_timeout_minutes ]]]'
+          start_minimized: '[[[ return !!variables.start_minimized ]]]'
 
           show_media_player_1: '[[[ return !!variables.media_player_1 ]]]'
           media_player_1: '[[[ return variables.media_player_1 ]]]'
@@ -1288,6 +1469,7 @@ hemma_room:
 
           show_plex_1: '[[[ return !!variables.plex_stream_1 ]]]'
           plex_stream_1: '[[[ return variables.plex_stream_1 ]]]'
+          plex_hide_users: '[[[ return variables.plex_hide_users ]]]'
           show_plex_2: '[[[ return !!variables.plex_stream_2 ]]]'
           plex_stream_2: '[[[ return variables.plex_stream_2 ]]]'
 
@@ -1296,14 +1478,20 @@ hemma_room:
           show_psn_2: '[[[ return !!variables.psn_2 ]]]'
           psn_2: '[[[ return variables.psn_2 ]]]'
 
-          show_discord: '[[[ return !!(variables.discord_online && variables.discord_game) ]]]'
+          show_discord: >
+            [[[
+              return !!(variables.discord_user
+                || (variables.discord_online && variables.discord_game));
+            ]]]
+          discord_user: '[[[ return variables.discord_user ]]]'
           discord_image: '[[[ return variables.discord_image ]]]'
           discord_game: '[[[ return variables.discord_game ]]]'
           discord_online: '[[[ return variables.discord_online ]]]'
           discord_details: '[[[ return variables.discord_details ]]]'
           discord_label: '[[[ return variables.discord_label ]]]'
 
-          show_steam: '[[[ return !!variables.steam_game ]]]'
+          show_steam: '[[[ return !!(variables.steam_account || variables.steam_game) ]]]'
+          steam_account: '[[[ return variables.steam_account ]]]'
           steam_online: '[[[ return variables.steam_online ]]]'
           steam_game: '[[[ return variables.steam_game ]]]'
           steam_image: '[[[ return variables.steam_image ]]]'
@@ -1334,7 +1522,7 @@ hemma_room:
           - type: custom:button-card
             template: hemma_badge_climate_group
             variables:
-              enabled: '[[[ return (!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && !variables.show_climate_inline ]]]'
+              enabled: '[[[ return (variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && !variables.show_climate_inline ]]]'
               temp_sensor: '[[[ return variables.temp_sensor_1 ]]]'
               temp_sensor_2: '[[[ return variables.temp_sensor_2 ]]]'
               temp_sensor_3: '[[[ return variables.temp_sensor_3 ]]]'
@@ -1350,9 +1538,9 @@ hemma_room:
             template: hemma_badge_temp
             entity: '[[[ return variables.temp_sensor_1 ]]]'
             variables:
-              enabled: '[[[ return !!((!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && variables.show_climate_inline && variables.temp_sensor_1) ]]]'
+              enabled: '[[[ return !!((variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && variables.show_climate_inline && variables.temp_sensor_1) ]]]'
               temp_unit: '[[[ return variables.temp_unit ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              room_name: '[[[ return variables.aqi_room_name || this._config?.name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.quality_sensor ]]]'
               entity_temp: '[[[ return variables.aqi_entity_temp ]]]'
               entity_humidity: '[[[ return variables.aqi_entity_humidity ]]]'
@@ -1365,8 +1553,8 @@ hemma_room:
             template: hemma_badge_humidity
             entity: '[[[ return variables.humidity_sensor ]]]'
             variables:
-              enabled: '[[[ return !!((!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && variables.show_climate_inline && variables.humidity_sensor) ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              enabled: '[[[ return !!((variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && variables.show_climate_inline && variables.humidity_sensor) ]]]'
+              room_name: '[[[ return variables.aqi_room_name || this._config?.name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.quality_sensor ]]]'
               entity_temp: '[[[ return variables.aqi_entity_temp ]]]'
               entity_humidity: '[[[ return variables.aqi_entity_humidity ]]]'
@@ -1379,8 +1567,8 @@ hemma_room:
             template: hemma_badge_air_quality
             entity: '[[[ return variables.quality_sensor ]]]'
             variables:
-              enabled: '[[[ return !!((!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && variables.show_climate_inline && variables.quality_sensor) ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              enabled: '[[[ return !!((variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && variables.show_climate_inline && variables.quality_sensor) ]]]'
+              room_name: '[[[ return variables.aqi_room_name || this._config?.name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.quality_sensor ]]]'
               entity_temp: '[[[ return variables.aqi_entity_temp ]]]'
               entity_humidity: '[[[ return variables.aqi_entity_humidity ]]]'
@@ -1392,23 +1580,23 @@ hemma_room:
           - type: custom:button-card
             template: hemma_badge_light_group
             variables:
-              enabled: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ]]]'
-              light_group_entity: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_group_entity : null ]]]'
-              entity_1: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_1 : null ]]]'
-              entity_2: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_2 : null ]]]'
-              entity_3: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_3 : null ]]]'
-              entity_4: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_4 : null ]]]'
-              entity_5: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_5 : null ]]]'
-              entity_6: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_6 : null ]]]'
-              entity_7: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_7 : null ]]]'
-              entity_8: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_8 : null ]]]'
-              entity_9: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_9 : null ]]]'
-              entity_10: '[[[ return (!!variables.light_entity_1||!!variables.light_group_entity) ? variables.light_entity_10 : null ]]]'
+              enabled: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ]]]'
+              light_group_entity: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_group_entity : null ]]]'
+              entity_1: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_1 : null ]]]'
+              entity_2: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_2 : null ]]]'
+              entity_3: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_3 : null ]]]'
+              entity_4: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_4 : null ]]]'
+              entity_5: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_5 : null ]]]'
+              entity_6: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_6 : null ]]]'
+              entity_7: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_7 : null ]]]'
+              entity_8: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_8 : null ]]]'
+              entity_9: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_9 : null ]]]'
+              entity_10: '[[[ return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) ? variables.light_entity_10 : null ]]]'
 
           - type: custom:button-card
             template: hemma_badge_presence_group
             variables:
-              enabled: '[[[ return !!variables.presence_entity_1 && !!variables.presence_entity_2 ]]]'
+              enabled: '[[[ return variables.show_people!==false && !!variables.presence_entity_1 && !!variables.presence_entity_2 ]]]'
               entity_1: '[[[ return variables.presence_entity_1 ]]]'
               entity_2: '[[[ return variables.presence_entity_2 ]]]'
               entity_3: '[[[ return variables.presence_entity_3 ]]]'
@@ -1418,12 +1606,12 @@ hemma_room:
             template: hemma_badge_presence
             entity: '[[[ return variables.presence_entity_1 ]]]'
             variables:
-              enabled: '[[[ return !!(!!variables.presence_entity_1 && variables.presence_entity_1 && !variables.presence_entity_2) ]]]'
+              enabled: '[[[ return variables.show_people!==false && !!(!!variables.presence_entity_1 && variables.presence_entity_1 && !variables.presence_entity_2) ]]]'
 
           - type: custom:button-card
             template: hemma_badge_media_group
             variables:
-              enabled: '[[[ return (!variables.show_now_playing&&!!variables.media_player_1) ]]]'
+              enabled: '[[[ return (variables.show_media!==false&&!variables.show_now_playing&&!!variables.media_player_1) ]]]'
               pause_timeout_minutes: '[[[ return variables.pause_timeout_minutes ]]]'
               entity_1: '[[[ return !!variables.media_player_1 ? variables.media_player_1 : null ]]]'
               entity_2: '[[[ return !!variables.media_player_2 ? variables.media_player_2 : null ]]]'
@@ -1444,7 +1632,8 @@ hemma_room:
           - type: custom:button-card
             template: hemma_badge_security_group
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) ]]]'
+              locks: '[[[ return variables.security_locks || [] ]]]'
               lock_entity: '[[[ return variables.security_lock_entity ]]]'
               lock_entity_2: '[[[ return variables.security_lock_entity_2 ]]]'
 
@@ -1452,9 +1641,14 @@ hemma_room:
             template: hemma_badge_energy_group
             entity: '[[[ return variables.energy_power_entity ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity ]]]'
+              enabled: >
+                [[[
+                  return window._hemmaEnergyOn
+                    ? window._hemmaEnergyOn(variables)
+                    : (variables.show_energy!==false && !!variables.energy_power_entity);
+                ]]]
               power_entity: '[[[ return variables.energy_power_entity ]]]'
-              # Always the room's own totals — hold opens the whole-room popup.
+              # Always the room's own totals - hold opens the whole-room popup.
               room_name: '[[[ return variables.room_name || variables.aqi_room_name ]]]'
               entity_power: '[[[ return variables.energy_power_entity ]]]'
               entity_usage_today: '[[[ return variables.energy_usage_today ]]]'
@@ -1481,9 +1675,9 @@ hemma_room:
             template: hemma_badge_temp
             entity: '[[[ return variables.temp_sensor_1 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && !!variables.temp_sensor_1 ]]]'
+              enabled: '[[[ return (variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && !!variables.temp_sensor_1 ]]]'
               temp_unit: '[[[ return variables.temp_unit ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              room_name: '[[[ return variables.aqi_room_name || this._config?.name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.quality_sensor ]]]'
               entity_temp: '[[[ return variables.aqi_entity_temp ]]]'
               entity_humidity: '[[[ return variables.aqi_entity_humidity ]]]'
@@ -1496,8 +1690,8 @@ hemma_room:
             template: hemma_badge_humidity
             entity: '[[[ return variables.humidity_sensor ]]]'
             variables:
-              enabled: '[[[ return (!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && !!variables.humidity_sensor ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              enabled: '[[[ return (variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && !!variables.humidity_sensor ]]]'
+              room_name: '[[[ return variables.aqi_room_name || this._config?.name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.quality_sensor ]]]'
               entity_temp: '[[[ return variables.aqi_entity_temp ]]]'
               entity_humidity: '[[[ return variables.aqi_entity_humidity ]]]'
@@ -1510,8 +1704,8 @@ hemma_room:
             template: hemma_badge_air_quality
             entity: '[[[ return variables.quality_sensor ]]]'
             variables:
-              enabled: '[[[ return (!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor) && !!variables.quality_sensor ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              enabled: '[[[ return (variables.show_climate!==false&&(!!variables.climate_entity_1||!!variables.temp_sensor_1||!!variables.humidity_sensor||!!variables.quality_sensor)) && !!variables.quality_sensor ]]]'
+              room_name: '[[[ return variables.aqi_room_name || this._config?.name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.quality_sensor ]]]'
               entity_temp: '[[[ return variables.aqi_entity_temp ]]]'
               entity_humidity: '[[[ return variables.aqi_entity_humidity ]]]'
@@ -1539,25 +1733,25 @@ hemma_room:
             template: hemma_badge_presence
             entity: '[[[ return variables.presence_entity_1 ]]]'
             variables:
-              enabled: '[[[ return !!variables.presence_entity_1 && !!variables.presence_entity_1 ]]]'
+              enabled: '[[[ return variables.show_people!==false && !!variables.presence_entity_1 && !!variables.presence_entity_1 ]]]'
 
           - type: custom:button-card
             template: hemma_badge_presence
             entity: '[[[ return variables.presence_entity_2 ]]]'
             variables:
-              enabled: '[[[ return !!variables.presence_entity_1 && !!variables.presence_entity_2 ]]]'
+              enabled: '[[[ return variables.show_people!==false && !!variables.presence_entity_1 && !!variables.presence_entity_2 ]]]'
 
           - type: custom:button-card
             template: hemma_badge_presence
             entity: '[[[ return variables.presence_entity_3 ]]]'
             variables:
-              enabled: '[[[ return !!variables.presence_entity_1 && !!variables.presence_entity_3 ]]]'
+              enabled: '[[[ return variables.show_people!==false && !!variables.presence_entity_1 && !!variables.presence_entity_3 ]]]'
 
           - type: custom:button-card
             template: hemma_badge_presence
             entity: '[[[ return variables.presence_entity_4 ]]]'
             variables:
-              enabled: '[[[ return !!variables.presence_entity_1 && !!variables.presence_entity_4 ]]]'
+              enabled: '[[[ return variables.show_people!==false && !!variables.presence_entity_1 && !!variables.presence_entity_4 ]]]'
 
     badges_media:
       card:
@@ -1903,6 +2097,7 @@ hemma_room:
                   [[[
                     if (!variables.plex_stream_1) return '0px';
                     const s = states[variables.plex_stream_1];
+                    if (window._hemmaPlexHidden?.(variables, s?.attributes?.user)) return '0px';
                     return (s && s.state === 'playing') ? 'var(--badge-gap-current, var(--badge-gap, 10px))' : '0px';
                   ]]]
               - transition: >
@@ -1919,6 +2114,7 @@ hemma_room:
                   [[[
                     if (!variables.plex_stream_2) return '0px';
                     const s = states[variables.plex_stream_2];
+                    if (window._hemmaPlexHidden?.(variables, s?.attributes?.user)) return '0px';
                     return (s && s.state === 'playing') ? 'var(--badge-gap-current, var(--badge-gap, 10px))' : '0px';
                   ]]]
               - transition: >
@@ -1972,7 +2168,8 @@ hemma_room:
             activity_discord:
               - max-width: >
                   [[[
-                    if (!variables.discord_online || !variables.discord_game) return '0px';
+                    if (!variables.discord_user
+                        && (!variables.discord_online || !variables.discord_game)) return '0px';
                     return '450px';
                   ]]]
               - margin-right: >
@@ -1987,7 +2184,7 @@ hemma_room:
             activity_steam:
               - max-width: >
                   [[[
-                    if (!variables.steam_game) return '0px';
+                    if (!variables.steam_account && !variables.steam_game) return '0px';
                     return '450px';
                   ]]]
               - margin-right: >
@@ -2218,26 +2415,26 @@ hemma_room:
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                return expand ? (m[0] || null) : (g || null);
+                return expand ? (m[0] || null) : (variables.light_entity_1 || null);
               ]]]
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[0];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!g;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[0];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_1;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[1] || null) : (variables.light_entity_2 || null);
@@ -2245,18 +2442,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[1];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_2;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[1];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_2;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[2] || null) : (variables.light_entity_3 || null);
@@ -2264,18 +2461,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[2];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_3;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[2];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_3;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[3] || null) : (variables.light_entity_4 || null);
@@ -2283,18 +2480,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[3];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_4;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[3];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_4;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[4] || null) : (variables.light_entity_5 || null);
@@ -2302,18 +2499,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[4];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_5;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[4];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_5;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[5] || null) : (variables.light_entity_6 || null);
@@ -2321,18 +2518,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[5];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_6;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[5];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_6;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[6] || null) : (variables.light_entity_7 || null);
@@ -2340,18 +2537,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[6];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_7;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[6];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_7;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[8] || null) : (variables.light_entity_8 || null);
@@ -2359,18 +2556,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[8];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_8;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[8];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_8;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[9] || null) : (variables.light_entity_9 || null);
@@ -2378,18 +2575,18 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[9];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_9;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[9];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_9;
                 ]]]
 
           - type: custom:button-card
             template: hemma_badge_light
             entity: >
               [[[
-                const g = variables.light_entity_1;
+                const g = variables.light_entity_1 || variables.light_group_entity;
                 const m = g ? hass.states[g]?.attributes?.entity_id : null;
                 const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
                 return expand ? (m[10] || null) : (variables.light_entity_10 || null);
@@ -2397,11 +2594,11 @@ hemma_room:
             variables:
               enabled: >
                 [[[
-                  const g = variables.light_entity_1;
+                  const g = variables.light_entity_1 || variables.light_group_entity;
                   const m = g ? hass.states[g]?.attributes?.entity_id : null;
                   const expand = Array.isArray(m) && m.length > 0 && !variables.light_entity_2;
-                  if (expand) return (!!variables.light_entity_1||!!variables.light_group_entity) && !!m[10];
-                  return (!!variables.light_entity_1||!!variables.light_group_entity) && !!variables.light_entity_10;
+                  if (expand) return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!m[10];
+                  return (variables.show_lights!==false&&(!!variables.light_entity_1||!!variables.light_group_entity)) && !!variables.light_entity_10;
                 ]]]
 
     badges_security:
@@ -2423,7 +2620,7 @@ hemma_room:
             template: hemma_badge_lock_group
             entity: '[[[ return variables.security_lock_entity ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_locks ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_locks ]]]'
               label: '[[[ return variables.security_locks_label ]]]'
               locks: '[[[ return variables.security_locks || [] ]]]'
               battery_entities: '[[[ return variables.security_lock_batteries || {} ]]]'
@@ -2434,7 +2631,7 @@ hemma_room:
             template: hemma_badge_camera_group
             entity: '[[[ return (variables.security_cameras || [])[0] ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!(variables.security_cameras || []).length ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!(variables.security_cameras || []).length ]]]'
               label: '[[[ return variables.security_cameras_label ]]]'
               cameras: '[[[ return variables.security_cameras || [] ]]]'
               room_name: '[[[ return variables.room_name || variables.aqi_room_name ]]]'
@@ -2442,49 +2639,49 @@ hemma_room:
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_1 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_1 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_1 ]]]'
               label: '[[[ return variables.security_label_1 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_2 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_2 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_2 ]]]'
               label: '[[[ return variables.security_label_2 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_3 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_3 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_3 ]]]'
               label: '[[[ return variables.security_label_3 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_4 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_4 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_4 ]]]'
               label: '[[[ return variables.security_label_4 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_5 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_5 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_5 ]]]'
               label: '[[[ return variables.security_label_5 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_6 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_6 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_6 ]]]'
               label: '[[[ return variables.security_label_6 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_7 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_7 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_7 ]]]'
               label: '[[[ return variables.security_label_7 ]]]'
           - type: custom:button-card
             template: hemma_badge_security
             entity: '[[[ return variables.security_entity_8 ]]]'
             variables:
-              enabled: '[[[ return (!!variables.security_lock_entity||!!variables.security_entity_1) && !!variables.security_entity_8 ]]]'
+              enabled: '[[[ return (variables.show_security!==false&&(!!variables.security_lock_entity||!!variables.security_entity_1||!!(variables.security_locks||[]).length||!!(variables.security_cameras||[]).length)) && !!variables.security_entity_8 ]]]'
               label: '[[[ return variables.security_label_8 ]]]'
 
     badges_energy:
@@ -2506,7 +2703,7 @@ hemma_room:
             template: hemma_badge_energy
             entity: '[[[ return variables.energy_entity_1 ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity && !!variables.energy_entity_1 ]]]'
+              enabled: '[[[ return (window._hemmaEnergyOn ? window._hemmaEnergyOn(variables) : !!variables.energy_power_entity) && !!variables.energy_entity_1 ]]]'
               label: '[[[ return variables.energy_label_1 ]]]'
               unit: '[[[ return variables.energy_unit_1 ]]]'
               cost_entity: '[[[ return variables.energy_cost_1 ]]]'
@@ -2520,7 +2717,7 @@ hemma_room:
             template: hemma_badge_energy
             entity: '[[[ return variables.energy_entity_2 ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity && !!variables.energy_entity_2 ]]]'
+              enabled: '[[[ return (window._hemmaEnergyOn ? window._hemmaEnergyOn(variables) : !!variables.energy_power_entity) && !!variables.energy_entity_2 ]]]'
               label: '[[[ return variables.energy_label_2 ]]]'
               unit: '[[[ return variables.energy_unit_2 ]]]'
               cost_entity: '[[[ return variables.energy_cost_2 ]]]'
@@ -2534,7 +2731,7 @@ hemma_room:
             template: hemma_badge_energy
             entity: '[[[ return variables.energy_entity_3 ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity && !!variables.energy_entity_3 ]]]'
+              enabled: '[[[ return (window._hemmaEnergyOn ? window._hemmaEnergyOn(variables) : !!variables.energy_power_entity) && !!variables.energy_entity_3 ]]]'
               label: '[[[ return variables.energy_label_3 ]]]'
               unit: '[[[ return variables.energy_unit_3 ]]]'
               cost_entity: '[[[ return variables.energy_cost_3 ]]]'
@@ -2548,7 +2745,7 @@ hemma_room:
             template: hemma_badge_energy
             entity: '[[[ return variables.energy_entity_4 ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity && !!variables.energy_entity_4 ]]]'
+              enabled: '[[[ return (window._hemmaEnergyOn ? window._hemmaEnergyOn(variables) : !!variables.energy_power_entity) && !!variables.energy_entity_4 ]]]'
               label: '[[[ return variables.energy_label_4 ]]]'
               unit: '[[[ return variables.energy_unit_4 ]]]'
               cost_entity: '[[[ return variables.energy_cost_4 ]]]'
@@ -2562,7 +2759,7 @@ hemma_room:
             template: hemma_badge_energy
             entity: '[[[ return variables.energy_entity_5 ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity && !!variables.energy_entity_5 ]]]'
+              enabled: '[[[ return (window._hemmaEnergyOn ? window._hemmaEnergyOn(variables) : !!variables.energy_power_entity) && !!variables.energy_entity_5 ]]]'
               label: '[[[ return variables.energy_label_5 ]]]'
               unit: '[[[ return variables.energy_unit_5 ]]]'
               cost_entity: '[[[ return variables.energy_cost_5 ]]]'
@@ -2576,7 +2773,7 @@ hemma_room:
             template: hemma_badge_energy
             entity: '[[[ return variables.energy_entity_6 ]]]'
             variables:
-              enabled: '[[[ return !!variables.energy_power_entity && !!variables.energy_entity_6 ]]]'
+              enabled: '[[[ return (window._hemmaEnergyOn ? window._hemmaEnergyOn(variables) : !!variables.energy_power_entity) && !!variables.energy_entity_6 ]]]'
               label: '[[[ return variables.energy_label_6 ]]]'
               unit: '[[[ return variables.energy_unit_6 ]]]'
               cost_entity: '[[[ return variables.energy_cost_6 ]]]'
@@ -2676,7 +2873,8 @@ hemma_room:
     @media (min-width: 769px) and (hover: hover) and (pointer: fine) {
       #time {
         display: var(--hemma-time-nav-open, block);
-        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-nav-top-current, 60px) - 8px);
+        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-chrome-row-center-desktop, 56px)
+          - (var(--hemma-chrome-font-size, 18px) / 2));
         left: var(--hemma-time-left, calc(var(--hero-gutter) + var(--hero-room-name-margin-left-current, 0px)));
       }
     }
@@ -2689,28 +2887,65 @@ hemma_room:
       }
     }
 
-    /* Tablet - Time */
-    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (pointer: coarse),
-           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (hover: none) {
+    /* Tablet - Time: leading rail, optical center on the navbar label row. */
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: landscape) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: landscape) and (hover: none) {
       #time {
         display: var(--hemma-time-nav-open, block);
-        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-time-top-tablet, 20px));
-        left: auto;
-        right: calc(var(--hero-gutter) - var(--hemma-time-right-nudge-tablet, 6px));
+        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-chrome-row-top-tablet, 30px) + var(--hemma-time-row-offset-tablet, 12px));
+        left: var(--hero-gutter);
+        right: auto;
+      }
+    }
+
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: portrait) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: portrait) and (hover: none) {
+      #time {
+        display: var(--hemma-time-nav-open, block);
+        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-chrome-row-top-tablet-portrait, 32px) + var(--hemma-time-row-offset-tablet, 12px));
+        left: var(--hero-gutter);
+        right: auto;
       }
     }
 
     /* Now Playing Text - Hidden on Tablet */
+    /* The settings button and the Now Playing waveform share this row, so one
+       number moves both and they cannot drift apart. Desktop is measured off the
+       nav label (y 16, height 26, center 29) less half a 34px button. */
+    :host {
+      --hemma-chrome-btn-size: 34px;
+      --hemma-chrome-btn-top: calc(var(--hemma-chrome-row-center-desktop, 56px)
+        - (var(--hemma-chrome-btn-size, 34px) / 2));
+    }
+
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: landscape) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: landscape) and (hover: none) {
+      :host {
+        --hemma-chrome-btn-top: calc(var(--hemma-chrome-row-top-tablet, 30px)
+          + (var(--hemma-nav-pill-height-tablet, 46px) / 2)
+          - (var(--hemma-chrome-btn-size, 34px) / 2));
+      }
+    }
+
     #now_playing {
       --np-vp: 0;
       pointer-events: none;
     }
 
+    /* The container is only a positioning box: right-anchored and up to 560px
+       wide, it reaches across chrome it does not draw. Left capturing pointer
+       events it swallowed every click on the settings button beside it whenever
+       media was playing - and did nothing when nothing was. Only what it
+       actually paints should be clickable, so the box stays transparent to
+       pointers and its content opts back in. This does not depend on z-index. */
+    #now_playing { pointer-events: none !important; }
+    #now_playing > * { pointer-events: auto; }
+
     @media (min-width: 769px) and (hover: hover) and (pointer: fine) {
       #now_playing {
         --np-vp: 1;
         pointer-events: auto;
-        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-nav-top-current, 60px) + var(--hemma-now-playing-drop, -12px));
+        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-chrome-btn-top, 12px));
         right: calc(var(--hero-gutter) + var(--hero-room-name-margin-left-current, 0px));
         max-width: min(560px, 34vw);
       }
@@ -2722,7 +2957,7 @@ hemma_room:
       #now_playing {
         --np-vp: 1;
         pointer-events: auto;
-        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-now-playing-top-tablet-landscape, 58px));
+        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-chrome-btn-top, 12px));
         right: var(--hero-gutter);
         max-width: min(480px, 52vw);
       }

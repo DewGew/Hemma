@@ -68,8 +68,11 @@ hemma_badge_plex:
               let clean = url;
               try {
                 const parsed = new URL(url, location.origin);
-                parsed.searchParams.delete('refresh');
-                clean = parsed.toString();
+                // authSig signs the exact param list, so editing the query of a signed URL 401s it.
+                if (!parsed.searchParams.has('authSig')) {
+                  parsed.searchParams.delete('refresh');
+                  clean = parsed.toString();
+                }
               } catch (e) {}
               if (this._hemmaBgRawUrl !== clean) {
                 this._hemmaBgRawUrl = clean;
@@ -122,6 +125,8 @@ hemma_badge_plex:
       const url = String(raw).startsWith('/') ? `${location.origin}${raw}` : raw;
       try {
         const parsed = new URL(url, location.origin);
+        // authSig signs the exact param list, so editing the query of a signed URL 401s it.
+        if (parsed.searchParams.has('authSig')) return url;
         parsed.searchParams.delete('refresh');
         return parsed.toString();
       } catch (e) {

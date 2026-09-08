@@ -18,92 +18,62 @@ hemma_badge_light:
     haptic: light
     action: |
       [[[
-        if (typeof window.browser_mod === 'undefined') return 'more-info';
+        if (!window.hemmaPopupAction || window.hemmaPopupAction() !== 'fire-dom-event') return 'more-info';
         const members = entity?.entity_id ? states[entity.entity_id]?.attributes?.entity_id : null;
         return Array.isArray(members) && members.length > 0 ? 'fire-dom-event' : 'more-info';
       ]]]
     entity: '[[[ return entity.entity_id ]]]'
-    browser_mod:
-      service: browser_mod.popup
-      data:
-        tag: |
-          [[[
-            const eid = entity?.entity_id;
-            if (!eid) return 'hemma_light_popup';
-            for (const sid of Object.keys(states)) {
-              if (!sid.startsWith('light.') || sid === eid) continue;
-              const st = states[sid];
-              const mems = st.attributes?.entity_id;
-              if (Array.isArray(mems) && mems.includes(eid) && mems.length > 1
-                  && Array.isArray(states[mems[0]]?.attributes?.entity_id)) {
-                return sid.replace(/\./g, '_') + '_popup';
-              }
+    hemma_popup:
+      title: ""
+      dismissable: true
+      style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
+      popup_styles:
+        - style: all
+          styles: |
+            .content .container > * {
+              width: 100% !important;
+              max-width: none !important;
+              box-sizing: border-box !important;
             }
-            return eid.replace(/\./g, '_') + '_popup';
-          ]]]
-        title: ""
-        dismissable: true
-        adaptive: true
-        size: auto
-        style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
-        popup_styles:
-          - style: all
-            styles: |
-              :host {
-                --dialog-surface-margin-top: 100px;
-                --ha-ripple-hover-opacity: 0;
-                --ha-ripple-pressed-opacity: 0.04;
-                opacity: 0;
-                animation: hemma-popup-reveal 0s 0.8s ease forwards;
-              }
-              @keyframes hemma-popup-reveal { to { opacity: 1; } }
-              .content .container > * {
-                width: 100% !important;
-                max-width: none !important;
-                box-sizing: border-box !important;
-              }
-              .content .container {
-                scrollbar-width: none;
-                overscroll-behavior: contain;
-                touch-action: pan-y;
-                padding-bottom: 24px !important;
-              }
-              .content .container::-webkit-scrollbar {
-                display: none;
-              }
-              @media (max-width: 768px) {
-                :host {
-                  --dialog-surface-margin-top: 0px;
-                }
-                wa-drawer {
-                  --size: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                  height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                }
-                .content .container {
-                  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                }
-                wa-drawer.hemma-h-auto {
-                  --size: var(--ha-bottom-sheet-height, auto) !important;
-                  height: auto !important;
-                  min-height: 0 !important;
-                }
-                wa-drawer.hemma-h-auto .content .container {
-                  min-height: 0 !important;
-                }
-              }
-        content: |
-          [[[
-            const _h = typeof hass !== 'undefined' ? hass : null;
-            if (typeof window._hemmaLPC === 'function') {
-              return window._hemmaLPC(entity, states, _h, {
-                popup_group: entity?.entity_id || null,
-                lights: [],
-                group_rooms: true,
-              });
+            .content .container {
+              scrollbar-width: none;
+              overscroll-behavior: contain;
+              touch-action: pan-y;
+              padding-bottom: 24px !important;
             }
-            return null;
-          ]]]
+            .content .container::-webkit-scrollbar {
+              display: none;
+            }
+            @media (max-width: 768px) {
+            wa-drawer {
+                --size: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+                height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+            }
+            .content .container {
+                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+            }
+            wa-drawer.hemma-h-auto {
+                --size: var(--ha-bottom-sheet-height, auto) !important;
+                height: auto !important;
+                min-height: 0 !important;
+            }
+            wa-drawer.hemma-h-auto .content .container {
+                min-height: 0 !important;
+            }
+            }
+      content: |
+        [[[
+          const _h = typeof hass !== 'undefined' ? hass : null;
+          if (typeof window._hemmaLPC === 'function') {
+            return window._hemmaLPC(entity, states, _h, {
+              popup_group: entity?.entity_id || null,
+              lights: [],
+              group_rooms: true,
+            });
+          }
+          return null;
+        ]]]
   hold_action:
     action: call-service
     service: script.turn_on
@@ -185,7 +155,24 @@ hemma_badge_light:
 
   name: >
     [[[
-      const friendly = entity?.attributes?.friendly_name || 'Light';
+      const eid = entity?.entity_id;
+      const _h  = typeof hass !== 'undefined' ? hass : null;
+      const members = entity?.attributes?.entity_id;
+
+      // Room light groups are renamed to a bare "Lights" in the registry, so a
+      // group badge takes its area name; member lights keep their own name.
+      const areaName = () => {
+        const ents = _h?.entities || {};
+        const reg = ents[eid] || (ents.get && ents.get(eid)) || null;
+        if (!reg) return null;
+        const aid = reg.area_id || (reg.device_id ? _h?.devices?.[reg.device_id]?.area_id : null);
+        return aid ? (_h?.areas?.[aid]?.name || null) : null;
+      };
+      const isGroup = Array.isArray(members) && members.length > 0;
+
+      const friendly = (isGroup ? areaName() : null)
+                    || entity?.attributes?.friendly_name
+                    || 'Light';
       const isOn     = entity?.state === 'on';
       let sub;
       if (!isOn) {

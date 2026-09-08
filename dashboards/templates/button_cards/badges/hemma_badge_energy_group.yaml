@@ -74,7 +74,7 @@ hemma_badge_energy_group:
               : 'var(--hemma-color-yellow, #FFCC00)';
           ]]]
       # Same tier the sub-line text uses, so icon and label can't disagree.
-      # power_entity (not entity) — on mobile the badge's entity is the filter
+      # power_entity (not entity) - on mobile the badge's entity is the filter
       # input_select, not a power sensor.
       - --hemma-badge-icon-color: >
           [[[
@@ -121,7 +121,7 @@ hemma_badge_energy_group:
         !['false','0','no','off','disabled'].includes(String(ev).trim().toLowerCase());
       const URL = window.hemmaIconUrl('energy');
 
-      return `:host{display:${enabled ? 'inline-block' : 'none'} !important;}
+      return `:host{display:${enabled ? 'inline-block' : 'none'} !important;order:var(--hemma-badge-order-energy,6);}
         #img-cell, .img-cell{ position: relative; }
 
         #img-cell #icon, .img-cell #icon{

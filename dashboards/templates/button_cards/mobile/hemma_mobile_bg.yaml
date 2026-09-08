@@ -13,6 +13,53 @@ hemma_mobile_bg:
 
   variables:
     preload_rooms: []
+    # The phone dashboard has ONE hero photo, not one per room - its rooms are
+    # sections of a single view. Same naming as a room card: a base name under
+    # /local/hemma/rooms/, with -night alongside it. Left null, the theme's own
+    # --hemma-mobile-hero-img-day/-night win, which is how this shipped.
+    image: null
+    image_night: null
+
+  custom_fields:
+    # A stylesheet rule, not an inline style on the root.
+    #
+    # --hemma-mobile-hero-img-day/-night are top level THEME variables, and Home
+    # Assistant writes theme variables as inline styles on the document root -
+    # re-writing them every time the theme is applied, which includes every
+    # light/dark switch. An inline override would be clobbered on exactly the
+    # gesture it most needs to survive. An `!important` declaration in a real
+    # stylesheet outranks a non-important inline one, so this wins and keeps
+    # winning.
+    #
+    # Overriding the PAIR rather than the painted var is what preserves the
+    # instant swap: the theme's mode blocks still choose between day and night,
+    # so switching mode is pure CSS resolution with no JavaScript in the way.
+    # hemma-core.js samples the same two off the root, so the gradient follows.
+    bg_init: >
+      [[[
+        const ID = 'hemma-mobile-hero-src';
+        let el = document.getElementById(ID);
+        const base = variables.image;
+        if (!base) {
+          if (el) el.remove();
+          return '';
+        }
+        const night = variables.image_night || (base + '-night');
+        const dir = '/local/hemma/rooms/';
+        const css = ':root{'
+          + '--hemma-mobile-hero-img-day:url("' + dir + base + '.jpg") !important;'
+          + '--hemma-mobile-hero-img-night:url("' + dir + night + '.jpg") !important;'
+          + '}';
+        if (!el) {
+          el = document.createElement('style');
+          el.id = ID;
+          document.head.appendChild(el);
+        }
+        // Compare before writing: this runs on every render, and replacing a
+        // style element's text reparses the sheet.
+        if (el.textContent !== css) el.textContent = css;
+        return '';
+      ]]]
 
   styles:
     card:
@@ -28,7 +75,7 @@ hemma_mobile_bg:
       - background-image: "none !important"
 
   extra_styles: |
-    /* LAYER 2 — the photo, uniformly blurred */
+    /* LAYER 2 - the photo, uniformly blurred */
     :host ha-card::after {
       content: "" !important;
       inset:
@@ -83,13 +130,18 @@ hemma_mobile_bg:
       }
     }
 
-    /* LAYER 3 — wash, mesh and the color gradient */
+    /* LAYER 3 - wash, mesh and the color gradient */
     :host ha-card::before {
       content: "";
       position: absolute;
       inset: 0;
       z-index: -9;
       pointer-events: none;
+      /* hemma_shared's grain layer is this same pseudo-element; without these
+         resets its overlay blend and 0.16 opacity erase the whole gradient. */
+      mix-blend-mode: normal !important;
+      opacity: 1 !important;
+      border-radius: 0 !important;
       background-image:
         /* Wash */
         linear-gradient(
@@ -99,7 +151,7 @@ hemma_mobile_bg:
             calc(var(--hemma-mobile-hero-wash-mid, 27%) + var(--hemma-safe-top)),
           transparent
             calc(var(--hemma-mobile-hero-wash-end, 70%) + var(--hemma-safe-top))),
-        /* Mesh — derived from the photo by hemma-core.js */
+        /* Mesh - derived from the photo by hemma-core.js */
         radial-gradient(
           var(--hemma-mobile-hero-mesh-a-size, 120% 46%) at
             var(--hemma-mobile-hero-mesh-a-pos, 18% 58%),

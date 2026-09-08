@@ -1,27 +1,7 @@
 hemma_air_purifier:
-  template: [hemma_entity]
-
-  show_icon: true
-  show_name: true
-  show_state: true
-
-  tap_action:
-    action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  hold_action:
-    action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  icon_tap_action:
-    action: toggle
-
-  icon_hold_action:
-    action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+  template: [hemma_air_device]
 
   variables:
-    mobile_filter_category: climate
     icon: purifier
 
   styles:

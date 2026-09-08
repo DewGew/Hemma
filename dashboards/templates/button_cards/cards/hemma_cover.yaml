@@ -1,3 +1,13 @@
+# Cover Card
+#
+# Variables:
+#   icon_open    - OPTIONAL override for the open glyph
+#   icon_closed  - OPTIONAL override for the closed glyph
+#
+# Neither is set by default: window.hemmaCoverKind resolves the pair from the
+# entity's device_class, so a blind gets blind glyphs and a garage gets doors.
+# These must stay OUT of `variables:` - a declared default wins the whole `||`
+# chain, which is what pinned every cover to a curtain.
 hemma_cover:
   template: [hemma_entity]
 
@@ -29,9 +39,12 @@ hemma_cover:
   entity_picture: |
     [[[
       const s = (entity?.state || '').toLowerCase();
+      const k = window.hemmaCoverKind
+        ? window.hemmaCoverKind(entity?.attributes?.device_class, entity?.entity_id)
+        : { open: 'curtain-open', closed: 'curtain-closed' };
       return ['open', 'opening'].includes(s)
-        ? window.hemmaIconUrl('curtain-open')
-        : window.hemmaIconUrl('curtain-closed');
+        ? window.hemmaIconUrl(variables.icon_open || k.open)
+        : window.hemmaIconUrl(variables.icon_closed || k.closed);
     ]]]
 
   state:
@@ -46,9 +59,12 @@ hemma_cover:
           - --hemma-icon-svg-url: |
               [[[
                 const s = (entity?.state || '').toLowerCase();
+                const k = window.hemmaCoverKind
+                  ? window.hemmaCoverKind(entity?.attributes?.device_class, entity?.entity_id)
+                  : { open: 'curtain-open', closed: 'curtain-closed' };
                 return ['open', 'opening'].includes(s)
-                  ? `url('${window.hemmaIconUrl('curtain-open')}')`
-                  : `url('${window.hemmaIconUrl('curtain-closed')}')`;
+                  ? `url('${window.hemmaIconUrl(variables.icon_open || k.open)}')`
+                  : `url('${window.hemmaIconUrl(variables.icon_closed || k.closed)}')`;
               ]]]
           - --hemma-icon-use-mask: "1"
           - --hemma-icon-color-current: "var(--hemma-popup-primary-color, #00c3d0)"
@@ -65,7 +81,10 @@ hemma_cover:
       - --hemma-icon-mask-image: |
           [[[
             const s = (entity?.state || '').toLowerCase();
+            const k = window.hemmaCoverKind
+              ? window.hemmaCoverKind(entity?.attributes?.device_class, entity?.entity_id)
+              : { open: 'curtain-open', closed: 'curtain-closed' };
             return ['open', 'opening'].includes(s)
-              ? `url('${window.hemmaIconUrl('curtain-open')}')`
-              : `url('${window.hemmaIconUrl('curtain-closed')}')`;
+              ? `url('${window.hemmaIconUrl(variables.icon_open || k.open)}')`
+              : `url('${window.hemmaIconUrl(variables.icon_closed || k.closed)}')`;
           ]]]

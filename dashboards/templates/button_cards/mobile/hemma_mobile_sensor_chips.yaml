@@ -22,7 +22,7 @@ hemma_mobile_sensor_chips:
     aqi_sensors: null
     room_chips: null
 
-  # Static (no template) — avoids per-render JS eval and first-paint flash.
+  # Static (no template) - avoids per-render JS eval and first-paint flash.
   extra_styles: |
     :host(.hemma-navbar-card.hemma-navbar-card):active{filter:none!important;-webkit-filter:none!important}
     :host{position:sticky!important;top:-9999px!important;filter:none!important;-webkit-filter:none!important}
@@ -123,7 +123,7 @@ hemma_mobile_sensor_chips:
               enabled: '[[[ return !!variables.temp_entity ]]]'
               gauge: true
               temp_unit: '[[[ return variables.temp_unit || "F" ]]]'
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              room_name: '[[[ return variables.aqi_room_name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.entity_quality ]]]'
               entity_temp: '[[[ return variables.entity_temp || variables.temp_entity ]]]'
               entity_humidity: '[[[ return variables.entity_humidity || variables.humidity_entity ]]]'
@@ -134,7 +134,7 @@ hemma_mobile_sensor_chips:
             variables:
               enabled: '[[[ return !!variables.humidity_entity ]]]'
               gauge: true
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              room_name: '[[[ return variables.aqi_room_name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.entity_quality ]]]'
               entity_temp: '[[[ return variables.entity_temp || variables.temp_entity ]]]'
               entity_humidity: '[[[ return variables.entity_humidity || variables.humidity_entity ]]]'
@@ -145,7 +145,7 @@ hemma_mobile_sensor_chips:
             variables:
               enabled: '[[[ return !!variables.entity_quality ]]]'
               gauge: true
-              room_name: '[[[ return variables.aqi_room_name ]]]'
+              room_name: '[[[ return variables.aqi_room_name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ return variables.entity_quality ]]]'
               entity_temp: '[[[ return variables.entity_temp || variables.temp_entity ]]]'
               entity_humidity: '[[[ return variables.entity_humidity || variables.humidity_entity ]]]'
@@ -180,7 +180,7 @@ hemma_mobile_sensor_chips:
               enabled: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return !!variables.room_chips?.[f]?.temp_entity ]]]'
               gauge: true
               temp_unit: '[[[ return variables.temp_unit || "F" ]]]'
-              room_name: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.aqi_room_name ]]]'
+              room_name: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.aqi_room_name || variables.aqi_room_name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.entity_quality ]]]'
               entity_temp: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.temp_entity ]]]'
               entity_humidity: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.humidity_entity ]]]'
@@ -195,7 +195,7 @@ hemma_mobile_sensor_chips:
             variables:
               enabled: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return !!variables.room_chips?.[f]?.humidity_entity ]]]'
               gauge: true
-              room_name: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.aqi_room_name ]]]'
+              room_name: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.aqi_room_name || variables.aqi_room_name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.entity_quality ]]]'
               entity_temp: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.temp_entity ]]]'
               entity_humidity: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.humidity_entity ]]]'
@@ -210,7 +210,7 @@ hemma_mobile_sensor_chips:
             variables:
               enabled: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return !!variables.room_chips?.[f]?.entity_quality ]]]'
               gauge: true
-              room_name: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.aqi_room_name ]]]'
+              room_name: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.aqi_room_name || variables.aqi_room_name || hass?.config?.location_name || "" ]]]'
               entity_quality: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.entity_quality ]]]'
               entity_temp: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.temp_entity ]]]'
               entity_humidity: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.humidity_entity ]]]'

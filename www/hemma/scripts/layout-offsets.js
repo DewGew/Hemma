@@ -137,16 +137,14 @@
     return null;
   }
 
-  // navbar-card has no box of its own; the positioned element is .navbar in
-  // its shadow root.
+  // The hemma-nav-bar host is a zero-height fixed anchor; .bar is the real box.
   function findNavbar() {
     var found = [];
-    walkFind(document, 'navbar-card', found, 0);
+    walkFind(document, 'hemma-nav-bar', found, 0);
     for (var i = 0; i < found.length; i++) {
       var nb = found[i];
-      var inner = nb.shadowRoot ? nb.shadowRoot.querySelector('.navbar') : null;
+      var inner = nb.shadowRoot ? nb.shadowRoot.querySelector('.bar') : null;
       if (inner && isVisible(inner)) return inner;
-      if (isVisible(nb)) return nb;
     }
     return null;
   }

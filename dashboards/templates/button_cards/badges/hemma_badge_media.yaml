@@ -80,7 +80,7 @@ hemma_badge_media:
       --hemma-media-badge-pad-v: 0px;
     }
 
-    /* Tablet (touch, 768-1400px) — matches the group badges' vertical padding
+    /* Tablet (touch, 768-1400px) - matches the group badges' vertical padding
        (see --badge-padding-current in hemma_badge_base.yaml). */
     @media (min-width: 768px) and (max-width: 1400px) and (min-height: 501px) and (pointer: coarse),
            (min-width: 768px) and (max-width: 1400px) and (min-height: 501px) and (hover: none) {

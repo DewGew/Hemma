@@ -124,6 +124,23 @@ hemma_shared:
       --ha-card-box-shadow: none !important;
     }
 
+    /* Dither over the photo. The demo renders are 1672x941 and get upscaled
+       past 2x on a Retina display, which stretches every quantisation step in
+       the sky into a visible band. It cannot go in the ::after stack: that
+       layer carries --hero-img-filter, and a blurred dither is not a dither. */
+    :host ha-card::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      border-radius:inherit;
+      pointer-events:none;
+      z-index:-9;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='discrete' tableValues='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 180px 180px;
+      mix-blend-mode: overlay;
+      opacity: var(--hemma-bg-grain, 0.16);
+    }
+
     /* Background image */
     :host ha-card::after{
       content:"";

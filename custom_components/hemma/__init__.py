@@ -14,7 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .images import HemmaImagesView
-from .templates import rebuild_if_stale
+from .templates import HemmaTemplatesView, rebuild_if_stale
 from .const import (
     DOMAIN,
     PANEL_ICON,
@@ -134,6 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not hass.data.get(f"{DOMAIN}_views"):
         hass.http.register_view(HemmaImagesView())
+        hass.http.register_view(HemmaTemplatesView())
         hass.data[f"{DOMAIN}_views"] = True
 
     # Remove first so a version bump re-registers cleanly instead of being skipped.

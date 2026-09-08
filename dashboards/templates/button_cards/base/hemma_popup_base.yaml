@@ -1,5 +1,5 @@
 hemma_popup_base:
-  # window.hemmaIconUrl load-race guard — see hemma_default.yaml for why.
+  # window.hemmaIconUrl load-race guard - see hemma_default.yaml for why.
   variables:
     hemma_icon_url_guard:
       force_eval: true
@@ -17,38 +17,19 @@ hemma_popup_base:
     haptic: light
     action: |
       [[[
-        return typeof window.browser_mod !== 'undefined' ? 'fire-dom-event' : 'more-info';
+        return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
     entity: "[[[ return entity?.entity_id; ]]]"
-    browser_mod:
-      service: browser_mod.popup
-      data:
-        tag: '[[[ return (entity?.entity_id || "hemma_popup").replace(/\./g, "_"); ]]]'
-        title: ""
-        dismissable: true
-        adaptive: true
-        size: auto
-        popup_styles:
-          - style: all
-            styles: |
-              ha-adaptive-dialog, ha-dialog { --dialog-surface-margin-top: 90px; }
-
+    hemma_popup:
+      title: ""
+      dismissable: true
   icon_tap_action:
     haptic: light
     action: |
       [[[
-        return typeof window.browser_mod !== 'undefined' ? 'fire-dom-event' : 'more-info';
+        return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
     entity: "[[[ return entity?.entity_id; ]]]"
-    browser_mod:
-      service: browser_mod.popup
-      data:
-        tag: '[[[ return (entity?.entity_id || "hemma_popup").replace(/\./g, "_"); ]]]'
-        title: ""
-        dismissable: true
-        adaptive: true
-        size: auto
-        popup_styles:
-          - style: all
-            styles: |
-              ha-adaptive-dialog, ha-dialog { --dialog-surface-margin-top: 90px; }
+    hemma_popup:
+      title: ""
+      dismissable: true

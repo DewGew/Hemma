@@ -1,31 +1,13 @@
 hemma_humidifier:
-  template: [hemma_entity]
+  template: [hemma_air_device]
 
-  variables:
-    mobile_filter_category: climate
-
-  # show_icon: true is required for icon_tap_action to work
-  show_icon: true
-  show_name: true
-  show_state: true
   name: Humidifier
 
-  tap_action:
-    action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  hold_action:
-    action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  icon_tap_action:
-    action: toggle
-
-  icon_hold_action:
-    action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  entity_picture: "[[[ return window.hemmaIconUrl('humidifier'); ]]]"
+  variables:
+    # hemma_entity derives BOTH the mask and entity_picture from this. The
+    # template used to override entity_picture instead and leave this unset,
+    # so the mask resolved to 'default' and won - that was the question mark.
+    icon: humidifier
 
   styles:
     entity_picture:

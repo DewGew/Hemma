@@ -81,8 +81,21 @@ hemma_badge_energy:
                     BRL:'R$', PLN:'z\u0142', KRW:'\u20A9' }[cur] || '$';
       const money = (n) => SYM + (n >= 100 ? Math.round(n) : n.toFixed(2));
 
+      // 'auto' means auto: a monetary sensor prints money, an energy sensor
+      // kWh. Without this a cost sensor left on the default printed "8 W".
+      const resolveUnit = (u, e) => {
+        u = String(u || 'auto').toLowerCase();
+        if (u === 'energy') return 'kwh';
+        if (u !== 'auto' && u !== '') return u;
+        const dc = String(e?.attributes?.device_class || '').toLowerCase();
+        const uom = String(e?.attributes?.unit_of_measurement || '');
+        if (dc === 'monetary') return 'cost';
+        if (dc === 'energy' || /^k?Wh$/i.test(uom)) return 'kwh';
+        return 'auto';
+      };
+
       const raw = parseFloat(entity?.state);
-      const unit = String(variables?.unit || 'auto').toLowerCase();
+      const unit = resolveUnit(variables?.unit, entity);
       let value = '';
       if (Number.isFinite(raw)) {
         if (unit === 'kwh') {
@@ -120,7 +133,19 @@ hemma_badge_energy:
       // Gauge ring built inline (same approach as the climate gauges) so the
       // sub-row reads as a set, distinct from the Energy group badge's solid
       // bolt above it. Currency glyph for cost badges, energy.svg bolt otherwise.
-      const unit = String(variables?.unit || 'auto').toLowerCase();
+      // Same resolution as the name block, or a cost sensor would print money
+      // under a bolt ring instead of a currency glyph.
+      const resolveUnit = (u, e) => {
+        u = String(u || 'auto').toLowerCase();
+        if (u === 'energy') return 'kwh';
+        if (u !== 'auto' && u !== '') return u;
+        const dc = String(e?.attributes?.device_class || '').toLowerCase();
+        const uom = String(e?.attributes?.unit_of_measurement || '');
+        if (dc === 'monetary') return 'cost';
+        if (dc === 'energy' || /^k?Wh$/i.test(uom)) return 'kwh';
+        return 'auto';
+      };
+      const unit = resolveUnit(variables?.unit, entity);
       const isCost = unit === 'cost' || !!variables?.cost_entity;
 
       const rr = 13.5, C = 16, W = 3;
