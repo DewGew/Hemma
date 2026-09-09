@@ -4,7 +4,7 @@
 
 A modern, mobile-friendly dashboard for Home Assistant, built and configured from a UI.
 
-Hemma installs as an integration and adds **Hemma Studio** to your sidebar. You pick your rooms and entities there, press Save, and Hemma writes the dashboard. There is no YAML to edit and no card configuration to paste.
+Hemma installs as an integration and adds **Hemma Studio** to your sidebar. You pick your rooms and entities there, press Save, and Hemma writes the dashboard. There is no dashboard YAML to write and no card configuration to paste.
 
 You get two dashboards from one setup: a desktop and tablet layout, and a dedicated mobile dashboard inspired by Apple Home. Phones are routed to the mobile one automatically.
 
@@ -35,16 +35,26 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 
 - Home Assistant **2026.9.0** or newer, with Lovelace in **storage** mode (the default)
 - [HACS](https://hacs.xyz)
+- **Themes enabled.** Hemma ships a theme, and Home Assistant only loads themes when `configuration.yaml` says so. If you have never installed a theme, add this and restart:
+
+  ```yaml
+  frontend:
+    themes: !include_dir_merge_named themes
+  ```
+
 - A time sensor for the clock on each room card. Settings > Devices & Services > **Add Integration > Date & time**, and enable the "Time" sensor.
 
 Hemma Studio checks for everything below on first open and links you straight to each one, so you do not need to collect them up front.
 
-| From HACS | Why |
-| --- | --- |
-| [uix](https://github.com/Lint-Free-Technology/uix) | card styling, used throughout. Required. Do not install card-mod alongside it. |
-| [button-card](https://github.com/custom-cards/button-card) | every Hemma tile is one |
-| [apexcharts-card](https://github.com/RomRider/apexcharts-card) | the energy and climate charts |
-| [bar-card](https://github.com/spacerokk/bar-card) | the plant and battery popups |
+| From HACS | Why | |
+| --- | --- | --- |
+| [uix](https://github.com/Lint-Free-Technology/uix) | card styling, used throughout. Do not install card-mod alongside it. | **required** |
+| [button-card](https://github.com/custom-cards/button-card) | every Hemma tile is one | **required** |
+| [apexcharts-card](https://github.com/RomRider/apexcharts-card) | the energy and climate charts | optional |
+| [bar-card](https://github.com/spacerokk/bar-card) | the plant and battery popups | optional |
+
+Studio will not let you build a dashboard without the two marked required. The
+optional two only affect the popups named beside them.
 
 ---
 
@@ -74,6 +84,9 @@ Hemma registers its own dashboard resources at this point. You do not need to ad
 ### 5. Select the theme
 
 Click your user name at the bottom of the sidebar and set **Theme** to **Hemma**.
+
+If Hemma is not in the list, the `frontend: themes:` line above is missing from
+`configuration.yaml`.
 
 ### 6. Build your dashboard
 

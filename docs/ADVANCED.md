@@ -35,7 +35,7 @@ Example layout:
 │       │   ├── cards/                  # Individual device cards (thermostat, media, lock, cover, energy, Plex, etc.)
 │       │   ├── mobile/                 # Mobile dashboard scaffolding (header, badge row, chips, Now Playing row)
 │       │   ├── now_playing/            # Now Playing panel (primary tile, rail chips, artwork, transport, header)
-│       │   └── popups/                 # browser_mod popup content (climate, energy, network, light, lock,
+│       │   └── popups/                 # popup content (climate, energy, network, light, lock,
 │       │                               #   cover, plant, battery, updates, Plex, recently-added)
 │       └── includes/                   # Layout + navigation includes
 │           ├── hemma_screen_layout.yaml
@@ -79,6 +79,12 @@ Copy these folders/files from this repo into your HA `/config`:
 - `www/hemma/` → `/config/www/hemma/`
 
 ### 3) Add Lovelace resources
+
+> **Skip this if you have the Hemma integration installed.** It registers these
+> for you, from `/hemma_scripts/` rather than `/local/`, and adding them by hand
+> as well would load every script twice. The list below is only for running the
+> dashboard with no integration at all.
+
 In Settings → Dashboards → Resources, add:
 
 Add these two first - the others read their icons and shared entity tables from them:
@@ -96,7 +102,6 @@ Then the rest, in any order:
 - `/local/hemma/scripts/hemma-redirect.js` (from this repo, recommended - routes phones to the mobile dashboard and back)
 - `/local/hemma/fonts/hanken-grotesk.css` (from this repo)
 - `/hacsfiles/button-card/button-card.js` (should already be present if installed via HACS)
-- `/hacsfiles/lovelace-navbar-card/navbar-card.js` (should already be present if installed via HACS)
 
 ### 4) Register the Hemma dashboards
 Add (or verify) in your `configuration.yaml`:
