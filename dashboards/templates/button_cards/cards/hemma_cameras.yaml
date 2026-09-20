@@ -1,9 +1,3 @@
-# Cameras Tile  (mobile)
-# Mobile has no security badge row, so the camera gallery gets a flat entity
-# tile here instead, the way hemma_battery fronts the battery popup.
-#
-# Variables:
-#   cameras - list of camera entity_ids; empty lets the popup auto-discover
 hemma_cameras:
   template:
     - hemma_entity
@@ -30,6 +24,4 @@ hemma_cameras:
 
   styles:
     card:
-      # doorbell.svg's viewBox origin is negative - ~6% transparent padding
-      # baked into the artwork, so it needs 60% * 1.06 to match every other icon.
       - --hemma-icon-mask-scale: 63.6%

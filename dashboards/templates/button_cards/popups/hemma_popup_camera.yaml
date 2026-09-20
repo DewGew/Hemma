@@ -182,7 +182,7 @@ hemma_popup_camera:
 
           const cams = ids.map(id => ({ id: id, s: states[id] })).filter(c => c.s);
 
-          const TPL = 23;
+          const TPL = 24;
 
           /* Owns the selected camera, the live card and its hass pump.
              Only one stream is ever mounted; the grid stays on stills. */
@@ -1166,17 +1166,27 @@ hemma_popup_camera:
               line-height: 0;
             }
 
-            /* An inset shadow layers over whatever background the JS wrote inline, so
-               the highlight lands without fighting it for specificity. Lit buttons
+            /* No plate behind them, so the rim is what makes them objects on the
+               room photo. Hover must re-state it or the tint erases it. Lit buttons
                darken instead of lightening — white cannot get any brighter. */
-            .cam-mute, .cam-rec, .cam-fit { transition: box-shadow 180ms ease; }
+            .cam-controls > * {
+              --cam-rim: var(--hemma-glass-rim,
+                inset 0 1px .5px -0.5px rgba(255,255,255,0.55),
+                inset 0 -1px .5px -0.5px rgba(255,255,255,0.48),
+                inset 0 3px 6px -3px rgba(255,255,255,0.20),
+                inset 0 -3px 6px -3px rgba(255,255,255,0.12),
+                2px 0 3px -2px rgba(0,0,0,0.45),
+                -2px 0 3px -2px rgba(0,0,0,0.45),
+                0 2px 8px rgba(0,0,0,0.18));
+              box-shadow: var(--cam-rim);
+              transition: box-shadow 180ms ease;
+            }
             @media (hover: hover) {
-              .cam-mute:hover, .cam-rec:hover, .cam-fit:hover, [data-acc]:hover {
-                box-shadow: inset 0 0 0 999px rgba(255,255,255,0.07);
+              .cam-controls > *:hover {
+                box-shadow: inset 0 0 0 999px rgba(255,255,255,0.07), var(--cam-rim);
               }
-              .cam-mute[data-on]:hover, .cam-rec[data-on]:hover,
-              .cam-fit[data-on]:hover, [data-acc][data-on]:hover {
-                box-shadow: inset 0 0 0 999px rgba(0,0,0,0.055);
+              .cam-controls > *[data-on]:hover {
+                box-shadow: inset 0 0 0 999px rgba(0,0,0,0.055), var(--cam-rim);
               }
             }
 
@@ -1410,24 +1420,16 @@ hemma_popup_camera:
               + '</div>';
 
             const controls = row.length
-              ? '<div class="cam-controls" style="display:flex;flex-wrap:wrap;gap:10px;'
-                + 'align-items:center;justify-content:center;padding:14px 18px;'
-                + 'border-radius:var(--hemma-popup-row-radius, 20px);'
-                + 'background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));'
-                + 'backdrop-filter:var(--hemma-popup-plate-backdrop, none);'
-                + '-webkit-backdrop-filter:var(--hemma-popup-plate-backdrop, none);">'
+              ? '<div class="cam-controls" style="display:flex;flex-wrap:wrap;gap:12px;'
+                + 'align-items:center;justify-content:center;">'
                 + row.join('') + '</div>'
               : '';
 
-            /* One widget, not three stacked blocks. The title, the stream and
-               the controls belong to the same object - with the pane gone they
-               would otherwise be a heading, a video and a row of buttons each
-               floating separately on the room. */
             return '<div class="cam-detail" data-cam="' + esc(cam.id) + '"'
               + (single ? '' : bind('back'))
               + ' style="display:' + (single ? 'block' : 'none') + ';">'
               + '<div class="hemma-cam-pane" style="'
-              + 'margin:0 ' + pad + 'px 26px;display:flex;flex-direction:column;gap:14px;'
+              + 'margin:0 ' + pad + 'px 26px;display:flex;flex-direction:column;gap:18px;'
               + 'animation:var(--hemma-popup-plate-enter, none);"'
               + ' onclick="' + stop + '" onpointerdown="' + stop + '">'
               + back + stream + controls
@@ -1609,7 +1611,7 @@ hemma_popup_camera:
 
           const cams = ids.map(id => ({ id: id, s: states[id] })).filter(c => c.s);
 
-          const TPL = 23;
+          const TPL = 24;
 
           /* Owns the selected camera, the live card and its hass pump.
              Only one stream is ever mounted; the grid stays on stills. */
@@ -2593,17 +2595,27 @@ hemma_popup_camera:
               line-height: 0;
             }
 
-            /* An inset shadow layers over whatever background the JS wrote inline, so
-               the highlight lands without fighting it for specificity. Lit buttons
+            /* No plate behind them, so the rim is what makes them objects on the
+               room photo. Hover must re-state it or the tint erases it. Lit buttons
                darken instead of lightening — white cannot get any brighter. */
-            .cam-mute, .cam-rec, .cam-fit { transition: box-shadow 180ms ease; }
+            .cam-controls > * {
+              --cam-rim: var(--hemma-glass-rim,
+                inset 0 1px .5px -0.5px rgba(255,255,255,0.55),
+                inset 0 -1px .5px -0.5px rgba(255,255,255,0.48),
+                inset 0 3px 6px -3px rgba(255,255,255,0.20),
+                inset 0 -3px 6px -3px rgba(255,255,255,0.12),
+                2px 0 3px -2px rgba(0,0,0,0.45),
+                -2px 0 3px -2px rgba(0,0,0,0.45),
+                0 2px 8px rgba(0,0,0,0.18));
+              box-shadow: var(--cam-rim);
+              transition: box-shadow 180ms ease;
+            }
             @media (hover: hover) {
-              .cam-mute:hover, .cam-rec:hover, .cam-fit:hover, [data-acc]:hover {
-                box-shadow: inset 0 0 0 999px rgba(255,255,255,0.07);
+              .cam-controls > *:hover {
+                box-shadow: inset 0 0 0 999px rgba(255,255,255,0.07), var(--cam-rim);
               }
-              .cam-mute[data-on]:hover, .cam-rec[data-on]:hover,
-              .cam-fit[data-on]:hover, [data-acc][data-on]:hover {
-                box-shadow: inset 0 0 0 999px rgba(0,0,0,0.055);
+              .cam-controls > *[data-on]:hover {
+                box-shadow: inset 0 0 0 999px rgba(0,0,0,0.055), var(--cam-rim);
               }
             }
 
@@ -2837,24 +2849,16 @@ hemma_popup_camera:
               + '</div>';
 
             const controls = row.length
-              ? '<div class="cam-controls" style="display:flex;flex-wrap:wrap;gap:10px;'
-                + 'align-items:center;justify-content:center;padding:14px 18px;'
-                + 'border-radius:var(--hemma-popup-row-radius, 20px);'
-                + 'background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));'
-                + 'backdrop-filter:var(--hemma-popup-plate-backdrop, none);'
-                + '-webkit-backdrop-filter:var(--hemma-popup-plate-backdrop, none);">'
+              ? '<div class="cam-controls" style="display:flex;flex-wrap:wrap;gap:12px;'
+                + 'align-items:center;justify-content:center;">'
                 + row.join('') + '</div>'
               : '';
 
-            /* One widget, not three stacked blocks. The title, the stream and
-               the controls belong to the same object - with the pane gone they
-               would otherwise be a heading, a video and a row of buttons each
-               floating separately on the room. */
             return '<div class="cam-detail" data-cam="' + esc(cam.id) + '"'
               + (single ? '' : bind('back'))
               + ' style="display:' + (single ? 'block' : 'none') + ';">'
               + '<div class="hemma-cam-pane" style="'
-              + 'margin:0 ' + pad + 'px 26px;display:flex;flex-direction:column;gap:14px;'
+              + 'margin:0 ' + pad + 'px 26px;display:flex;flex-direction:column;gap:18px;'
               + 'animation:var(--hemma-popup-plate-enter, none);"'
               + ' onclick="' + stop + '" onpointerdown="' + stop + '">'
               + back + stream + controls

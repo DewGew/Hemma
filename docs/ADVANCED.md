@@ -1,13 +1,13 @@
 # Advanced: building Hemma by hand
 
-Hemma Studio writes your dashboard for you, and most people never need this
-page. It is here for the case Studio does not cover: hand-written views, your
+Hemma writes your dashboard for you, and most people never need this
+page. It is here for the case it does not cover: hand-written views, your
 own button-card templates, or a dashboard you want to keep in version control
 as YAML.
 
-Everything below still works. Studio and YAML produce the same dashboard, and
-you can move between them: Studio can import an existing YAML dashboard, and a
-Studio dashboard is ordinary Lovelace storage you can export.
+Everything below still works. Hemma and YAML produce the same dashboard, and
+you can move between them: Hemma can import an existing YAML dashboard, and a
+dashboard Hemma wrote is ordinary Lovelace storage you can export.
 
 If you only want the dashboard, start at the [README](../README.md) instead.
 

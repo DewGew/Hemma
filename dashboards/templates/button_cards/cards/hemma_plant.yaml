@@ -1,15 +1,3 @@
-# Plant Card
-# Shows plant health from either the entity's own state/moisture attribute,
-# or (when `sensors` is provided) a scored breakdown across multiple sensor
-# thresholds (moisture, illuminance, temperature, conductivity, humidity).
-#
-# Variables:
-#   icon           - icon name (default: 'plant')
-#   low_threshold  - moisture % at/below which the card goes active (default: 30)
-#   sensors        - array of plant sensor entity_ids used for the scored
-#                    breakdown and the popup detail view
-#   use_flower_card - render the popup with flower-card instead of the
-#                     default tile layout
 hemma_plant:
   template:
     - hemma_entity
@@ -124,8 +112,6 @@ hemma_plant:
           - "--hemma-active-overlay-dur": "0s"
           - --hemma-entity-top-gradient: none
           - box-shadow: var(--button-card-box-shadow-active, var(--button-card-box-shadow)) !important
-          # Active = unhealthy here, so it uses warning yellow like an "on"
-          # light - green is reserved for the healthy/inactive tint.
           - --hemma-icon-color-current: "var(--hemma-color-yellow, #FFCC00)"
           - --hemma-icon-svg-url: "[[[ return `url('${window.hemmaIconUrl(variables.icon || 'plant')}')`; ]]]"
           - --hemma-icon-use-mask: "1"

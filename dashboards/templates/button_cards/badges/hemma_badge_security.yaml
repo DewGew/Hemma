@@ -1,15 +1,3 @@
-# Security Sub-Badge
-# One template covering every security entity type, switching on domain rather
-# than duplicating a near-identical template per kind:
-#   lock.*                 -> Locked / Unlocked
-#   alarm_control_panel.*  -> Armed Home / Armed Away / Disarmed / Triggered
-#   binary_sensor.*        -> Open / Closed  (door, window, garage, opening)
-#   camera.*               -> Live / Idle
-#   cover.* (garage)       -> Open / Closed
-#
-# Variables:
-#   enabled - show/hide this badge (default: true)
-#   label   - title override; falls back to the entity's friendly name
 hemma_badge_security:
   template: [hemma_badge_base]
 
@@ -118,12 +106,7 @@ hemma_badge_security:
         name = isDoor ? (open ? 'door-open' : 'door-closed') : (open ? 'lock-open' : 'lock');
       }
       const URL = window.hemmaIconUrl(name);
-      // One size for every security glyph so the group badge and its
-      // sub-badges are visually identical. Every glyph here now carries 6% of
-      // transparent viewBox padding, so they all take the same 6% bump.
       const RAW = variables?.icon_size || '72%';
-      // The door glyphs are the exception - no padding in their viewBox, so they
-      // need the 6% taken back out to match the locks.
       const SIZE = (isDoor && dom !== 'lock' && /%\s*$/.test(RAW))
         ? (parseFloat(RAW) * 0.944).toFixed(1) + '%'
         : RAW;

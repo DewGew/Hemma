@@ -15,8 +15,6 @@
     }
   }
 
-  // offsetParent is null for position:fixed elements like the navbar even when
-  // they're on screen, so measure the box instead.
   function isVisible(el) {
     var r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return false;
@@ -104,8 +102,6 @@
   var lastHeaderTop = -1;
   var recomputeQueued = false;
 
-  // Phones get the mobile dashboard instead, but a narrow desktop window can
-  // still land here.
   function isDesktopOrTablet() {
     try {
       return !(window.matchMedia('(max-width: 767px)').matches &&
@@ -125,8 +121,6 @@
     return null;
   }
 
-  // _scrollMode is set by smart-row.js and separates the entity tile row from
-  // the scroll-mode badge sub-rows.
   function findActiveEntityRow() {
     var found = [];
     walkFind(document, 'hemma-smart-row', found, 0);
@@ -149,8 +143,6 @@
     return null;
   }
 
-  // Falling back to the theme's declared nav position rather than 0 keeps a
-  // failed lookup from collapsing the header onto the weather widget.
   function fallbackNavbarBottom() {
     var v = getComputedStyle(html).getPropertyValue('--hemma-nav-top-current').trim();
     var px = parseFloat(v);
@@ -217,8 +209,6 @@
   function initHeader() {
     computeAndApplyHeader();
     setupHeaderObservers();
-    // The room card may not be in the DOM yet, and its badges settle a beat
-    // after first paint.
     var attempts = 0;
     var iv = setInterval(function () {
       if (++attempts > 20) { clearInterval(iv); return; }

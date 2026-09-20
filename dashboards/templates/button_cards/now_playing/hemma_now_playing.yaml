@@ -96,8 +96,15 @@ hemma_now_playing:
           // draw empty rather than throwing on every template below.
           if (typeof window._hemmaNP !== 'function' && !window._hemmaNPNoCore) {
             window._hemmaNPNoCore = 1;
-            console.error('Hemma: hemma-core.js has not loaded, so Now Playing '
-              + 'cannot collect sources. Check the dashboard resource for it.');
+            // Not immediately: a module resource is still loading while the
+            // first render evaluates this, so the bare check cried wolf on
+            // every cold load and then latched, leaving a stale error in the
+            // console for a file that had in fact arrived.
+            setTimeout(function () {
+              if (typeof window._hemmaNP === 'function') return;
+              console.error('Hemma: hemma-core.js has not loaded, so Now Playing '
+                + 'cannot collect sources. Check the dashboard resource for it.');
+            }, 5000);
           }
           return true;
         ]]]
@@ -158,8 +165,6 @@ hemma_now_playing:
           return result.list;
         ]]]
 
-  # Shell is a container, not a control - primary card/chips carry their own tap actions
-  # (an action here made the padding itself feel clickable).
   tap_action:
     action: none
   hold_action:
@@ -169,12 +174,8 @@ hemma_now_playing:
 
   styles:
     card:
-      # Guard for theme's global card-mod-card hover rule; declared here AND in extra_styles' :host
-      # (neither alone has proven reliable).
       - --hemma-card-hover-shadow: var(--np-shadow)
       - --hemma-card-hover-filter: none
-      # 1 while any source is active, 0 otherwise - everything below multiplies through this
-      # instead of display:none, which would kill the exit animation.
       - --np-open: >
           [[[
             const v = variables?.enabled;
@@ -224,19 +225,15 @@ hemma_now_playing:
 
       # --np-inner-glass: 1=glass, 0=flat (revert switch)
       - --np-inner-glass: '1'
-      # Derived, not fixed: the collapse runs (n-1)*26 + 210ms, and a flat 0.46s
-      # left the box standing empty after the last tile had gone.
       - --np-min-hold: >
           [[[
             const n = Math.max(1, (variables.settled || []).length);
-            return 'calc(var(--np-min, 0) * ' + ((n - 1) * 26 + 210) + 'ms)';
+            // MUST match NP_OUT_STAGGER and NP_OUT_DUR in --np-min.
+            return 'calc(var(--np-min, 0) * ' + ((n - 1) * 20 + 180) + 'ms)';
           ]]]
 
       - --np-min: >
           [[[
-            // The header's pointerdown calls this so the intent is acted on now
-            // rather than at the next state push. Slot 0, not a bare function, so
-            // a stale shell cannot hold the reference after a rebuild.
             if (!this._npKickWired) {
               this._npKickWired = true;
               const el = this;
@@ -245,8 +242,6 @@ hemma_now_playing:
 
             const _mzs = states[variables.minimized_entity];
             const _real = _mzs?.state === 'on' ? 1 : 0;
-            // The tap's own intent while the helper has not caught up yet, so the
-            // animation starts on the same frame as the press.
             const minimized = window.hemmaOptimistic
               ? window.hemmaOptimistic('np-min', _mzs, _real) : _real;
 
@@ -266,8 +261,6 @@ hemma_now_playing:
             const root = this.shadowRoot;
             if (!root) return minimized;
 
-            // Animate each tile's own ha-card (the element carrying backdrop-filter) - animating
-            // any ancestor moves the backdrop root and freezes the blur.
             const targets = [];
             const push = (holder) => {
               const bc = holder ? holder.querySelector('button-card') : null;
@@ -279,8 +272,6 @@ hemma_now_playing:
               targets.push({ host: bc, card: card, container: sr.getElementById('container') });
             };
 
-            // One stack now, so one walk: every tile is the same card in the
-            // same wrapper, and the stagger just runs down it.
             const stackHost = root.querySelector('#np_main button-card');
             const stackRoot = stackHost && stackHost.shadowRoot;
             if (stackRoot) {
@@ -290,6 +281,10 @@ hemma_now_playing:
 
             const n = targets.length;
 
+            const headEl = root.querySelector('#np_head');
+            const headInset = headEl
+              ? (parseFloat(getComputedStyle(headEl).paddingRight) || 0) : 0;
+
             const spring = (t, zeta, omega) => {
               if (t <= 0) return 0;
               if (t >= 1) return 1;
@@ -297,13 +292,22 @@ hemma_now_playing:
               return 1 - Math.exp(-zeta * omega * t) *
                 (Math.cos(wd * t) + ((zeta * omega) / wd) * Math.sin(wd * t));
             };
-            // Slight anticipation on the way out, so the collapse reads as elastic rather than switched off.
-            const easeInBack = (t) => (2.10 * t * t * t) - (1.10 * t * t);
+            const easeIn = (t) => t * t;
+
+            // Flip to false to put the original droplet back and compare.
+            const REFINED = true;
+            const M = REFINED ? {
+              droplet: false, scale0: 0.92, outScale: 0.96, zeta: 0.86,
+              inDur: 300, inStagger: 28, outDur: 180, outStagger: 20,
+            } : {
+              droplet: true, zeta: 0.74,
+              inDur: 360, inStagger: 40, outDur: 210, outStagger: 26,
+            };
 
             const DROP = 40;
             const SAMPLES = 26;
-            const NP_OUT_DUR = 210;
-            const NP_OUT_STAGGER = 26;
+            const NP_OUT_DUR = M.outDur;
+            const NP_OUT_STAGGER = M.outStagger;
 
             targets.forEach((t, i) => {
               const card = t.card;
@@ -312,36 +316,54 @@ hemma_now_playing:
               const h = Math.max(r.height, 1);
               if (w < 8 || h < 8) return;
 
-              // Scales derived from the tile's own box (not a flat ratio) so the start reads as
-              // a circular droplet regardless of tile shape.
               const sx0 = Math.min(0.9, DROP / w);
               const sy0 = Math.min(0.9, DROP / h);
 
-              // Radius is pre-scale, so it must be divided back out per axis to look circular at
-              // droplet size - same correction the promotion FLIP below uses.
               const R = parseFloat(getComputedStyle(card).borderTopLeftRadius) || 26;
               const rx0 = (DROP / 2) / sx0;
               const ry0 = (DROP / 2) / sy0;
 
-              // Offset from the tile's own top-right corner up onto the waveform toggle, so the droplet is born at the button.
+              // Offset from the droplet's origin up onto the waveform toggle, so it is born at the button.
               const dx = 10;
               const dy = -20;
+              const originX = Math.max(0, w - headInset);
 
               const extra = n > 1 ? (i / (n - 1)) : 0;
-              // Lower tiles ride a looser spring - the stack absorbs the shove, so the bottom tile whips furthest and settles last.
-              const zeta = 0.74 - (0.09 * extra);
+              const zeta = M.zeta - ((M.droplet ? 0.09 : 0.03) * extra);
 
               const kf = [];
               for (let k = 0; k <= SAMPLES; k++) {
                 const u = k / SAMPLES;
+                if (!M.droplet) {
+                  let sc, op;
+                  if (opening) {
+                    const p = spring(u, zeta, 9);
+                    sc = M.scale0 + (1 - M.scale0) * p;
+                    op = Math.min(1, u / 0.32);
+                  } else {
+                    const e = easeIn(u);
+                    sc = 1 - (1 - M.outScale) * e;
+                    op = Math.max(0, 1 - u);
+                  }
+                  kf.push({
+                    offset: u,
+                    easing: 'linear',
+                    transformOrigin: opening
+                      ? (originX.toFixed(1) + 'px 0%') : '50% 50%',
+                    translate: '0px 0px',
+                    scale: sc.toFixed(4),
+                    opacity: op.toFixed(3),
+                  });
+                  continue;
+                }
+
                 let px, py, op;
                 if (opening) {
                   px = spring(u, zeta, 9);
-                  // Height trails width by a tenth of the run - droplet spreads sideways first, then fills downward.
                   py = spring(Math.max(0, (u - 0.10) / 0.90), zeta + 0.04, 9);
                   op = Math.min(1, u / 0.26);
                 } else {
-                  const e = easeInBack(u);
+                  const e = (2.10 * u * u * u) - (1.10 * u * u);
                   px = 1 - e;
                   py = 1 - e;
                   op = Math.max(0, 1 - Math.pow(u, 1.6));
@@ -351,7 +373,7 @@ hemma_now_playing:
                 kf.push({
                   offset: u,
                   easing: 'linear',
-                  transformOrigin: '100% 0%',
+                  transformOrigin: originX.toFixed(1) + 'px 0%',
                   translate: (dx * (1 - px)).toFixed(2) + 'px ' +
                              (dy * (1 - px)).toFixed(2) + 'px',
                   scale: sx.toFixed(4) + ' ' + sy.toFixed(4),
@@ -361,12 +383,10 @@ hemma_now_playing:
                 });
               }
 
-              // Opening runs top-down; collapsing runs bottom-up, so the rail follows the tile out and leads it back in.
-              // NP_OUT_* are read by --np-min-hold too: the layout must collapse as
-              // the last tile lands, not on a fixed delay after it.
               const order = opening ? i : (n - 1 - i);
-              const delay = order * (opening ? 40 : NP_OUT_STAGGER);
-              const dur = opening ? (360 + extra * 50) : NP_OUT_DUR;
+              const delay = order * (opening ? M.inStagger : NP_OUT_STAGGER);
+              const dur = opening ? (M.inDur + extra * (M.droplet ? 50 : 20))
+                                  : NP_OUT_DUR;
 
               const run = (el, pseudo) => {
                 if (!el) return;
@@ -374,15 +394,11 @@ hemma_now_playing:
                 if (pseudo) opts.pseudoElement = pseudo;
                 let anim;
                 try { anim = el.animate(kf, opts); } catch (e) { return; }
-                // fill:'both' left uncancelled would keep the animation live forever; safe to cancel
-                // since resting CSS already equals the final keyframe.
                 anim.finished
                   .then(() => { try { anim.cancel(); } catch (e) {} })
                   .catch(() => {});
               };
 
-              // ha-card carries the blur; the glass rim (:host::after) is a separate pseudo-element
-              // and needs its own animation copy or it stays full-size around a shrinking tile.
               run(card, null);
               run(t.host, '::after');
             });
@@ -411,9 +427,6 @@ hemma_now_playing:
 
     grid:
       - display: grid !important
-      # One stack, not a primary plus a rail. Two representations of one list
-      # meant two things that could disagree about which source was where, and
-      # every window-level cache below existed to keep them in step.
       - grid-template-areas: '"np_head" "np_main"'
       - grid-template-columns: minmax(0, 1fr)
       - row-gap: 9px
@@ -428,7 +441,7 @@ hemma_now_playing:
         - display: flex
         - align-items: flex-start
         - justify-content: flex-end
-        - padding: '0 0 6px 0'
+        - padding: '0 var(--hemma-np-head-inset, 0px) 6px 0'
         - max-height: 34px
         - overflow: visible
       np_main:
@@ -438,12 +451,7 @@ hemma_now_playing:
         - display: flex
         - justify-content: flex-end
         - max-height: 'calc((1 - var(--np-min, 0)) * 900px)'
-        # Always visible - overflow:hidden would clip the exit animation;
-        # nothing shows once collapsed anyway (opacity 0), so hiding buys nothing.
-        # The stack inside does its own scrolling.
         - overflow: visible
-        # Each tile's own ha-card sets its own pointer-events, overriding this
-        # ancestor - see --np-src-ptr in hemma_now_playing_primary.yaml.
         - transition: 'max-height 0s var(--np-min-hold, 0s), pointer-events 0s var(--np-min-hold, 0s)'
         - pointer-events: >
             [[[
@@ -493,26 +501,32 @@ hemma_now_playing:
             contain: none !important;
           }
 
-          /* The stack scrolls rather than growing down over the room's tiles.
-             The side padding is the entrance animation's own --np-enter-shift:
-             a scroll container clips on both axes, and with no room to move
-             into, every tile's arrival was cut off. The negative margin hands
-             that space back to the layout. */
+          /* NOT a scroll container, and never becomes one. The stack is sized by
+             --np-slot-h (built in styles.card): the budget split between the live
+             tiles, each taking min(its natural size, its slot). One or two tiles
+             are full size and the stack packs tighter as sources arrive, so there
+             is nothing to scroll and nothing to clip. A max-height here would only
+             ever be the thing that traps a tile half off the bottom, which is
+             exactly what this replaced.
+             The side padding is the entrance animation's own --np-enter-shift, and
+             the negative margin hands that space back to the layout. */
           #container{
-            max-height: var(--np-stack-max, 322px);
-            overflow-y: auto;
-            overflow-x: hidden;
+            overflow: visible;
             padding: var(--np-stack-pad-y, 22px) var(--np-enter-shift, 30px);
             margin: calc(-1 * var(--np-stack-pad-y, 22px)) calc(-1 * var(--np-enter-shift, 30px));
-            scrollbar-width: none;
-            overscroll-behavior: contain;
           }
-          #container::-webkit-scrollbar{ display: none; }
         variables:
           settled: '[[[ return variables.settled || []; ]]]'
           minimized_entity: '[[[ return variables.minimized_entity; ]]]'
         styles:
           card:
+            - --np-slot-h: >
+                [[[
+                  const n = Math.max(1, (variables.settled || []).length);
+                  const gaps = 9 * (n - 1);
+                  return 'calc((var(--np-stack-budget, 320px) - ' + gaps + 'px) * '
+                    + (1 / n).toFixed(6) + ')';
+                ]]]
             - --ha-card-background: transparent
             - --ha-card-box-shadow: none
             - --hemma-card-hover-shadow: none
@@ -532,122 +546,66 @@ hemma_now_playing:
             - align-items: flex-end !important
           custom_fields:
             s1:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[0] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[0] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
             s2:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[1] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[1] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
             s3:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[2] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[2] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
             s4:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[3] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[3] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
             s5:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[4] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[4] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
             s6:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[5] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[5] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
             s7:
-              # An empty slot must take no room, but it has to keep its height
-              # while its tile animates away - so the collapse is instant on
-              # arrival and waits out the exit on departure. Same idiom the
-              # shell uses for --np-min.
               - --np-slot-has: '[[[ return (variables.settled || [])[6] ? 1 : 0; ]]]'
               - max-height: 'calc(var(--np-slot-has, 0) * 900px)'
-              # The tile's own guard cannot do this: --np-has-src is declared in
-              # styles.card, which button-card applies to ha-card, and the glass
-              # rim is :host::after - an ANCESTOR of ha-card. A custom property
-              # set on the card never reaches it, so the rim resolved its
-              # fallback of 1 and drew its drop shadow for every empty slot.
-              # The wrapper contains the whole tile, pseudos included.
               - opacity: 'var(--np-slot-has, 0)'
-              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              - transition: 'max-height 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), opacity 0s calc((1 - var(--np-slot-has, 0)) * 0.5s), pointer-events 0s calc((1 - var(--np-slot-has, 0)) * 0.5s)'
+              # A collapsed slot keeps overflow:visible, so its full-size tile still lays out and stays a hit target - invisible, cursor:pointer, and does nothing.
+              - pointer-events: '[[[ return (variables.settled || [])[6] ? "auto" : "none"; ]]]'
               - overflow: visible
               - width: 100%
         custom_fields:
@@ -661,6 +619,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np1'; ]]]
                 src: '[[[ return (variables.settled || [])[0] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
           s2:
             card:
               type: custom:button-card
@@ -671,6 +630,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np2'; ]]]
                 src: '[[[ return (variables.settled || [])[1] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
           s3:
             card:
               type: custom:button-card
@@ -681,6 +641,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np3'; ]]]
                 src: '[[[ return (variables.settled || [])[2] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
           s4:
             card:
               type: custom:button-card
@@ -691,6 +652,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np4'; ]]]
                 src: '[[[ return (variables.settled || [])[3] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
           s5:
             card:
               type: custom:button-card
@@ -701,6 +663,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np5'; ]]]
                 src: '[[[ return (variables.settled || [])[4] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
           s6:
             card:
               type: custom:button-card
@@ -711,6 +674,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np6'; ]]]
                 src: '[[[ return (variables.settled || [])[5] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
           s7:
             card:
               type: custom:button-card
@@ -721,6 +685,7 @@ hemma_now_playing:
                     ? window._hemmaNPCfgKey(variables) : '') + '|np7'; ]]]
                 src: '[[[ return (variables.settled || [])[6] || null; ]]]'
                 minimized_entity: '[[[ return variables.minimized_entity; ]]]'
+                np_count: '[[[ return (variables.settled || []).length || 1; ]]]'
 
   extra_styles: |
     /* Tablet - Now Playing Padding */

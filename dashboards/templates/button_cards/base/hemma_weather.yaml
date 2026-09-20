@@ -1,9 +1,3 @@
-# Weather Widget
-#
-# hero_mode: false (default) - compact, right-aligned, mobile portrait weather area
-# hero_mode: true            - large, left-aligned, desktop/tablet temperature widget
-#
-# weather_temp_sensor - entity_id of current temp sensor override
 hemma_weather:
   variables:
     show_icon: true
@@ -33,6 +27,9 @@ hemma_weather:
 
   styles:
     card:
+      # No entity, no card: a dashboard with weather turned off was still
+      # drawing the glyph on the surfaces that do not gate the slot themselves.
+      - display: '[[[ return entity ? "flex" : "none" ]]]'
       - background: none
       - box-shadow: none
       - backdrop-filter: none

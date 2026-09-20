@@ -1,8 +1,3 @@
-# Deprecated alias for hemma_camera.
-#
-# The tile was never doorbell-specific, so it was renamed once cameras got their
-# own badge and popup. Existing dashboards keep working unchanged; new ones
-# should use hemma_camera. This alias will be removed in a future major version.
 hemma_doorbell:
   template:
     - hemma_camera

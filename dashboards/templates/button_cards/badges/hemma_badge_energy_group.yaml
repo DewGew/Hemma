@@ -1,16 +1,4 @@
-# Energy Group Badge
-# Row-level badge: tap toggles the Energy sub-row (hemma_badge_energy fills it).
-# Shows "Energy" plus a usage tier derived from power_entity.
-#
-# Variables:
-#   enabled           - show/hide this badge (default: true)
-#   power_entity      - power sensor driving the usage tier
-#   normal_threshold  - W above which the tier reads "Normal"  (default: 200)
-#   heavy_threshold   - W above which the tier reads "Heavy Usage"   (default: 1000)
-#   extreme_threshold - W above which the tier reads "Extreme Usage" (default: 3000)
 hemma_badge_energy_group:
-  # hemma_popup_energy is anchored so its popup lands on hold_action; tap is
-  # overridden below to toggle the sub-badge row.
   template: [hemma_badge_base, hemma_popup_energy]
 
   show_state: false
@@ -73,9 +61,6 @@ hemma_badge_energy_group:
               ? 'var(--hemma-color-yellow-dark, #F4C403)'
               : 'var(--hemma-color-yellow, #FFCC00)';
           ]]]
-      # Same tier the sub-line text uses, so icon and label can't disagree.
-      # power_entity (not entity) - on mobile the badge's entity is the filter
-      # input_select, not a power sensor.
       - --hemma-badge-icon-color: >
           [[[
             const pid = variables.power_entity || variables.entity_power;

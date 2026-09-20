@@ -181,7 +181,6 @@ Hemma:
       hemma-nav-border: transparent
       hemma-nav-active-fill: rgba(200,200,200,0.25)
 
-
       hemma-popup-tiles-text-primary: 'rgba(255,255,255,0.95)'
       hemma-popup-tiles-text-secondary: 'rgba(255,255,255,0.75)'
       hemma-popup-tiles-text-muted: 'rgba(255,255,255,0.52)'
@@ -255,7 +254,7 @@ Hemma:
   # Base palette
   # ----------------------------------------------------------------------------
 
-  hemma-color-blue:        '#0088FF'   # informational
+  hemma-color-blue:        '#0A84FF'   # informational
   hemma-color-teal:        '#00C3D0'   # primary / interactive / climate active
   hemma-color-mint:        '#00C8B3'   # security
   hemma-color-mint-dark:   '#00DAC3'   # security
@@ -479,8 +478,30 @@ Hemma:
     inset 0 1px 0 -0.5px rgba(255,255,255,0.10),
     0 2px 8px rgba(0,0,0,0.10)
 
+  # Desktop and tablet only; the phone pins itself back to the flat rim above.
+  hemma-tile-glass-rim-desktop: >-
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(255,255,255,0.08),
+    0 2px 8px rgba(0,0,0,0.10)
+
   # 'filter, transform' makes every card a backdrop root and kills blur inside it.
   hemma-card-will-change: auto
+
+  # How far the phone's top capsule and everything under it sit below the safe area.
+  hemma-mobile-chrome-drop: 4px
+
+  # The top corner capsule, shared by the phone dashboard and the panel. Measured off iOS's own.
+  hemma-pill-fill: rgba(255,255,255,0.10)
+  hemma-pill-backdrop: blur(12px) saturate(1.4)
+  # Apple's edge light brightens what is behind it rather than adding white, so it keeps the color.
+  hemma-pill-highlight: brightness(1.38)
+  hemma-pill-rim: >-
+    inset 0 0.5px 0 rgba(255,255,255,0.10),
+    inset 0 -0.5px 0 rgba(255,255,255,0.10),
+    inset 0 3px 4px -3px rgba(255,255,255,0.14),
+    inset 0 -3px 4px -3px rgba(255,255,255,0.10)
+  hemma-pill-edge: rgba(0,0,0,0.50)
+  hemma-pill-divider: rgba(60,60,67,0.36)
 
   hemma-glass-background: rgba(255,255,255,0.10)
   hemma-glass-backdrop: blur(24px) saturate(180%)
@@ -493,7 +514,7 @@ Hemma:
     -2px 0 3px -2px rgba(0,0,0,0.45),
     0 2px 8px rgba(0,0,0,0.18)
 
-  # Badge
+  hemma-badge-glass-rim: none
   hemma-badge-art-floor: rgba(160,160,160,0.28)
   hemma-badge-rim-side: 0.98
   hemma-badge-rim-side-spread: -1px
@@ -539,17 +560,6 @@ Hemma:
   hemma-popup-tiles-glow-top-soft: 0.15
   hemma-popup-tiles-glow-bottom-tight: 0.10
   hemma-popup-tiles-glow-bottom-soft: 0.07
-
-  # Navbar
-  hemma-nav-glass-backdrop: blur(24px) saturate(120%)
-  hemma-nav-glass-rim: >-
-    inset 0 1px .5px -0.5px rgba(255,255,255,0.55),
-    inset 0 -1px .5px -0.5px rgba(255,255,255,0.48),
-    inset 0 3px 6px -3px rgba(255,255,255,0.20),
-    inset 0 -3px 6px -3px rgba(255,255,255,0.12),
-    2px 0 3px -2px rgba(0,0,0,0.45),
-    -2px 0 3px -2px rgba(0,0,0,0.45),
-    0 4px 28px 2px rgba(0,0,0,0.07)
 
   # ----------------------------------------------------------------------------
   # Shadows
@@ -757,6 +767,13 @@ Hemma:
   hemma-entity-picture-inactive-opacity: 0.95
   hemma-entity-picture-inactive-filter: brightness(0.9) saturate(0.8)
 
+  hemma-sidebar-fill: rgba(0,0,0,0.42)
+  hemma-sidebar-backdrop: blur(20px) saturate(1.2)
+  hemma-sidebar-scrim: rgba(0,0,0,0.24)
+
+  hemma-elevation-floating: 0 8px 20px rgba(0,0,0,0.13)
+  hemma-elevation-floating-phone: 0 10px 26px rgba(0,0,0,0.18)
+
   hemma-hover-overlay-opacity: 0.06
   hemma-entity-text-shadow: none
   hemma-entity-height-h: clamp(160px, 18svh, 200px)
@@ -767,11 +784,17 @@ Hemma:
   hemma-entity-name-font-desktop: calc(var(--hemma-u, 10px) * 1.8)
   hemma-entity-state-font-desktop: calc(var(--hemma-u, 10px) * 1.5)
   hemma-entity-icon-size-desktop: calc(var(--hemma-u, 10px) * 3.4)
-  hemma-entity-height-tablet: var(--hemma-entity-height-h)
+  hemma-entity-aspect-tablet: var(--hemma-entity-aspect-desktop, 1.487)
   hemma-tile-peek-tablet: 60px
   hemma-entity-col-width-tablet: 220px
+  hemma-entity-col-width-tablet-portrait: calc((100vw - var(--hemma-rail-left, 3vw) - var(--hemma-tile-peek-tablet, 60px) - 24px) / 3)
   hemma-entity-col-width-tablet-landscape: calc((100vw - var(--hemma-rail-left, 3vw) - var(--hemma-tile-peek-tablet, 60px) - 40px) / 5)
   hemma-entity-col-width-tablet-landscape-sm: calc((100vw - var(--hemma-rail-left, 3vw) - var(--hemma-tile-peek-tablet, 60px) - 32px) / 4)
+  hemma-entity-row-pad-end: var(--page-gutter-desktop, 6vw)
+  hemma-entity-row-pad-end-tablet: 3vw
+
+  hemma-entity-row-pad-bottom: 40px
+  hemma-entity-row-pad-bottom-tablet: var(--hemma-entity-row-pad-bottom, 40px)
   hemma-entity-col-width-tablet-lg: 260px
   hemma-entity-icon-size-tablet-lg: 32px
   hemma-entity-name-font-tablet-lg: 16px
@@ -866,33 +889,28 @@ Hemma:
   hemma-nav-top-desktop: 60px
   hemma-nav-top-tablet: 55px
 
-  # Desktop header row. One anchor, like the tablet below: the clock, the nav
-  # labels and both chrome buttons all centre on this line.
   hemma-chrome-row-center-desktop: 64px
 
-  # Active-route indicator travel. The lead delay is what stretches the bar
-  # toward the room being opened before the trailing edge catches up.
   hemma-nav-indicator-duration: 0.42s
   hemma-nav-indicator-lead: 0.07s
   hemma-nav-indicator-ease: cubic-bezier(0.32, 0.72, 0, 1)
 
-  # Tablet header row. The navbar pill top is the anchor; the clock and the
-  # Now Playing panel derive from it so the row cannot desync.
   hemma-chrome-row-top-tablet: 30px
   hemma-chrome-row-top-tablet-portrait: 32px
   hemma-time-row-offset-tablet: 15px
-  hemma-chrome-side-reserve-tablet: 118px
 
-  # Tablet navbar pill. Height and inset are pinned so the active fill clears the glass
-  # edge equally on all four sides; the row offsets above are both pill-height / 2 - 9px.
+  hemma-chrome-btn-step: 46px
+  hemma-chrome-row-gap: 16px
+  hemma-chrome-side-reserve-tablet: "calc((3 * var(--hemma-chrome-btn-step, 46px)) - 12px + var(--hemma-chrome-row-gap, 16px))"
+  hemma-chrome-side-reserve-tablet-portrait: "calc((2 * var(--hemma-chrome-btn-step, 46px)) - 12px + var(--hemma-chrome-row-gap, 16px))"
+  hemma-now-playing-top-tablet-portrait: "calc(var(--hemma-chrome-row-top-tablet-portrait, 32px) + var(--hemma-nav-pill-height-tablet, 46px) + 8px)"
+
   hemma-nav-pill-height-tablet: 46px
   hemma-nav-pill-inset-y-tablet: 4px
-  hemma-nav-pill-inset-x-tablet: 4px
+  hemma-nav-pill-inset-x-tablet: 6px
   hemma-nav-route-gap-tablet: 4px
   hemma-nav-label-pad-x-tablet: 16px
 
-  # Desktop active-route underline. A pseudo-element bar, not text-decoration,
-  # so its thickness never follows the chosen font's underline metric.
   hemma-nav-underline-thickness: 2px
   hemma-nav-underline-gap: 4px
 
@@ -1044,12 +1062,6 @@ Hemma:
       }
 
 
-      body.kiosk-mode,
-      ha-panel-lovelace.kiosk-mode,
-      ha-panel-lovelace[is-kiosk],
-      ha-app-layout.kiosk-mode,
-
-
       :not(.edit-mode) > hui-view::after,
       :not(.edit-mode) > hui-view:after {
         display: none !important;
@@ -1147,6 +1159,8 @@ Hemma:
         --badge-media-btn-icon-size-current: var(--badge-media-btn-icon-size, 34px);
         --hemma-entity-col-width-current: var(--hemma-entity-col-width-desktop, 280px);
         --hemma-entity-height-current: var(--hemma-entity-height-desktop, 180px);
+        --hemma-entity-row-pad-bottom-current: var(--hemma-entity-row-pad-bottom, 40px);
+        --hemma-entity-row-pad-end-current: var(--hemma-entity-row-pad-end, var(--hemma-rail-left, 6vw));
         --hemma-entity-rows-current: var(--hemma-entity-rows-desktop, repeat(1, auto));
         --hemma-entity-justify-current: var(--hemma-entity-justify-desktop, flex-start);
         --hemma-entity-right-inset-current: var(--hemma-entity-right-inset-desktop, 0px);
@@ -1193,7 +1207,12 @@ Hemma:
           --badge-media-btn-size-current: var(--badge-media-btn-size-tablet, var(--badge-media-btn-size, 50px));
           --badge-media-btn-icon-size-current: var(--badge-media-btn-icon-size-tablet, var(--badge-media-btn-icon-size, 30px));
           --hemma-entity-col-width-current: var(--hemma-entity-col-width-tablet, 210px);
-          --hemma-entity-height-current: var(--hemma-entity-height-tablet, 150px);
+          --hemma-entity-height-current: clamp(140px,
+            calc(var(--hemma-entity-col-width-current, 220px)
+              / var(--hemma-entity-aspect-tablet, 1.487)),
+            min(24svh, 200px));
+          --hemma-entity-row-pad-bottom-current: var(--hemma-entity-row-pad-bottom-tablet, 20px);
+          --hemma-entity-row-pad-end-current: var(--hemma-entity-row-pad-end-tablet, var(--hemma-rail-left, 3vw));
           --hemma-entity-overflow-y-current: var(--hemma-entity-overflow-y-tablet, var(--hemma-entity-overflow-y-desktop, hidden));
           --hemma-entity-inner-pad-current: var(--hemma-entity-inner-pad-tablet, 18px);
           --hemma-entity-name-font-current: var(--hemma-entity-name-font-tablet, 15px);
@@ -1236,6 +1255,9 @@ Hemma:
       @media (min-width: 768px) and (max-width: 1600px) and (orientation: portrait) and (min-height: 501px) and (hover: none) and (pointer: coarse) {
         :host {
           --hero-top: var(--header-top-tablet-portrait);
+          /* Three up plus the peek, so the tile keeps a landscape proportion
+             on a screen whose own proportion is the opposite. */
+          --hemma-entity-col-width-current: var(--hemma-entity-col-width-tablet-portrait);
         }
       }
 

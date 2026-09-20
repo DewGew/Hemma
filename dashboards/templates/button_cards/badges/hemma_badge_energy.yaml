@@ -1,17 +1,3 @@
-# Power / Energy Sub-Badge
-# One template for every value badge in the Energy sub-row:
-#   - per-room consumption on the Home dashboard  (label + W)
-#   - the Today / This Month metrics on a room     (label + kWh, optional cost)
-#   - any per-device power sensors                 (label + W)
-# They are all "label + number", so they share one template rather than three
-# near-identical ones.
-#
-# Variables:
-#   enabled     - show/hide this badge (default: true)
-#   label       - title override; falls back to the entity's friendly name
-#   unit        - 'auto' (W, switching to kW above 1000), 'kwh', or 'cost'
-#                 ('cost' is for rooms that only have a cost sensor, no kWh)
-#   cost_entity - optional; appended to the value as "· $1.23"
 hemma_badge_energy:
   template: [hemma_badge_base, hemma_popup_energy]
 
@@ -45,8 +31,6 @@ hemma_badge_energy:
             const dead = !entity?.entity_id || !st || ['unknown','unavailable'].includes(st);
             return (!enabled || dead) ? 'none' : 'inline-grid';
           ]]]
-      # Same Idle/Normal/Heavy/Extreme tier the popup pill and the hemma_energy
-      # card use, read off the popup's own power entity so the two can't disagree.
       - --hemma-badge-icon-color: >
           [[[
             const pid = variables?.entity_power || entity?.entity_id;
@@ -72,8 +56,6 @@ hemma_badge_energy:
         || entity?.attributes?.friendly_name
         || 'Power';
 
-      // Same symbol table the gauge glyph in extra_styles uses, so the ring
-      // and the text can't show different currencies.
       const cur = String((typeof hass !== 'undefined' && hass?.config?.currency) || 'USD').toUpperCase();
       const SYM = { USD:'$', CAD:'$', AUD:'$', NZD:'$', MXN:'$',
                     EUR:'\u20AC', GBP:'\u00A3', JPY:'\u00A5', CNY:'\u00A5',
@@ -81,8 +63,6 @@ hemma_badge_energy:
                     BRL:'R$', PLN:'z\u0142', KRW:'\u20A9' }[cur] || '$';
       const money = (n) => SYM + (n >= 100 ? Math.round(n) : n.toFixed(2));
 
-      // 'auto' means auto: a monetary sensor prints money, an energy sensor
-      // kWh. Without this a cost sensor left on the default printed "8 W".
       const resolveUnit = (u, e) => {
         u = String(u || 'auto').toLowerCase();
         if (u === 'energy') return 'kwh';
@@ -130,11 +110,6 @@ hemma_badge_energy:
         !['false','0','no','off','disabled'].includes(String(v).trim().toLowerCase());
       const st = String(entity?.state ?? '').trim().toLowerCase();
       const dead = !entity?.entity_id || !st || ['unknown','unavailable'].includes(st);
-      // Gauge ring built inline (same approach as the climate gauges) so the
-      // sub-row reads as a set, distinct from the Energy group badge's solid
-      // bolt above it. Currency glyph for cost badges, energy.svg bolt otherwise.
-      // Same resolution as the name block, or a cost sensor would print money
-      // under a bolt ring instead of a currency glyph.
       const resolveUnit = (u, e) => {
         u = String(u || 'auto').toLowerCase();
         if (u === 'energy') return 'kwh';
@@ -182,8 +157,6 @@ hemma_badge_energy:
         "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'>" +
         "<path d='" + ring + "' stroke='white' stroke-width='" + W + "' stroke-linecap='round' fill='none'/>" +
         glyph + "</svg>";
-      // Double quotes around the url() \u2014 encodeURIComponent leaves apostrophes
-      // alone, and the SVG is full of them.
       const URL = 'data:image/svg+xml,' + encodeURIComponent(svg);
 
       return `:host{display:${(!enabled || dead) ? 'none' : 'inline-block'} !important;}

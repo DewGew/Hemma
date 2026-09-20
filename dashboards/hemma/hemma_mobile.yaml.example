@@ -46,6 +46,8 @@
 button_card_templates: !include_dir_merge_named /config/dashboards/templates/button_cards
 
 # Recommended — requires the kiosk-mode HACS integration.
+# Hemma hides the header itself; the kiosk-mode HACS integration is not needed
+# for this. Add ?hemma_header=1 to the URL to get it back for one page load.
 kiosk_mode:
   mobile_settings:
     hide_header: true
@@ -288,12 +290,6 @@ views:
                 variables:
                   icon: light
                   show_toggle: true
-                  # Scenes have their own row and Scenes page, so the light popup
-                  # hides them. Uncomment to bring them back inside this popup.
-                  # show_scenes: true
-                  # scene_order:
-                  #   - scene.YOUR_SCENE_1
-                  #   - scene.YOUR_SCENE_2
 
               - type: custom:button-card
                 template:

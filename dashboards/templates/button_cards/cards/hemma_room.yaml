@@ -28,6 +28,49 @@ hemma_room:
     # The bell in the chrome row. On by default: it is dashboard chrome, not a
     # room feature, and it has content on any install with a lock or a doorbell.
     show_notifications: true
+    show_assist: true
+    # What the bell reports. Written by Hemma's Notifications section,
+    # which sets every room at once - the bell is dashboard chrome, so two
+    # rooms must not be able to disagree about it. Absent means on.
+    notify_safety: true
+    notify_air: true
+    notify_locks: true
+    notify_alarm: true
+    notify_doorbell: true
+    notify_doors: true
+    notify_people: true
+    notify_vacuum: true
+    notify_appliances: true
+    notify_plants: true
+    notify_battery: true
+    notify_updates: true
+    notify_restart: true
+    # An appliance cannot be detected, so it is named: a list of entities and,
+    # beside it, whichever sensor counts that appliance down.
+    notification_appliances: null
+    notification_appliance_timers: null
+    notification_co2_ppm: null
+    notification_open_minutes: null
+    notification_battery_threshold: null
+    # A helper (input_datetime, input_text or input_number) holding when
+    # notifications were last marked read. Set it and every surface shares
+    # one read state; leave it null and each browser keeps its own.
+    notification_read_entity: null
+
+    # Applied from whichever layout is on screen. force_eval so a change in
+    # Hemma lands on the next render instead of waiting for a reload.
+    hemma_notify_config:
+      force_eval: true
+      value: |
+        [[[
+          // Stash regardless: on a cold load this runs before hemma-core.js,
+          // and the module picks the stash up when it initializes. Without it
+          // a layout that renders once - the phone - never applied its
+          // switches at all.
+          window._hemmaNotifyCfg = variables;
+          if (window._hemmaNotify) window._hemmaNotify.configureFrom(variables);
+          return true;
+        ]]]
 
     show_climate_inline: false  # true = show individual badges (temp/humidity/air quality) directly on the top row instead of the group badge
     climate_entity_1:
@@ -198,16 +241,9 @@ hemma_room:
 
   styles:
     card:
-      # Badge order. Each badge's own extra_styles carries a static
-      # `order:var(--hemma-badge-order-<id>, N)`, so all this has to do is
-      # publish the six numbers - custom properties inherit from ha-card down
-      # through the layout-card and into every badge host, which is the only
-      # way to reach them: nothing in this card's CSS can SELECT a badge, and
-      # button-card's styles.card targets ha-card rather than the grid item.
-      #
-      # A category the list does not mention sits after the ones it does,
-      # keeping its relative default order. Slotting it back into its built-in
-      # POSITION instead walked an explicitly-listed badge to the end.
+      - "--hemma-chrome-dots-step": '[[[ return variables.hemma_ui_managed ? "46px" : "0px" ]]]'
+      - "--hemma-chrome-bell-step": '[[[ return variables.show_notifications === false ? "0px" : "46px" ]]]'
+
       - "--hemma-badge-order-climate": >
           [[[
             const o = variables.badge_order;
@@ -251,36 +287,6 @@ hemma_room:
             return i < 0 ? o.length + 6 : i + 1;
           ]]]
 
-      # How far left of the gutter the settings button sits: the waveform is
-      # the rightmost control, because the media panel expands from it and wants
-      # to align to the same edge. Zero on a YAML dashboard, which has no
-      # settings button at all, and zero when there is no waveform to make room
-      # for - a lone button parked 52px inboard reads as a mistake.
-      #
-      # Read from _hemmaNP's cache rather than calling it. Rebuilding its V by
-      # hand would have to reproduce every show_* flag exactly or the two
-      # callers compute different signatures and invalidate each other every
-      # render, which also runs its demotion bookkeeping twice. Unknown means
-      # 52px: a reserved gap is cosmetic, but 0px while the waveform is up puts
-      # the two buttons on top of each other. Costs one render's lag on first
-      # paint, before the panel has filled the cache.
-      # Unknown resolves to 0px, the same value the idle state resolves to, so
-      # an idle load never moves the button at all - it paints at the margin and
-      # stays. It used to answer 52px while the cache was still empty, out of a
-      # worry about overlapping the waveform, and that guess was the whole bug:
-      # the button appeared 52px inboard and snapped right a frame later.
-      # Nothing about the chrome row's spacing is set here. It used to be
-      # computed from config plus the Now Playing cache, and kept disagreeing
-      # with what was drawn - the panel showed its waveform while this read zero
-      # and the settings button landed on top of it. hemma-core.js measures
-      # which controls actually drew and writes --hemma-chrome-shift on each
-      # slot, so the buttons slide to meet whatever is really there.
-      # The font is a theme value, but the config panel edits the dashboard and
-      # has no way to write a theme file - so a dashboard that names a font
-      # writes it onto the document instead. It has to be a stylesheet rule with
-      # !important: HA sets theme variables as inline styles on <html> and
-      # rewrites them on every theme change, and a plain inline write here would
-      # just trade blows with it.
       - --hemma-font-set: >
           [[[
             const STACKS = {
@@ -298,8 +304,6 @@ hemma_room:
               document.head.appendChild(el);
             }
             const css = 'html{--primary-font-family:' + want + ' !important;}';
-            // Compare before assigning: this runs on every render, and rewriting
-            // a stylesheet that has not changed restyles the whole document.
             if (el.textContent !== css) el.textContent = css;
             return '1';
           ]]]
@@ -421,7 +425,7 @@ hemma_room:
     name:
       - grid-area: n
       - color: var(--primary-text-color)
-      - opacity: 0.9
+      - opacity: 1
       - font-size: var(--hero-room-name-size-current, clamp(48px, 6vw + 12px, 100px))
       - letter-spacing: var(--hero-room-name-letter-spacing-current, -2px)
       - font-weight: 700
@@ -441,8 +445,7 @@ hemma_room:
               const w = window?.innerWidth || 1024;
               const h = window?.innerHeight || 800;
               const isMobileSize = w <= 767 || h <= 500;
-              if (variables.weather_entity) { window._hemmaWx = variables.weather_entity; try { localStorage.setItem('hemma_weather_entity', variables.weather_entity); } catch(e) {} }
-              const wx = variables.weather_entity || window._hemmaWx || (window._hemmaWx = localStorage.getItem('hemma_weather_entity') || '');
+              const wx = window.hemmaWx ? window.hemmaWx(variables, 'entity') : (variables.weather_entity || '');
               return (!isMobileSize && !!wx) ? 'block' : 'none';
             ]]]
         - position: absolute
@@ -467,6 +470,12 @@ hemma_room:
         - background-color: transparent !important
 
       time:
+        # Hemma owns the clock on a managed dashboard: unset means no clock,
+        # rather than the sensor.time fallback a hand-written config still gets.
+        - display: >
+            [[[
+              return (variables.hemma_ui_managed && !variables.time_entity) ? 'none' : 'block';
+            ]]]
         - position: fixed
         - z-index: 10
         - pointer-events: auto
@@ -483,10 +492,8 @@ hemma_room:
                 (mm('(pointer: coarse)') || mm('(hover: none)')) &&
                 mm('(max-width: 767px)') &&
                 mm('(orientation: portrait)');
-              if (variables.weather_entity) { window._hemmaWx = variables.weather_entity; try { localStorage.setItem('hemma_weather_entity', variables.weather_entity); } catch(e) {} }
-              if (variables.weather_temp_sensor) { window._hemmaWxTemp = variables.weather_temp_sensor; try { localStorage.setItem('hemma_weather_temp_sensor', variables.weather_temp_sensor); } catch(e) {} }
-              const wx = variables.weather_entity || window._hemmaWx || (window._hemmaWx = localStorage.getItem('hemma_weather_entity') || '');
-              const wxt = variables.weather_temp_sensor || window._hemmaWxTemp || (window._hemmaWxTemp = localStorage.getItem('hemma_weather_temp_sensor') || '');
+              const wx = window.hemmaWx ? window.hemmaWx(variables, 'entity') : (variables.weather_entity || '');
+              const wxt = window.hemmaWx ? window.hemmaWx(variables, 'temp') : (variables.weather_temp_sensor || '');
               const hasData = !!(wx || wxt);
               const ok = !!wx && hasData;
               return (isPhonePortrait && ok) ? 'block' : 'none';
@@ -578,8 +585,6 @@ hemma_room:
                             { duration: 460, easing: SPRING, fill: 'forwards' });
                         } else {
                           const w = f.offsetWidth || 0;
-                          // Badge leaves in full view first, then the gap closes
-                          // behind it - never clipped, so the rise is visible.
                           b._hemmaA = b.animate(
                             [{ '--hemma-badge-enter-p': 0 }, { '--hemma-badge-enter-p': 1 }],
                             { duration: 320, easing: OUT, fill: 'forwards' });
@@ -1287,6 +1292,15 @@ hemma_room:
             ]]]
 
       now_playing:
+        - --hemma-np-head-inset: >
+            [[[
+              const STEP = 46;
+              const dots = variables.hemma_ui_managed ? STEP : 0;
+              const assist = variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes("conversation") ? STEP : 0;
+              const bell = variables.show_notifications === false ? 0 : STEP;
+              return 'max(0px, calc(' + (dots + assist + bell) + 'px'
+                + ' - var(--hero-room-name-margin-left-current, 0px)))';
+            ]]]
         - position: fixed
         - z-index: 12
         - text-align: left !important
@@ -1314,18 +1328,11 @@ hemma_room:
         - filter: none
 
       settings:
-        # The host stays hit-testable when the button hides itself, and with no
-        # button the reserve is 0px so this box lands exactly on the waveform.
         - display: '[[[ return variables.hemma_ui_managed ? "block" : "none" ]]]'
         - position: fixed
         - top: var(--hemma-chrome-btn-top, 12px)
-        # Every chrome button rests on the gutter and slides left to make room
-        # for whatever is to its right, so one step size governs all the gaps.
         - right: var(--hero-gutter)
         - left: auto
-        # hemma-core writes --hemma-chrome-shift on this element, so the
-        # transition fires off its own inline style rather than an
-        # ancestor var, which has not reliably started one here.
         - transform: "translateX(calc(-1 * var(--hemma-chrome-shift, 0px)))"
         - transition: "transform 420ms cubic-bezier(0.32, 0.72, 0, 1)"
         - width: var(--hemma-chrome-btn-size, 34px)
@@ -1333,19 +1340,34 @@ hemma_room:
         - z-index: 20
         - pointer-events: auto
 
+      assist:
+        - display: '[[[ return variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes("conversation") ? "block" : "none" ]]]'
+        - position: fixed
+        - top: var(--hemma-chrome-btn-top, 12px)
+        - right: var(--hero-gutter)
+        - left: auto
+        - transform: >
+            [[[
+              const rest = variables.hemma_ui_managed ? '46px' : '0px';
+              return `translateX(calc(-1 * var(--hemma-chrome-shift, ${rest})))`;
+            ]]]
+        - transition: "transform 420ms cubic-bezier(0.32, 0.72, 0, 1)"
+        - width: var(--hemma-chrome-btn-size, 34px)
+        - height: var(--hemma-chrome-btn-size, 34px)
+        - z-index: 21
+        - pointer-events: auto
+
       notifications:
-        # Left of the dots and the waveform. hemma-core MEASURES which of those
-        # actually drew, so a hidden neighbour collapses its own step rather
-        # than leaving a hole here.
         - display: '[[[ return variables.show_notifications === false ? "none" : "block" ]]]'
         - position: fixed
         - top: var(--hemma-chrome-btn-top, 12px)
         - right: var(--hero-gutter)
         - left: auto
-        # hemma-core writes --hemma-chrome-shift on this element, so the
-        # transition fires off its own inline style rather than an
-        # ancestor var, which has not reliably started one here.
-        - transform: "translateX(calc(-1 * var(--hemma-chrome-shift, 0px)))"
+        - transform: >
+            [[[
+              const rest = (variables.hemma_ui_managed ? 46 : 0) + (variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes("conversation") ? 46 : 0);
+              return `translateX(calc(-1 * var(--hemma-chrome-shift, ${rest}px)))`;
+            ]]]
         - transition: "transform 420ms cubic-bezier(0.32, 0.72, 0, 1)"
         - width: var(--hemma-chrome-btn-size, 34px)
         - height: var(--hemma-chrome-btn-size, 34px)
@@ -1384,6 +1406,18 @@ hemma_room:
         template: hemma_settings_button
         variables:
           shown: '[[[ return !!variables.hemma_ui_managed ]]]'
+          assist_available: >
+            [[[
+              return variables.show_assist !== false
+                && ((hass && hass.config && hass.config.components) || []).includes("conversation");
+            ]]]
+
+    assist:
+      card:
+        type: custom:button-card
+        template: hemma_assist_button
+        variables:
+          shown: '[[[ return variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes("conversation") ]]]'
 
     notifications:
       card:
@@ -1391,7 +1425,6 @@ hemma_room:
         template: hemma_notifications_button
         variables:
           shown: '[[[ return variables.show_notifications !== false ]]]'
-
     navigation:
       card: !include /config/dashboards/templates/includes/hemma_navigation.yaml
 
@@ -1402,15 +1435,13 @@ hemma_room:
         template: hemma_weather
         entity: |
           [[[
-            if (variables.weather_entity) { window._hemmaWx = variables.weather_entity; try { localStorage.setItem('hemma_weather_entity', variables.weather_entity); } catch(e) {} }
-            return variables.weather_entity || window._hemmaWx || (window._hemmaWx = localStorage.getItem('hemma_weather_entity') || '');
+            return window.hemmaWx ? window.hemmaWx(variables, 'entity') : (variables.weather_entity || '');
           ]]]
         variables:
           hero_mode: true
           weather_temp_sensor: |
             [[[
-              if (variables.weather_temp_sensor) { window._hemmaWxTemp = variables.weather_temp_sensor; try { localStorage.setItem('hemma_weather_temp_sensor', variables.weather_temp_sensor); } catch(e) {} }
-              return variables.weather_temp_sensor || window._hemmaWxTemp || (window._hemmaWxTemp = localStorage.getItem('hemma_weather_temp_sensor') || '');
+              return window.hemmaWx ? window.hemmaWx(variables, 'temp') : (variables.weather_temp_sensor || '');
             ]]]
     weather:
       card:
@@ -1418,14 +1449,12 @@ hemma_room:
         template: hemma_weather
         entity: |
           [[[
-            if (variables.weather_entity) { window._hemmaWx = variables.weather_entity; try { localStorage.setItem('hemma_weather_entity', variables.weather_entity); } catch(e) {} }
-            return variables.weather_entity || window._hemmaWx || (window._hemmaWx = localStorage.getItem('hemma_weather_entity') || '');
+            return window.hemmaWx ? window.hemmaWx(variables, 'entity') : (variables.weather_entity || '');
           ]]]
         variables:
           weather_temp_sensor: |
             [[[
-              if (variables.weather_temp_sensor) { window._hemmaWxTemp = variables.weather_temp_sensor; try { localStorage.setItem('hemma_weather_temp_sensor', variables.weather_temp_sensor); } catch(e) {} }
-              return variables.weather_temp_sensor || window._hemmaWxTemp || (window._hemmaWxTemp = localStorage.getItem('hemma_weather_temp_sensor') || '');
+              return window.hemmaWx ? window.hemmaWx(variables, 'temp') : (variables.weather_temp_sensor || '');
             ]]]
 
     time:
@@ -2927,6 +2956,51 @@ hemma_room:
       }
     }
 
+    /* Portrait sits the pill 2px lower, so the buttons follow it. Without this
+       the row fell back to the desktop center and every button sat 9px low. */
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: portrait) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: portrait) and (hover: none) {
+      :host {
+        --hemma-chrome-btn-top: calc(var(--hemma-chrome-row-top-tablet-portrait, 32px)
+          + (var(--hemma-nav-pill-height-tablet, 46px) / 2)
+          - (var(--hemma-chrome-btn-size, 34px) / 2));
+      }
+
+      /* Portrait alone cannot fit the waveform beside the pill, so it gives up
+         its seat in the row and takes the one below. Assist is already in the
+         dots menu on every tablet - see the block after this one. */
+      #now_playing { --hemma-np-head-inset: 0px !important; }
+    }
+
+    /* A tablet keeps Assist in the dots menu in BOTH orientations. Landscape has
+       the width for it, but a control that moves when the iPad is turned is
+       worse than one that lives in one place. The row collapses the way a UIKit
+       toolbar does; the bell then closes Assist's gap and the waveform's own
+       reserve drops a step with it. !important because every one of these is
+       stamped inline from styles.custom_fields.
+       --hemma-chrome-side-reserve-tablet* in the theme counts what is left;
+       changing what shows here means changing those. */
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (hover: none) {
+      #assist { display: none !important; }
+
+      #notifications {
+        transform: translateX(calc(-1 * var(--hemma-chrome-dots-step, 46px))) !important;
+      }
+
+      #now_playing {
+        --hemma-np-head-inset: calc(var(--hemma-chrome-dots-step, 46px)
+          + var(--hemma-chrome-bell-step, 46px)) !important;
+      }
+    }
+
+    /* Portrait again, last: its waveform is not in the row at all, so it
+       reserves nothing. Same weight as the block above, so order settles it. */
+    @media (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: portrait) and (pointer: coarse),
+           (min-width: 768px) and (max-width: 1600px) and (min-height: 501px) and (orientation: portrait) and (hover: none) {
+      #now_playing { --hemma-np-head-inset: 0px !important; }
+    }
+
     #now_playing {
       --np-vp: 0;
       pointer-events: none;
@@ -2968,7 +3042,10 @@ hemma_room:
       #now_playing {
         --np-vp: 1;
         pointer-events: auto;
-        top: calc(env(safe-area-inset-top, 0px) + var(--hemma-now-playing-top-tablet-portrait, 56px));
+        top: calc(env(safe-area-inset-top, 0px)
+          + var(--hemma-now-playing-top-tablet-portrait,
+              calc(var(--hemma-chrome-row-top-tablet-portrait, 32px)
+                + var(--hemma-nav-pill-height-tablet, 46px) + 8px)));
         right: var(--hero-gutter);
         max-width: min(420px, 60vw);
       }

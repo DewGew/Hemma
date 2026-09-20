@@ -7,8 +7,6 @@ hemma_battery:
     icon: battery
     batteries: null
 
-  # No hold target: the tile is a score over `batteries`, not a view of any one
-  # sensor, so there is no entity a hold could sensibly open.
   hold_action:
     action: none
 

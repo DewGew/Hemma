@@ -1,5 +1,3 @@
-# The waveform toggle for the Now Playing panel. The "Now Playing" label was
-# dropped: tablet never showed it, and the waveform alone is the control.
 hemma_now_playing_header:
   template:
     - hemma_default
@@ -55,9 +53,6 @@ hemma_now_playing_header:
       - --hemma-card-hover-shadow: none
       - --hemma-card-hover-filter: none
       - --np-head-open: '[[[ return variables.open ? 1 : 0; ]]]'
-      # The SAME clock the shell's --np-min runs on. Reading the raw entity here
-      # left the button waiting on the round trip while the tiles animated off
-      # the intent, so the fill flipped a beat after they had gone.
       - --np-head-min: >
           [[[
             const st = states[variables.minimized_entity];

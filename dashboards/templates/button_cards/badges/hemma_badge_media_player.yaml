@@ -1,13 +1,3 @@
-# Media Player Badge
-# Now Playing badge for a single media_player, with play/pause and skip
-# controls. Shares its look with the activity + plex badges via hemma_badge_media.
-#
-# Variables:
-#   enabled               - show/hide this badge (default: true)
-#   entity                - media_player entity_id (falls back to the card's own entity)
-#   pause_timeout_minutes - minutes a paused player still counts as active (default: 10)
-#   group_entities        - array of additional entity_ids controlled alongside `entity`
-#                           (e.g. grouped speakers) and shown as a "+N" pill
 hemma_badge_media_player:
   template: [hemma_badge_base, hemma_badge_media]
   show_icon: false

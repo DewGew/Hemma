@@ -15,6 +15,10 @@ hemma_now_playing_primary:
     glass: true
     # Smaller transport glyphs (28px vs 36px); set by mobile to match entity-tile height.
     compact_controls: false
+    # How many tiles the stack is showing. Transport and the progress bar come off
+    # as the slot shrinks, or the text column outgrows the slot and the card grows
+    # past min-height - which is exactly what the budget is meant to prevent.
+    np_count: 1
     # 'corner' (desktop) grows from top-right; 'horizontal' (mobile row/rail) slides from the right and doesn't skip the first-content animation.
     entry_direction: corner
     swap_motion: true
@@ -317,40 +321,98 @@ hemma_now_playing_primary:
           [[[
             const s = variables.hold_src;
             const hold = window._hemmaNPArtHold = window._hemmaNPArtHold || {};
-            // The warm map is keyed by URL path, so it is shared on purpose:
-            // two cards showing one cover should reuse the decode.
             const warm = window._hemmaNPArtWarm = window._hemmaNPArtWarm || new Map();
-            const path = (u) => String(u || '').split('?')[0];
             const k = s ? ((s.entity || '') + '|' + (s.key || s.kind || '')) : '';
             const cur = s?.art || null;
             const id = s ? ((s.title || '') + '|' + (s.subtitle || '')) : '';
+            const el = this;
 
-            let u = cur;
-            if (k) {
-              const prev = hold[k];
-              const sameTrack = !!(prev && prev.id === id);
-              if (cur && sameTrack && path(prev.url) === path(cur) && warm.has(path(cur))) u = prev.url;
-              else if (cur) hold[k] = { id: id, url: cur };
-              // Transient null between polls - hold the last good art, but only for this track.
-              else u = sameTrack ? prev.url : null;
-            }
+            const artk = (u) => {
+              const t = String(u || '');
+              const q = t.indexOf('?');
+              if (q < 0) return t + '|' + id;
+              const rest = t.slice(q + 1).split('&')
+                .filter((p) => p.slice(0, 6) !== 'token=' && p.slice(0, 8) !== 'authSig=')
+                .sort().join('&');
+              return t.slice(0, q) + (rest ? '?' + rest : '') + '|' + id;
+            };
 
-            // Retaining a decoded Image keeps the bitmap alive across a rebuild
-            // (feedback_preload_needs_decode_not_hidden_img).
-            if (u && !warm.has(path(u))) {
+            const touch = (p) => {
+              const rec = warm.get(p);
+              if (rec) { warm.delete(p); warm.set(p, rec); }
+              return rec;
+            };
+            // LRU rather than insertion order, so the cover on screen is never the one evicted.
+            const trim = () => {
+              while (warm.size > 24) {
+                const p = warm.keys().next().value;
+                const rec = warm.get(p);
+                warm.delete(p);
+                if (rec && rec.obj) { try { URL.revokeObjectURL(rec.obj); } catch (e) {} }
+              }
+            };
+            const rotates = (u) => {
               try {
-                const im = new Image();
-                im.decoding = 'async';
-                im.src = u;
-                warm.set(path(u), im);
-                if (warm.size > 24) warm.delete(warm.keys().next().value);
-                im.decode?.().catch(() => {});
-              } catch (e) {}
+                const p = new URL(u, location.origin);
+                return p.origin === location.origin &&
+                  (p.searchParams.has('token') || p.searchParams.has('authSig'));
+              } catch (e) { return false; }
+            };
+
+            const claim = (u) => {
+              const p = artk(u);
+              let rec = touch(p);
+              if (!rec) { rec = {}; warm.set(p, rec); trim(); }
+              if (rec.obj || rec.busy || rec.tried === u) return rec;
+              rec.tried = u;
+              if (!rotates(u)) {
+                try {
+                  const im = new Image();
+                  im.decoding = 'async';
+                  im.src = u;
+                  rec.img = im;
+                  im.decode?.().catch(() => {});
+                } catch (e) {}
+                return rec;
+              }
+              rec.busy = true;
+              fetch(u, { credentials: 'same-origin' })
+                .then((r) => (r.ok ? r.blob() : Promise.reject(r.status)))
+                .then((b) => {
+                  const obj = URL.createObjectURL(b);
+                  const publish = () => {
+                    rec.busy = false;
+                    rec.obj = obj;
+                    const card = el.shadowRoot?.querySelector('ha-card');
+                    if (card) card.style.setProperty('--np-art', 'url("' + obj + '")');
+                  };
+                  // Decoded first, or the swap off the token url is a repaint with nothing to show.
+                  try {
+                    const im = new Image();
+                    im.decoding = 'async';
+                    im.src = obj;
+                    rec.img = im;
+                    if (im.decode) im.decode().then(publish, publish); else publish();
+                  } catch (e) { publish(); }
+                })
+                .catch(() => { rec.busy = false; });
+              return rec;
+            };
+
+            let u = null;
+            if (cur) {
+              const rec = claim(cur);
+              // Until the blob lands, paint the CURRENT url - it is the only one HA will serve.
+              u = (rec && rec.obj) || cur;
+              if (k) hold[k] = { id: id, url: u };
+            } else if (k) {
+              const prev = hold[k];
+              // Transient null between polls - hold the last good art, but only for this track.
+              u = (prev && prev.id === id) ? prev.url : null;
             }
 
             return u ? `url("${u}")` : 'none';
           ]]]
-      # Reads the same hold as --np-art - gating the bloom on the live value alone would drop the
       # wash to zero on the very poll the held URL is covering for.
       - --np-has-art: >
           [[[
@@ -539,11 +601,9 @@ hemma_now_playing_primary:
           [[[
             const k = variables.hold_src?.kind;
             if (k === 'plex') return 'var(--hemma-color-orange, #FF9230)';
-            if (k === 'activity') return 'var(--hemma-color-blue, #0088FF)';
+            if (k === 'activity') return 'var(--hemma-color-blue, #0A84FF)';
             return 'var(--hemma-color-teal, #00c3d0)';
           ]]]
-      # Overridden here (not the shared --hemma-badge-body-tint default) so only this tile's light-mode tint changes, not every media badge.
-      # hass.themes.darkMode (HA's own theme setting) can differ from the OS's prefers-color-scheme, so it's checked first with matchMedia as fallback (same pattern as hemma_room.yaml's --hero-img).
       - --hemma-badge-body-tint: >
           [[[
             const isDark = typeof hass?.themes?.darkMode === 'boolean'
@@ -600,7 +660,8 @@ hemma_now_playing_primary:
       - grid-template-rows: >
           [[[
             const c = variables.hold_src?.controls;
-            const hasControls = !!(c && (c.toggle || c.next || c.prev));
+            const hasControls = !!(c && (c.toggle || c.next || c.prev))
+              && (variables.np_count || 1) <= 2;
             return hasControls ? 'max-content max-content' : 'max-content 0px';
           ]]]
       - column-gap: calc(var(--hemma-u-np, 10px) * 1.4)
@@ -608,7 +669,8 @@ hemma_now_playing_primary:
       - row-gap: >
           [[[
             const c = variables.hold_src?.controls;
-            return (c && (c.toggle || c.next || c.prev)) ? 'var(--np-row-gap, 8px)' : '0px';
+            return (c && (c.toggle || c.next || c.prev)) && (variables.np_count || 1) <= 2
+              ? 'var(--np-row-gap, 8px)' : '0px';
           ]]]
       - align-items: center !important
       - align-content: center !important
@@ -618,7 +680,8 @@ hemma_now_playing_primary:
       - align-self: >
           [[[
             const c = variables.hold_src?.controls;
-            const hasControls = !!(c && (c.toggle || c.next || c.prev));
+            const hasControls = !!(c && (c.toggle || c.next || c.prev))
+              && (variables.np_count || 1) <= 2;
             return hasControls ? 'end' : 'center';
           ]]]
       - min-width: 0
@@ -651,7 +714,13 @@ hemma_now_playing_primary:
         type: custom:button-card
         template: hemma_now_playing_controls
         variables:
-          src: '[[[ return variables.hold_src; ]]]'
+          # Null past two tiles: the controls template already hides itself on a
+          # src with no transport (Plex/PSN take that path), so this reuses it
+          # rather than adding a second way to be hidden.
+          src: >
+            [[[
+              return (variables.np_count || 1) <= 2 ? variables.hold_src : null;
+            ]]]
           compact: '[[[ return !!variables.compact_controls; ]]]'
 
   name: >
@@ -668,7 +737,8 @@ hemma_now_playing_primary:
       const sub = bits.map(x => String(x || '').trim()).filter(Boolean).join(' · ');
 
       let bar = '';
-      if (Number.isFinite(s.dur) && s.dur > 0 && Number.isFinite(s.pos)) {
+      if ((variables.np_count || 1) <= 3
+        && Number.isFinite(s.dur) && s.dur > 0 && Number.isFinite(s.pos)) {
         const elapsed = s.playing && s.posAt ? (Date.now() - s.posAt) / 1000 : 0;
         const now = Math.min(s.dur, Math.max(0, s.pos + elapsed));
         const frac = Math.max(0, Math.min(1, now / s.dur));
@@ -699,16 +769,21 @@ hemma_now_playing_primary:
       --np-shadow: none;
 
       /* Artwork can't shrink below the text column height, or the column drives card height and breaks the equal insets - so column height is trimmed and the freed space goes to padding. */
-      --np-pad-v: calc(var(--hemma-u-np, 10px) * 1.6);
+      /* min(natural, slot): --np-slot-h is the stack's budget split between the live
+         tiles, so one or two keep their natural size and the rest shrink exactly
+         enough to fit. The 999px fallback is the mobile row, which sets no slot. */
+      --np-pad-v: min(calc(var(--hemma-u-np, 10px) * 1.6), calc(var(--np-slot-h, 999px) * 0.134));
       /* 2px less than --np-pad-v - top/bottom read as slightly heavier than left at the same value, tuned down on request. */
-      --np-pad-tb: calc(var(--hemma-u-np, 10px) * 1.4);
-      --np-art-size: calc(var(--hemma-u-np, 10px) * 9.4);
+      --np-pad-tb: min(calc(var(--hemma-u-np, 10px) * 1.4), calc(var(--np-slot-h, 999px) * 0.117));
+      --np-art-size: min(calc(var(--hemma-u-np, 10px) * 9.4), calc(var(--np-slot-h, 999px) - 2 * var(--np-pad-tb)));
       --np-row-gap: calc(var(--hemma-u-np, 10px) * 1);
       --np-track-gap: calc(var(--hemma-u-np, 10px) * 0.8);
       /* Desktop's title/sub read as loud as the entity grid's own tile names despite living in a peripheral,
          ambient corner widget — sized down a step so it reads as glanceable status, not a second headline. */
-      --np-title-size: calc(var(--hemma-u-np, 10px) * 1.5);
-      --np-sub-size: calc(var(--hemma-u-np, 10px) * 1.3);
+      /* Also min(): past five tiles the text column, not the artwork, is what
+         would drive the card past its slot. */
+      --np-title-size: min(calc(var(--hemma-u-np, 10px) * 1.5), calc(var(--np-slot-h, 999px) * 0.30));
+      --np-sub-size: min(calc(var(--hemma-u-np, 10px) * 1.3), calc(var(--np-slot-h, 999px) * 0.26));
     }
 
     /* Minimise/expand motion, lifted from hemma_badge_base's entrance with the origin moved to the header's waveform toggle.
@@ -717,10 +792,15 @@ hemma_now_playing_primary:
     :host{
       --np-enter-t: calc(1 - var(--np-min, 0));
       --np-enter-p: var(--np-min, 0);
-      --np-enter-shift: 30px;
-      --np-enter-lift: -20px;
-      --np-enter-depth: 0.22;
-      --np-enter-squash: 0.07;
+      /* Was a 30px shift, a 20px lift and a 0.22 depth with a 0.07 squash -
+         a droplet flying to the toggle. The refined motion is a uniform scale
+         in place, so the shift and the squash are gone and the depth is what
+         reads as a settle rather than a flight. Reduced motion takes this path
+         on its own, so it has to say the same thing as the keyframes. */
+      --np-enter-shift: 0px;
+      --np-enter-lift: 0px;
+      --np-enter-depth: 0.08;
+      --np-enter-squash: 0;
       --np-enter-dur: calc(0.34s + var(--np-enter-t) * 0.14s);
       --np-enter-fade: calc(0.20s + var(--np-enter-t) * 0.05s);
       --np-enter-ease: cubic-bezier(0.34, 1.26, 0.44, 1);
@@ -825,10 +905,11 @@ hemma_now_playing_primary:
       --np-rim-side:      var(--hemma-badge-rim-side-blur, 2px) var(--hemma-badge-rim-side-spread, -1px) rgba(0,0,0,var(--hemma-badge-rim-side, 0.98));
       --np-rim-bottom:    0 1px 1px -1px rgba(0,0,0,var(--hemma-badge-rim-bottom, 0.14));
       --np-rim-top:       0 -1px 1px -1px rgba(0,0,0,var(--hemma-badge-rim-top, 0.12));
-      /* ── BOTTOM DROP SHADOW - tune --np-elev-* ── separate from shared --hemma-badge-elevation so media badges aren't affected; defaults fall through to it. */
-      --np-rim-elevation:
-        0 var(--np-elev-y, 2px) var(--np-elev-blur, 8px)
-        rgba(0,0,0,var(--np-elev-alpha, var(--hemma-badge-elevation, 0.22)));
+      /* ── BOTTOM DROP SHADOW ── the same token the dropdowns float on, so the
+         tile and a menu opened beside it cannot read as two different heights.
+         Tune the whole shadow with --np-elevation, or `none` to remove it. */
+      --np-rim-elevation: var(--np-elevation,
+        var(--hemma-elevation-floating, 0 8px 20px rgba(0,0,0,0.13)));
       box-shadow:
         var(--hemma-badge-rim-side-offset, 1px) 0 var(--np-rim-side),
         calc(-1 * var(--hemma-badge-rim-side-offset, 1px)) 0 var(--np-rim-side),
@@ -1038,15 +1119,15 @@ hemma_now_playing_primary:
     @media (min-width: 768px) and (max-width: 1400px) and (min-height: 501px) and (pointer: coarse),
            (min-width: 768px) and (max-width: 1400px) and (min-height: 501px) and (hover: none) {
       :host{
-        --np-art-size: 78px;
-        --np-title-size: 14px;
-        --np-sub-size: 12px;
-        --np-pad-v: 12px;
+        --np-art-size: min(78px, calc(var(--np-slot-h, 999px) - 2 * var(--np-pad-tb)));
+        --np-title-size: min(14px, calc(var(--np-slot-h, 999px) * 0.30));
+        --np-sub-size: min(12px, calc(var(--np-slot-h, 999px) * 0.26));
+        --np-pad-v: min(12px, calc(var(--np-slot-h, 999px) * 0.134));
         /* Must be restated per breakpoint: --np-pad-tb is set unconditionally on :host, so it does
            NOT fall back to this block's --np-pad-v. Left it at the desktop 14px against a 12px left
            inset, i.e. top/bottom 2px LARGER than the left — the one place the intended relationship
            was inverted. 12px squares the artwork's inset on all three sides. */
-        --np-pad-tb: 12px;
+        --np-pad-tb: min(12px, calc(var(--np-slot-h, 999px) * 0.117));
         --np-track-gap: 8px;
       }
     }
@@ -1061,10 +1142,8 @@ hemma_now_playing_primary:
         --np-pad-v: 16px;
         --np-row-gap: 7px;
         --np-track-gap: 9px;
-        /* Lower than desktop: tiles are usually darker than the wallpaper, so full elevation reads as haze. Raise --np-elev-alpha toward 0.22 for desktop weight, 0 to remove. */
-        --np-elev-alpha: 0.10;
-        --np-elev-blur: 6px;
-        --np-elev-y: 1px;
+        /* Lower than desktop: tiles are usually darker than the wallpaper, so full elevation reads as haze. */
+        --np-elevation: 0 1px 6px rgba(0,0,0,0.10);
         /* Phone slots are sized by the row itself, so the desktop cap and right-align both come off here. */
         max-width: 100% !important;
         margin-left: 0;
@@ -1086,9 +1165,7 @@ hemma_now_playing_primary:
         --np-pad-tb: 10px;
         --np-row-gap: 5px;
         --np-track-gap: 6px;
-        --np-elev-alpha: 0.10;
-        --np-elev-blur: 6px;
-        --np-elev-y: 1px;
+        --np-elevation: 0 1px 6px rgba(0,0,0,0.10);
         /* Slot width is owned by the row, as on portrait mobile. */
         max-width: 100% !important;
         margin-left: 0;

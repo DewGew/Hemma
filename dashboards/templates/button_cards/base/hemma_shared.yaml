@@ -36,8 +36,6 @@ hemma_shared:
         window.hemmaPreloadKey = preloadKey;
         window.hemmaPreloadedImages = [];
 
-        // decode() is the point: a display:none <img> is fetched but never decoded,
-        // and decode is the expensive half for a full-viewport hero.
         const warm = (src) => {
           const img = new Image();
           img.decoding = 'async';

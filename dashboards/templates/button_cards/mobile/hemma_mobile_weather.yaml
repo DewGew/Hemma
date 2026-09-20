@@ -14,6 +14,52 @@ hemma_mobile_weather:
   variables:
     weather_entity: null
     weather_temp_sensor: null
+    show_notifications: true
+    # Written by Hemma when it saves this layout, exactly as the wide one
+    # gates its settings dots. A YAML phone dashboard never gets one.
+    hemma_ui_managed: false
+
+    # Declared so Hemma's Notifications section reaches this layout too: the
+    # panel writes a dashboard-scoped key to every mobile template that
+    # DECLARES it, so a key missing here silently keeps its default on the
+    # phone while the wide layout obeys the switch.
+    notify_safety: true
+    notify_air: true
+    notify_locks: true
+    notify_alarm: true
+    notify_doorbell: true
+    notify_doors: true
+    notify_people: true
+    notify_vacuum: true
+    notify_appliances: true
+    notify_plants: true
+    notify_battery: true
+    notify_updates: true
+    notify_restart: true
+    notification_appliances: null
+    notification_appliance_timers: null
+    notification_co2_ppm: null
+    notification_open_minutes: null
+    notification_battery_threshold: null
+    # A helper (input_datetime, input_text or input_number) holding when
+    # notifications were last marked read. Set it and every surface shares
+    # one read state; leave it null and each browser keeps its own.
+    notification_read_entity: null
+
+    # One composer for both layouts - see hemma-core. force_eval so a change
+    # in Hemma lands on the next render instead of waiting for a reload.
+    hemma_notify_config:
+      force_eval: true
+      value: |
+        [[[
+          // Stash regardless: on a cold load this runs before hemma-core.js,
+          // and the module picks the stash up when it initializes. Without it
+          // a layout that renders once - the phone - never applied its
+          // switches at all.
+          window._hemmaNotifyCfg = variables;
+          if (window._hemmaNotify) window._hemmaNotify.configureFrom(variables);
+          return true;
+        ]]]
 
   name: >
     [[[
@@ -25,7 +71,7 @@ hemma_mobile_weather:
   extra_styles: |
     @keyframes titleFadeIn {
       from { opacity: 0; transform: translateY(4px); }
-      to   { opacity: 0.9; transform: translateY(0); }
+      to   { opacity: 1; transform: translateY(0); }
     }
     #name { animation: titleFadeIn 0.3s ease-out both; }
     ha-card.button-card-main {
@@ -38,6 +84,15 @@ hemma_mobile_weather:
 
 
   custom_fields:
+    notifications:
+      card:
+        type: custom:button-card
+        template: hemma_mobile_chrome
+        variables:
+          show_notifications: '[[[ return variables.show_notifications !== false ]]]'
+          show_edit: '[[[ return !!variables.hemma_ui_managed ]]]'
+          show_assist: '[[[ return variables.show_assist !== false ]]]'
+
     weather:
       card:
         type: custom:button-card
@@ -55,7 +110,7 @@ hemma_mobile_weather:
       - box-shadow: none
       - border: none
       - border-radius: 0
-      - padding: "52px var(--hemma-rail-left, 16px) 12px max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px))"
+      - padding: "calc(52px + var(--hemma-mobile-chrome-drop, 4px)) var(--hemma-rail-left, 16px) 12px max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px))"
       - margin: 0
       - "--button-card-ripple-color": transparent
       - "-webkit-tap-highlight-color": transparent
@@ -78,6 +133,20 @@ hemma_mobile_weather:
       - margin: 0
       - max-width: "calc(100% - 145px)"
     custom_fields:
+      notifications:
+        - display: >
+            [[[
+              const bell = variables.show_notifications !== false;
+              return (bell || variables.hemma_ui_managed) ? 'block' : 'none';
+            ]]]
+        - position: absolute
+        - top: var(--hemma-mobile-chrome-top, 0px)
+        - right: "var(--hemma-rail-left, 16px)"
+        # The capsule sizes to what it holds, so no width is set here.
+        - z-index: 2
+        - overflow: visible
+        - pointer-events: auto
+
       weather:
         - display: >
             [[[
@@ -85,7 +154,7 @@ hemma_mobile_weather:
               return f === 'all' ? 'block' : 'none';
             ]]]
         - position: absolute
-        - top: "calc(52px + var(--hero-room-name-size-current, 38px) * 0.6)"
+        - top: "calc(52px + var(--hemma-mobile-chrome-drop, 4px) + var(--hero-room-name-size-current, 38px) * 0.6)"
         - transform: translateY(-50%)
         - right: "var(--hemma-rail-left, 16px)"
         - z-index: 1

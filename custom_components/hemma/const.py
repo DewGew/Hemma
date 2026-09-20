@@ -5,23 +5,13 @@ from pathlib import Path
 
 DOMAIN = "hemma"
 
-# manifest.json is the single source of truth: HACS reads it to decide whether
-# an update is available, so anything that repeats the number can only drift
-# from what the user is actually running.
+# manifest.json is the single source of truth: HACS reads it.
 VERSION = json.loads(
     (Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
 )["version"]
 
 URL_BASE = "/hemma_panel"
 
-# The shared frontend scripts, served by the integration rather than from
-# /local. A Lovelace resource under /local is cached for 30 days, so the only
-# thing keeping it fresh was a hand-typed ?v= that nobody remembers - and a
-# stale hemma-core.js has cost real debugging time. Served with caching off,
-# so the URL is stable and a resource entry is set once and never bumped.
-#
-# Every other frontend module on a typical install already works this way:
-# HACS serves its cards from /hacsfiles with its own tag.
 SCRIPTS_URL_BASE = "/hemma_scripts"
 SCRIPTS_DIR = "www/hemma/scripts"
 
@@ -37,14 +27,14 @@ SHARED_SCRIPTS = (
     "filter-overlay.js",
 )
 
-# The integration is "Hemma" - it installs the whole product. This panel is the
-# place you go to build the dashboard, so it gets its own name and icon: the
-# dashboard is already in the sidebar as "Hemma" with mdi:home-heart, and two
-# identical entries is what shipped before.
+ASSETS_URL_BASE = "/hemma_assets"
+ASSETS_DIR = f"custom_components/{DOMAIN}/assets"
+USER_ASSETS_DIR = "www/hemma"
+
+# The panel keeps the url it was given in 2.0.5; only its title changed.
 PANEL_URL = "hemma-studio"
-PANEL_TITLE = "Hemma Studio"
+PANEL_TITLE = "Hemma"
 PANEL_ICON = "mdi:tablet-dashboard"
 
-# Registered at /hemma before the rename. Removed on setup so an upgrade does
-# not leave a dead second entry in the sidebar until the next restart.
+# Registered at /hemma before the rename, so setup removes the old one.
 LEGACY_PANEL_URL = "hemma"

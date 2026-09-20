@@ -23,6 +23,7 @@ hemma_energy:
     entity_usage_month: null
     entity_cost_today: null
     entity_cost_month: null
+    usage_shows: null
 
   icon_tap_action:
     action: more-info
@@ -48,8 +49,6 @@ hemma_energy:
     - operator: template
       value: |
         [[[
-          // Hysteresis: smart-row sorts off this state, so a sensor hovering at
-          // the trigger would reshuffle the row on every crossing. Release lower.
           const w = parseFloat(entity?.state);
           if (!Number.isFinite(w)) { this._hemmaEnergyActive = false; return false; }
           const on  = Number(variables.high_threshold ?? 500);
@@ -65,8 +64,6 @@ hemma_energy:
           - "--hemma-active-overlay-dur": "0s"
           - --hemma-entity-top-gradient: none
           - box-shadow: var(--button-card-box-shadow-active, var(--button-card-box-shadow)) !important
-          # A numeric power sensor never matches hemma_entity's active state, so
-          # the icon vars it would have set have to be set here.
           - --hemma-icon-color-current: var(--hemma-icon-inactive-color)
           - --hemma-icon-circle-bg: var(--hemma-icon-color-current)
           - --hemma-icon-mask-active: "0"

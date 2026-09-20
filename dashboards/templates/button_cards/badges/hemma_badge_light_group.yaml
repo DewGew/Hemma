@@ -1,15 +1,3 @@
-# Light Group Badge
-# Shows consolidated light status for multiple light entities.
-# Tap to expand/collapse the individual light sub-badges row
-# (driven by input_select.hemma_expanded_row).
-# Hold to open the light popup: per-light toggle, brightness, color temperature.
-#
-# Variables:
-#   enabled             - show/hide this badge (default: true)
-#   entity_1 - entity_8 - entity IDs of light entities to track
-#   light_group_entity  - the light group this badge shows (optional; falls back
-#                         to entity_1, then the badge's own entity). A room group
-#                         opens the whole-home popup filtered to that room.
 hemma_badge_light_group:
   template: [hemma_badge_base, hemma_popup_light]
 
@@ -29,6 +17,7 @@ hemma_badge_light_group:
     entity_7: null
     entity_8: null
     light_group_entity: null
+    popup_group: '[[[ return variables.light_group_entity || variables.entity_1 || null ]]]'
 
   show_state: false
   show_label: false
@@ -41,58 +30,6 @@ hemma_badge_light_group:
       [[[
         return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
-    hemma_popup:
-      title: ""
-      dismissable: true
-      style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
-      popup_styles:
-        - style: all
-          styles: |
-            .content .container > * {
-              width: 100% !important;
-              max-width: none !important;
-              box-sizing: border-box !important;
-            }
-            .content .container {
-              scrollbar-width: none;
-              overscroll-behavior: contain;
-              touch-action: pan-y;
-              padding-bottom: 24px !important;
-            }
-            .content .container::-webkit-scrollbar {
-              display: none;
-            }
-            @media (max-width: 768px) {
-            wa-drawer {
-                --size: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-                height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-            }
-            .content .container {
-                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-            }
-            wa-drawer.hemma-h-auto {
-                --size: var(--ha-bottom-sheet-height, auto) !important;
-                height: auto !important;
-                min-height: 0 !important;
-            }
-            wa-drawer.hemma-h-auto .content .container {
-                min-height: 0 !important;
-            }
-            }
-      content: |
-        [[[
-          const groupId = variables?.light_group_entity || variables?.entity_1 || entity?.entity_id || null;
-          const _h = typeof hass !== 'undefined' ? hass : null;
-          if (typeof window._hemmaLPC === 'function') {
-            return window._hemmaLPC(entity, states, _h, {
-              popup_group: groupId,
-              lights: [],
-              group_rooms: true,
-            });
-          }
-          return null;
-        ]]]
 
   tap_action:
     action: call-service
@@ -116,8 +53,6 @@ hemma_badge_light_group:
           (typeof v === 'number') ? v !== 0 :
           !['false','0','no','off','disabled'].includes(String(v).trim().toLowerCase());
         if (!enabled) return 'none';
-        // The group on its own is enough to show the pill; it does not need the
-        // members listed out as entity_1..8 as well.
         const eids = [
           variables?.light_group_entity,
           variables?.entity_1, variables?.entity_2, variables?.entity_3, variables?.entity_4,
@@ -173,8 +108,6 @@ hemma_badge_light_group:
               (typeof v === 'number') ? v !== 0 :
               !['false','0','no','off','disabled'].includes(String(v).trim().toLowerCase());
             if (!enabled) return 'none';
-            // The group on its own is enough to show the pill; it does not need the
-            // members listed out as entity_1..8 as well.
             const eids = [
               variables?.light_group_entity,
               variables?.entity_1, variables?.entity_2, variables?.entity_3, variables?.entity_4,

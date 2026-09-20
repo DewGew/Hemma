@@ -1,60 +1,3 @@
-# Base Entity Card
-# Foundation template for every non-badge entity card (thermostat, light,
-# media, lock, etc. all build on this). Provides:
-#   - Active-state detection and styling (icon tint/circle color by domain,
-#     name/state color, active box-shadow) - extend via variables.active_states
-#   - Icon color system: byIcon/byDomain color maps keyed on variables.icon /
-#     entity domain, applied as a CSS mask so a single SVG can be recolored
-#     without separate active/inactive art
-#   - Optional toggle switch, battery-low indicator, and progress ring
-#     custom fields (see variables below)
-#   - Page-load entry animation, staggered off --hemma-position-index (set by
-#     hemma-smart-row on each card's wrapper from its cards: list order)
-#
-# Variables:
-#   size                    - 'small' (default) or 'large'. Phones only: small is the
-#                             compact tile (icon left, name/state right, one grid
-#                             row), large is the stacked card spanning two rows.
-#   icon                   - icon name, resolved via window.hemmaIconUrl() from the
-#                            inline map in hemma-icons.js. Source SVGs live at
-#                            /local/hemma/icons/<icon>.svg and are only fetched for
-#                            icons missing from the map; see that file to add one.
-#   active_states           - extra entity states (beyond the built-in defaults)
-#                            that should count as "active"
-#   show_when               - 'always' (default) or 'active'. 'active' takes the tile
-#                            off the dashboard while `idle` is true, so a tile with
-#                            nothing to report is not there to be read. Hiding the
-#                            HOST is what smart-row watches, the same as enabled.
-#   idle                    - the card template's own "nothing to report" test, read
-#                            only when show_when is 'active'. It is declared on the
-#                            card template because the active rule it mirrors is.
-#   icon_never_masked       - skip the CSS mask-tint (default: false); always render
-#                            the raw entity_picture <img> instead. Use for icon art
-#                            that needs crisp per-state renders (e.g. a colored "on"
-#                            SVG and a separate plain "off" SVG) rather than relying
-#                            on the mask to recolor a single shape - CSS masking a
-#                            shape with fine diagonal edges can look jagged/aliased.
-#   battery_entity          - battery sensor shown as a low-battery icon
-#   battery_low_threshold   - % at/below which the battery icon appears (default: 20)
-#   show_toggle             - show a toggle switch custom field
-#   toggle_entity            - entity to toggle (defaults to the card's own entity)
-#   toggle_service           - override service (defaults to homeassistant.toggle,
-#                              or lock.lock/unlock for lock entities)
-#   toggle_service_data      - override service_data for the toggle
-#   show_progress            - show a circular progress ring custom field
-#   progress_entity          - entity whose state/attributes drive the ring
-#   progress_value           - explicit 0-100 value (skips auto-detection)
-#   progress_active_states   - states where the ring is shown (default: playing,
-#                              cleaning, running, etc. - see below)
-#   mobile_filter_category   - which mobile filter chip this card belongs to
-#                              (lights/climate/media/energy/security), or
-#                              'unfiltered' for a card that belongs to no chip
-#                              and so hides whenever any filter is active - not
-#                              "always show", which is what null does. Read in JS
-#                              by hemma-smart-row and filter-overlay.js, which
-#                              fall back to their own template-name → category
-#                              maps when it is null. Set it on the card template
-#                              (hemma_light, hemma_cover, …), not per card.
 hemma_entity:
   template:
     - hemma_default
@@ -87,6 +30,7 @@ hemma_entity:
     enabled: true
     show_when: always  # always | active: active takes the tile off the dashboard while idle is true
     idle: false  # set by the card template that owns the active rule
+    active_override: null
     show_toggle: false
     toggle_entity: null
     toggle_service: null
@@ -222,7 +166,7 @@ hemma_entity:
 
     ha-card {
       --hemma-height-mq: var(--hemma-entity-height-current, var(--hemma-entity-height-desktop, 200px));
-      --hemma-box-shadow-mq: var(--hemma-tile-glass-rim, inset 0 1px 0 -0.5px rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.10));
+      --hemma-box-shadow-mq: var(--hemma-tile-glass-rim-desktop, var(--hemma-tile-glass-rim, inset 0 1px 0 -0.5px rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.10)));
       /* Sized off the icon circle: two balanced circles in opposite corners. Ratio, not a
          literal, so it tracks the card automatically. Visible ring is 32/36 of this (r14 +
          stroke 4 in a 36 viewBox), i.e. ~0.8x the icon circle. */
@@ -317,6 +261,8 @@ hemma_entity:
 
     @media (max-width: 767px), (max-height: 600px) {
       ha-card {
+        /* Phone tiles stay flat: drop the desktop rim, not just dim it. */
+        --hemma-box-shadow-mq: var(--hemma-tile-glass-rim, inset 0 1px 0 -0.5px rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.10));
         --hemma-toggle-width: calc(40px * var(--hemma-toggle-scale, 1));
         --hemma-progress-icon-ratio: 0.8;
         --hemma-entity-active-tint-current: var(--hemma-entity-active-tint-mobile, var(--hemma-entity-active-tint, rgba(255,255,255,1)));
@@ -473,7 +419,7 @@ hemma_entity:
     toggle:
       card:
         type: custom:button-card
-        entity: '[[[ return entity.entity_id ]]]'
+        entity: '[[[ return entity?.entity_id ]]]'
         show_name: false
         show_state: false
         show_icon: false
@@ -483,13 +429,20 @@ hemma_entity:
             [[[
               if (variables.toggle_service) return variables.toggle_service;
 
-              const target = variables.toggle_entity || entity.entity_id;
-              const state = (states[target]?.state || entity.state || '').toLowerCase();
+              const target = variables.toggle_entity || entity?.entity_id || '';
+              const state = (states[target]?.state || entity?.state || '').toLowerCase();
+              if (state === 'unavailable' || state === 'unknown') return 'none';
 
               if (target.startsWith('lock.')) {
                 if (state === 'locked') return 'lock.unlock';
                 if (state === 'unlocked') return 'lock.lock';
                 return 'none';
+              }
+
+              if (target.startsWith('media_player.')) {
+                const feats = Number(states[target]?.attributes?.supported_features || 0);
+                if (state === 'off') return (feats & 128) ? 'media_player.turn_on' : 'none';
+                return (feats & 256) ? 'media_player.turn_off' : 'none';
               }
 
               return 'homeassistant.toggle';
@@ -499,7 +452,7 @@ hemma_entity:
               if (variables.toggle_service_data) return variables.toggle_service_data;
 
               return {
-                entity_id: variables.toggle_entity || entity.entity_id
+                entity_id: variables.toggle_entity || entity?.entity_id
               };
             ]]]
         custom_fields:
@@ -517,7 +470,7 @@ hemma_entity:
                 ].join('');
                 document.head.appendChild(s);
               }
-              const toggleTarget = variables.toggle_entity || entity.entity_id;
+              const toggleTarget = variables.toggle_entity || entity?.entity_id || '';
               const toggleState = (states[toggleTarget]?.state || entity?.state || "").toLowerCase();
               const activeStates = ["on","open","opening","playing","unlocked","unlocking","cleaning","returning","cool","heat"];
               const extraStates = Array.isArray(variables.active_states) ? variables.active_states.map(v => String(v).toLowerCase()) : [];
@@ -526,17 +479,15 @@ hemma_entity:
               const W = mob ? 38 : 44, H = mob ? 26 : 26, r = mob ? 8 : 9, cx0 = mob ? 14 : 14;
               const SW = W + 2;
               const travel = mob ? 12 : 18;
-              const stateKey = '_hemma_toggle_' + entity.entity_id;
+              const stateKey = '_hemma_toggle_' + (entity?.entity_id || '');
               const shouldAnimate = window[stateKey] !== undefined && window[stateKey] !== isOn;
               window[stateKey] = isOn;
               const anim = isOn ? (mob ? 'hemma-thumb-on-m' : 'hemma-thumb-on-d') : (mob ? 'hemma-thumb-off-m' : 'hemma-thumb-off-d');
               const animStyle = shouldAnimate ? `animation:${anim} 0.2s ease forwards;` : '';
               const circleCx = (!shouldAnimate && isOn) ? cx0 + travel : cx0;
-              const mid = 'htm-' + entity.entity_id.replace(/[^a-z0-9]/gi, '-');
+              const mid = 'htm-' + (entity?.entity_id || '').replace(/[^a-z0-9]/gi, '-');
               const trackFillVar = getComputedStyle(document.documentElement).getPropertyValue('--hemma-toggle-track-fill').trim();
               const trackFill = trackFillVar || 'rgba(255,255,255,0.85)';
-              // Var, not a literal: an active card's surface goes white on desktop/tablet too, not just mobile,
-              // so this always defers to the theme's dark-ink token (see --hemma-toggle-off-color).
               const offColor = 'var(--hemma-toggle-off-color, rgba(255,255,255,0.8))';
               if (isOn) {
                 return `<svg viewBox="0 0 ${SW} ${H}" style="display:block;width:100%;height:100%;overflow:visible;"><defs><mask id="${mid}"><rect x="2" y="1" width="${W-2}" height="${H-2}" rx="${(H-2)/2}" fill="white"/><circle cx="${circleCx}" cy="${H/2}" r="${r}" fill="black" style="${animStyle}"/></mask></defs><rect x="2" y="1" width="${W-2}" height="${H-2}" rx="${(H-2)/2}" fill="${trackFill}" mask="url(#${mid})"/></svg>`;
@@ -655,8 +606,6 @@ hemma_entity:
           }
         }
 
-        // Two rounded bars / a rounded triangle, both inside r12 (the stroke's inner edge)
-        // and about a third of the ring's diameter, matching Apple's glyph-to-ring ratio.
         const GLYPHS = {
           pause: '<rect class="hemma-progress-glyph" x="14" y="13" width="2.6" height="10" rx="1.3"/>'
                + '<rect class="hemma-progress-glyph" x="19.4" y="13" width="2.6" height="10" rx="1.3"/>',
@@ -668,10 +617,8 @@ hemma_entity:
         if (glyph && svc) {
           const [d, sv] = svc.split('.');
           const stop = 'event.stopPropagation();event.stopImmediatePropagation();';
-          // onclick only for the action: click fires after touchend, so binding both would
-          // toggle twice and cancel itself out. pointerdown/touchstart only stop the card tap.
           const act = stop + "document.querySelector('home-assistant').hass.callService('"
-                    + d + "','" + sv + "',{entity_id:'" + entity.entity_id + "'});";
+                    + d + "','" + sv + "',{entity_id:'" + entity?.entity_id + "'});";
           inner = `<g style="cursor:pointer;pointer-events:auto;" onpointerdown="${stop}" ontouchstart="${stop}" onclick="${act}">`
                 + `<circle cx="18" cy="18" r="12" fill="transparent"/>${GLYPHS[glyph]}</g>`;
         }
@@ -685,8 +632,6 @@ hemma_entity:
         </svg>`;
       ]]]
 
-  # 'none' binds no icon handler at all, so the tap falls through to the card
-  # and the popup still opens.
   icon_tap_action:
     action: |
       [[[ return variables.show_toggle ? 'call-service' : 'none'; ]]]
@@ -694,13 +639,20 @@ hemma_entity:
       [[[
         if (variables.toggle_service) return variables.toggle_service;
 
-        const target = variables.toggle_entity || entity.entity_id;
-        const state = (states[target]?.state || entity.state || '').toLowerCase();
+        const target = variables.toggle_entity || entity?.entity_id || '';
+        const state = (states[target]?.state || entity?.state || '').toLowerCase();
+        if (state === 'unavailable' || state === 'unknown') return 'none';
 
         if (target.startsWith('lock.')) {
           if (state === 'locked') return 'lock.unlock';
           if (state === 'unlocked') return 'lock.lock';
           return 'none';
+        }
+
+        if (target.startsWith('media_player.')) {
+          const feats = Number(states[target]?.attributes?.supported_features || 0);
+          if (state === 'off') return (feats & 128) ? 'media_player.turn_on' : 'none';
+          return (feats & 256) ? 'media_player.turn_off' : 'none';
         }
 
         return 'homeassistant.toggle';
@@ -710,7 +662,7 @@ hemma_entity:
         if (variables.toggle_service_data) return variables.toggle_service_data;
 
         return {
-          entity_id: variables.toggle_entity || entity.entity_id
+          entity_id: variables.toggle_entity || entity?.entity_id
         };
       ]]]
 
@@ -731,6 +683,10 @@ hemma_entity:
     - operator: template
       value: |
         [[[
+          if (variables.active_override !== null && variables.active_override !== undefined) {
+            return !!variables.active_override;
+          }
+
           const defaults = ["on","open","opening","unlocked","unlocking","playing","cleaning","returning","cool","heat","washing","rinsing","spinning","drying","running","active","problem"];
           const extra = Array.isArray(variables.active_states) ? variables.active_states.map(v => String(v).toLowerCase()) : [];
           const activeStates = [...defaults, ...extra];
@@ -762,8 +718,6 @@ hemma_entity:
               [[[
                 const icon   = variables.icon || '';
                 const domain = (entity?.entity_id || '').split('.')[0];
-                // Energy follows the same Idle/Normal/Heavy/Extreme tier as its popup
-                // and sub-badges, off the popup's own power entity.
                 if (icon === 'energy' || icon === 'power') {
                   const pid = variables.entity_power || entity?.entity_id;
                   const w = parseFloat(states[pid]?.state);
@@ -787,21 +741,21 @@ hemma_entity:
                   vacuum:       'var(--hemma-color-teal, #00C3D0)',
                   cover:        'var(--hemma-color-teal, #00c3d0)',
                   media_player: 'var(--hemma-color-teal, #00c3d0)',
-                  lock:         entity.state === 'unlocking' ? 'var(--hemma-color-yellow, #FFCC00)' : 'var(--hemma-color-teal, #00c3d0)',
+                  lock:         entity?.state === 'unlocking' ? 'var(--hemma-color-yellow, #FFCC00)' : 'var(--hemma-color-teal, #00c3d0)',
                   plant:        'var(--hemma-color-yellow, #FFCC00)',
                 };
                 return byIcon[icon] || byDomain[domain] || 'var(--hemma-icon-fallback-color, rgba(255,255,255,0.95))';
               ]]]
           - --hemma-icon-svg-url: |
               [[[
-                const pic = entity.attributes.entity_picture || '';
+                const pic = entity?.attributes?.entity_picture || '';
                 if (pic && pic.startsWith('/local/')) return `url('${pic}')`;
                 const icon = variables.icon || 'default';
                 return `url('${window.hemmaIconUrl(icon)}')`;
               ]]]
           - --hemma-icon-use-mask: |
               [[[
-                const pic = entity.attributes.entity_picture || '';
+                const pic = entity?.attributes?.entity_picture || '';
                 if (pic && (pic.startsWith('/api/') || pic.startsWith('http'))) return '0';
                 return '1';
               ]]]
@@ -873,8 +827,6 @@ hemma_entity:
             const icon   = variables.icon || '';
             const domain = (entity?.entity_id || '').split('.')[0];
             if (domain === 'media_player') return 'var(--hemma-icon-inactive-fallback-color, rgba(255,255,255,0.95))';
-            // Energy follows the same Idle/Normal/Heavy/Extreme tier as its popup
-            // and sub-badges, off the popup's own power entity.
             if (icon === 'energy' || icon === 'power') {
               const pid = variables.entity_power || entity?.entity_id;
               const w = parseFloat(states[pid]?.state);
@@ -929,7 +881,7 @@ hemma_entity:
             let v = variables.progress_value;
 
             if (v === null || v === undefined) {
-              const target = variables.progress_entity || entity.entity_id;
+              const target = variables.progress_entity || entity?.entity_id;
               const st = states[target];
 
               if (!st) return 0;
@@ -1001,6 +953,13 @@ hemma_entity:
         - display: |
             [[[
               if (!variables.show_toggle) return 'none';
+              const target = variables.toggle_entity || entity?.entity_id || '';
+              const tState = (states[target]?.state || entity?.state || '').toLowerCase();
+              if (tState === 'unavailable' || tState === 'unknown') return 'none';
+              if (target.startsWith('media_player.')) {
+                const feats = states[target]?.attributes?.supported_features;
+                if (typeof feats === 'number' && !(feats & 384)) return 'none';
+              }
               if (variables.show_progress) {
                 const activeStates = variables.progress_active_states || [];
                 const s = (entity?.state || '').toLowerCase();

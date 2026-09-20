@@ -4,7 +4,7 @@
 
 A modern, mobile-friendly dashboard for Home Assistant, built and configured from a UI.
 
-Hemma installs as an integration and adds **Hemma Studio** to your sidebar. You pick your rooms and entities there, press Save, and Hemma writes the dashboard. There is no dashboard YAML to write and no card configuration to paste.
+Hemma installs as an integration and adds **Hemma** to your sidebar. You pick your rooms and entities there, press Save, and Hemma writes the dashboard. There is no dashboard YAML to write and no card configuration to paste.
 
 You get two dashboards from one setup: a desktop and tablet layout, and a dedicated mobile dashboard inspired by Apple Home. Phones are routed to the mobile one automatically.
 
@@ -24,6 +24,9 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 <img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/96b0a526-62aa-450b-b0a4-dd1cbf6ba4af" />
 
 ### Popups
+
+Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
+
 <img width="615" height="361" alt="lights" src="https://github.com/user-attachments/assets/eda0853b-8e49-459a-a4d2-010ef335ec4d" />
 <img width="615" height="668" alt="aqi" src="https://github.com/user-attachments/assets/2356570c-18be-4234-88f6-85d8d18dfb9e" />
 <img width="615" height="513" alt="energy" src="https://github.com/user-attachments/assets/1e24e4ae-e8ed-4dfa-a6dc-10d05b27c2bc" />
@@ -43,8 +46,14 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
   ```
 
 - A time sensor for the clock on each room card. Settings > Devices & Services > **Add Integration > Date & time**, and enable the "Time" sensor.
+- **Packages enabled.** Hemma's badges, filter pills and overlays are driven by helper entities that ship in `packages/hemma_helpers.yaml`. Home Assistant only loads that folder when `configuration.yaml` says so:
 
-Hemma Studio checks for everything below on first open and links you straight to each one, so you do not need to collect them up front.
+  ```yaml
+  homeassistant:
+    packages: !include_dir_named packages
+  ```
+
+Hemma checks for everything below on first open and links you straight to each one, so you do not need to collect them up front.
 
 | From HACS | Why | |
 | --- | --- | --- |
@@ -53,7 +62,7 @@ Hemma Studio checks for everything below on first open and links you straight to
 | [apexcharts-card](https://github.com/RomRider/apexcharts-card) | the energy and climate charts | optional |
 | [bar-card](https://github.com/spacerokk/bar-card) | the plant and battery popups | optional |
 
-Studio will not let you build a dashboard without the two marked required. The
+Hemma will not let you build a dashboard without the two marked required. The
 optional two only affect the popups named beside them.
 
 ---
@@ -72,6 +81,11 @@ Hemma's icons, fonts, room images and theme live in your config folder. From thi
 
 - `www/hemma/` into `/config/www/hemma/`
 - `themes/hemma/` into `/config/themes/hemma/`
+- `packages/hemma_helpers.yaml` into `/config/packages/`
+
+Without the last one, tapping a badge group throws a service-call error and the
+phone's filter pills do nothing. Hemma keeps the room list in it up to date for
+you once your dashboard is saved; you never edit that file by hand.
 
 ### 3. Restart Home Assistant
 
@@ -90,7 +104,7 @@ If Hemma is not in the list, the `frontend: themes:` line above is missing from
 
 ### 6. Build your dashboard
 
-Open **Hemma Studio** in the sidebar and choose **Create dashboard**. Add a room, point it at your entities, and press Save. Repeat for each room.
+Open **Hemma** in the sidebar and choose **Create dashboard**. Add a room, point it at your entities, and press Save. Repeat for each room.
 
 Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, scenes and Now Playing whenever you like.
 
@@ -100,18 +114,20 @@ Everything is optional. A room with nothing but a light group is a valid room, a
 
 Your existing YAML dashboard keeps working. Nothing is removed or rewritten.
 
-To move it into Studio:
+To move it into Hemma:
 
 1. Install the integration as above.
-2. Open Hemma Studio and choose **Import from YAML**.
-3. Pick your existing Hemma dashboard. Studio reads your rooms, entities and badges, and shows you what it found before it writes anything.
+2. Open Hemma and choose **Import from YAML**.
+3. Pick your existing dashboard. Hemma reads your rooms, entities and badges, and shows you what it found before it writes anything.
 
 The import creates a **new** dashboard and leaves the original untouched, so you can compare the two and switch over when you are happy.
 
-Two things changed in 2.1 that are worth knowing:
+Four things changed in 2.1 that are worth knowing:
 
 - **browser_mod is no longer required.** Every popup is now Hemma's own. You can remove it if nothing else uses it.
+- **navbar-card is no longer required**, replaced by Hemma's own `hemma-nav`.
 - **Dashboard resources moved.** Hemma now serves its scripts itself and registers them for you. Entries still pointing at `/local/hemma/scripts/` are repointed automatically on first setup. If you see a warning in the log about a resource Hemma no longer ships, remove that one entry by hand.
+- **Weather appears only where you configured it.** The weather entity used to be remembered per browser rather than per dashboard, so a second dashboard could draw the first one's forecast. If a dashboard has been showing weather you never set up there, it stops after upgrading.
 
 ---
 
@@ -129,7 +145,7 @@ Two things changed in 2.1 that are worth knowing:
 
 ## Writing your own YAML
 
-Hemma is still a YAML dashboard underneath, and everything Studio writes you can also write by hand. Custom templates, hand-built views and per-card overrides all keep working.
+Hemma is still a YAML dashboard underneath, and everything it writes you can also write by hand. Custom templates, hand-built views and per-card overrides all keep working.
 
 See **[docs/ADVANCED.md](docs/ADVANCED.md)** for the folder layout, template variables, and the full card reference.
 

@@ -146,8 +146,6 @@ hemma_popup_plant:
 
           const getThreshold = (type, dir) => {
             if (!type || type === 'battery' || !_plantName) return null;
-            // Plant Monitor entities use "soil_moisture"/"air_humidity" on newer
-            // installs, bare type name on older ones - try both.
             const slug = type === 'moisture' ? 'soil_moisture'
               : type === 'humidity' ? 'air_humidity'
               : type;
@@ -392,8 +390,6 @@ hemma_popup_plant:
               { labelInside: true }));
             if (!sensors.length) add('none', UI.note('No plant sensors configured'));
 
-            // overflow: visible or the field wrapper's ellipsis class clips the
-            // plate's shadow into a hard rectangle; the delay is the stagger.
             areas.forEach((a, i) => {
               const key = a.replace(/"/g, '');
               if (fstyle[key]) {
@@ -407,10 +403,6 @@ hemma_popup_plant:
               entity: plant,
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,
-              // The theme sets will-change: filter, transform on every ha-card,
-              // and that makes every backdrop-filter inside it inert - the frost
-              // is asked for and then has nothing to sample. Every widget popup
-              // has to opt its wrapper out.
               card_mod: { style: contentCardStyle
                 + '\nha-card { will-change: auto !important; }' },
               styles: {

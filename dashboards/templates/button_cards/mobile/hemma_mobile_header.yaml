@@ -35,8 +35,6 @@ hemma_mobile_header:
   tap_action:
     action: |
       [[[
-        // Favorites has no matching popup - never tappable, no hide_caret
-        // variable needed to say so.
         if (this._config?.name === 'Favorites') return 'none';
         const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
         const roomKey = variables.room_key || (!variables.hide_caret && slug ? 'room_' + slug : null);

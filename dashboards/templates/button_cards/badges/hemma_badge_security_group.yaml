@@ -1,12 +1,3 @@
-# Security Badge
-# Shows consolidated lock status for up to two locks. The sub-line reads like
-# Apple's category badge: "No Alerts" at rest, a count when something is open.
-#
-# Variables:
-#   enabled       - show/hide this badge (default: true)
-#   locks         - list of lock entity_ids; wins over the two scalars below
-#   lock_entity   - primary lock entity_id
-#   lock_entity_2 - second lock entity_id (optional)
 hemma_badge_security_group:
   template: [hemma_badge_base]
 

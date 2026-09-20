@@ -656,12 +656,6 @@ hemma_climate_popup:
           const climateYAxis = [];
           const climateSeries = [];
           if (tempId) {
-            // align_to rounds the ends and stepSize spaces the ticks; they have to be
-            // the same number. apexcharts-card writes a concrete min and max from the
-            // data before Apex sees the axis, so forceNiceScale never runs and
-            // tickAmount just halves whatever range it got: 0/83/166, 0/375/750,
-            // 81/82/84. With both ends on a multiple of the step Apex takes stepSize
-            // and every label is a multiple of it. tickAmount must stay off, it wins.
             climateYAxis.push({ id: 'temp', align_to: 5, show: true, apex_config: { stepSize: 5, decimalsInFloat: 0, floating: true, labels: { offsetX: 4, offsetY: -8, align: 'left', style: { colors: 'rgba(255,255,255,0.42)', fontSize: '11px', fontFamily: 'var(--primary-font-family, system-ui)' } } } });
             climateSeries.push({
               entity: tempId,
@@ -677,8 +671,6 @@ hemma_climate_popup:
             });
           }
           if (humidId) {
-            // Hidden: a percent scale opposite a degree scale puts numbers down
-            // both edges. Humidity still plots; the legend carries its value.
             climateYAxis.push({ id: 'humid', show: false });
             climateSeries.push({
               entity: humidId,
@@ -719,27 +711,12 @@ hemma_climate_popup:
               },
               theme: { mode: 'dark' },
               stroke: { curve: 'smooth', width: 2.5, lineCap: 'round' },
-              // Apple's charts are charts: a labeled scale, time along the
-              // bottom, faint horizontal rules, on a ground dark enough to read
-              // them against. Without those this was a sparkline claiming to be
-              // informative - a curve you cannot take a number off.
               grid: {
                 show: true,
                 borderColor: 'rgba(255,255,255,0.10)',
                 strokeDashArray: 0,
                 xaxis: { lines: { show: false } },
                 yaxis: { lines: { show: true } },
-                // Measured, not guessed. A floating y label is drawn from the
-                // CHART's left edge, not the plot's, so grid.padding never moved
-                // it: at offsetX 6 the widest label ("1000") started at -2px,
-                // outside the card. offsetX 42 puts the right edge of the number
-                // column at 44px in, on every popup, and padding.left 56 starts
-                // the plot 12px past it. padding.right 8 leaves room for the last
-                // time label to sit inside the content edge instead of past it.
-                // Full bleed. The plot runs the card's whole inner width and the
-                // numbers move inside it, left-aligned at the plot's own left
-                // edge so their position no longer moves with the digit count,
-                // and lifted 8px so no gridline crosses a digit.
                 padding: { left: 0, right: 0, top: -6, bottom: -4 },
               },
               xaxis: {
@@ -972,10 +949,6 @@ hemma_climate_popup:
             if (t != null) bits.push(Math.round(t) + tUnit);
             if (h != null) bits.push(Math.round(h) + '% humidity');
 
-            // The chip sat beside the value and, on a phone, landed on top of
-            // the sub-line. The advice IS the sub-line now, and the two
-            // readings move to a legend under the chart they are drawn in -
-            // where their colors mean something.
             const metricAreas = [], metricFields = {}, metricStyle = {};
             const addMetric = (n2, html) => {
               metricAreas.push('"' + n2 + '"');
@@ -1010,11 +983,6 @@ hemma_climate_popup:
               addMetric('legend', UI.legend(legendSeries));
             }
 
-            // Identity, not severity: the tile says what the sensor measures and
-            // never changes with the reading. The reading's own color, on the
-            // right, is the only thing that moves. Particulates share an icon
-            // and a hue because they are one family - telling PM 2.5 from PM 10
-            // is the label's job, not the color's.
             const sensorGlyph = (eid) => {
               const id = (eid || '').toLowerCase();
               const dc = (states[eid]?.attributes?.device_class || '').toLowerCase();
@@ -1029,7 +997,7 @@ hemma_climate_popup:
                   || dc.includes('volatile_organic')) {
                 return { icon: 'mdi:air-filter', tone: 'var(--hemma-color-purple, #9333ea)' };
               }
-              return { icon: 'mdi:air-filter', tone: 'var(--hemma-color-blue, #0088FF)' };
+              return { icon: 'mdi:air-filter', tone: 'var(--hemma-color-blue, #0A84FF)' };
             };
 
             const readings = sensors.map((eid) => {
@@ -1062,8 +1030,6 @@ hemma_climate_popup:
               type: 'custom:button-card',
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,
-              // Its own keyframes: an animation name resolves in the element's
-              // own tree scope, and this card is a shadow root of its own.
               extra_styles: '@keyframes hemma-plate-hold { from, to { opacity: 0; } }'
                 + ' @keyframes hemma-plate-in {'
                 + ' from { opacity: 0; transform: perspective(900px) translateZ(-70px); }'
@@ -1090,15 +1056,8 @@ hemma_climate_popup:
                   + ' box-shadow: var(--hemma-popup-plate-shadow, none) !important;'
                   + ' backdrop-filter: var(--hemma-popup-plate-backdrop, none) !important;'
                   + ' -webkit-backdrop-filter: var(--hemma-popup-plate-backdrop, none) !important;'
-                  // visible, or a tooltip near the top of the chart is clipped
-                  // by the card holding it. The content is inset by the card's
-                  // padding, so nothing reaches the rounded corners anyway.
                   + ' overflow: visible !important;'
                   + ' will-change: auto !important; cursor: default !important; }',
-                // The plate hands its own shadow to the theme's hover rule via
-                // --hemma-card-hover-shadow, and custom properties inherit - so
-                // the chart card nested inside it was painting that shadow around
-                // the graph. Stood back down for everything under the plate.
                 '#container > * { --hemma-card-hover-shadow: none !important;'
                   + ' --button-card-box-shadow-hover: none !important; }',
                 'ha-card::before, ha-card::after { display: none !important; }',
@@ -1123,14 +1082,10 @@ hemma_climate_popup:
               },
               custom_fields: metricFields,
             };
-            // First, not last: the wrapper is built after the groups because it
-            // needs graphCard, but it belongs at the top of the popup.
             areas.unshift('"metric"');
             fields.metric = { card: metricCard };
             fstyle.metric = [{ 'justify-self': 'stretch' }, { overflow: 'visible' }];
 
-            // areas is the visual order; fstyle's own key order is not, because
-            // metric is unshifted in after read was already added.
             areas.forEach((a, i) => {
               const key = a.replace(/"/g, '');
               if (fstyle[key]) {
@@ -1141,24 +1096,8 @@ hemma_climate_popup:
 
             const uiCard = {
               type: 'custom:button-card',
-              // Transparent, or this nested ha-card lays a second
-              // backdrop-filter over the popup's own and the block it
-              // covers reads a shade off from everything around it.
               card_mod: { style: contentCardStyle
                 + '\nha-card { will-change: auto !important; }' },
-              // Each widget arrives on its own, from behind the sheet's plane.
-              // perspective + translateZ rather than scale: scale reads as a
-              // zoom, translateZ reads as depth, which is the point when the
-              // surfaces are meant to be objects in a room. No blur ramp - a
-              // filter on the plate would knock out the frost it is animating
-              // in with.
-              //
-              // The wrappers carry the stagger only, as a delay each widget reads
-              // for itself. They must never animate: an animated opacity on an
-              // ANCESTOR paints the subtree into its own layer, and every
-              // backdrop-filter inside it has nothing left to sample - which is
-              // the frost dropping out for the length of the entrance. Measured
-              // both ways; an ancestor transform is fine, opacity is not.
               entity: qualId,
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,

@@ -1,0 +1,105 @@
+hemma_assist_button:
+  show_icon: false
+
+  variables:
+    hemma_icon_url_guard:
+      force_eval: true
+      value: |
+        [[[
+          if (typeof window.hemmaIconUrl !== 'function') {
+            window.hemmaIconUrl = (name) =>
+              (window.HEMMA_ICONS && window.HEMMA_ICONS[name]) ||
+              `/local/hemma/icons/${name}.svg`;
+          }
+          return true;
+        ]]]
+    shown: true
+
+  tap_action:
+    action: javascript
+    javascript: |
+      [[[
+        // HA's root element owns the hass-action listener; a pinned capsule can live outside its tree.
+        const root = document.querySelector('home-assistant') || this;
+        root.dispatchEvent(new CustomEvent('hass-action', {
+          bubbles: true, composed: true,
+          detail: { config: { tap_action: { action: 'assist' } }, action: 'tap' },
+        }));
+      ]]]
+
+  hold_action: { action: none }
+  double_tap_action: { action: none }
+
+  custom_fields:
+    glyph: >
+      [[[
+        return `<img class="hemma-assist" src="${window.hemmaIconUrl('assist-fill')}"
+          alt="" aria-hidden="true">`;
+      ]]]
+
+  styles:
+    card:
+      - --hemma-assist-vis: '[[[ return variables.shown ? "grid" : "none" ]]]'
+      - padding: 0
+      - background: transparent
+      - box-shadow: none !important
+      - border: none !important
+      - cursor: pointer
+    custom_fields:
+      glyph:
+        - display: grid
+        - place-items: center
+        - line-height: 0
+
+  extra_styles: |
+    :host{
+      --button-card-ripple-color: transparent !important;
+      --button-card-ripple-hover-color: transparent !important;
+      --ha-ripple-color: transparent !important;
+      --ha-ripple-hover-color: transparent !important;
+      --mdc-ripple-press-opacity: 0 !important;
+    }
+    :host ha-ripple,
+    :host mwc-ripple{ display: none !important; }
+    :host{
+      display: grid !important;
+      place-items: center !important;
+      position: relative !important;
+      width: var(--hemma-chrome-btn-size, 34px) !important;
+      height: var(--hemma-chrome-btn-size, 34px) !important;
+      color: #fff !important;
+      pointer-events: auto !important;
+    }
+    :host ha-card{
+      display: var(--hemma-assist-vis, none) !important;
+      position: relative !important;
+      width: var(--hemma-chrome-btn-size, 34px) !important;
+      height: var(--hemma-chrome-btn-size, 34px) !important;
+      border-radius: 50% !important;
+      place-items: center !important;
+      background: var(--hemma-assist-fill, var(--hemma-chrome-fill, rgba(0,0,0,0.40))) !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      box-shadow: none !important;
+      transition: background 180ms cubic-bezier(.32,.72,0,1) !important;
+    }
+    :host .vertical,
+    :host .ellipsis,
+    :host .custom-field,
+    :host .custom-field-glyph{ overflow: visible !important; }
+    /* Height only: the viewBox is wider than tall, so fixing both squashes it. */
+    :host .hemma-assist{
+      position: absolute !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) !important;
+      height: var(--hemma-assist-size, 16px) !important;
+      width: auto !important;
+      display: block !important;
+      pointer-events: none !important;
+    }
+    @media (hover: hover) and (pointer: fine){
+      :host ha-card:hover{
+        background: var(--hemma-assist-fill, var(--hemma-chrome-fill-hover, rgba(0,0,0,0.55))) !important;
+      }
+    }

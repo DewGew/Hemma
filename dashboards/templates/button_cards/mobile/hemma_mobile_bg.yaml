@@ -21,20 +21,6 @@ hemma_mobile_bg:
     image_night: null
 
   custom_fields:
-    # A stylesheet rule, not an inline style on the root.
-    #
-    # --hemma-mobile-hero-img-day/-night are top level THEME variables, and Home
-    # Assistant writes theme variables as inline styles on the document root -
-    # re-writing them every time the theme is applied, which includes every
-    # light/dark switch. An inline override would be clobbered on exactly the
-    # gesture it most needs to survive. An `!important` declaration in a real
-    # stylesheet outranks a non-important inline one, so this wins and keeps
-    # winning.
-    #
-    # Overriding the PAIR rather than the painted var is what preserves the
-    # instant swap: the theme's mode blocks still choose between day and night,
-    # so switching mode is pure CSS resolution with no JavaScript in the way.
-    # hemma-core.js samples the same two off the root, so the gradient follows.
     bg_init: >
       [[[
         const ID = 'hemma-mobile-hero-src';
@@ -55,8 +41,6 @@ hemma_mobile_bg:
           el.id = ID;
           document.head.appendChild(el);
         }
-        // Compare before writing: this runs on every render, and replacing a
-        // style element's text reparses the sheet.
         if (el.textContent !== css) el.textContent = css;
         return '';
       ]]]

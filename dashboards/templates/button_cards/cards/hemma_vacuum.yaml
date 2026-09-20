@@ -1,13 +1,9 @@
-# Vacuum Card
-#
-# Variables:
-#   icon - replaces the state-varying glyph (clean / charge / docked) in every
-#          state; leave it unset to keep all three.
 hemma_vacuum:
   template: [hemma_entity]
 
   variables:
     mobile_filter_category: unfiltered
+    icon: vacuum
 
   show_icon: false
   show_label: false
@@ -16,41 +12,12 @@ hemma_vacuum:
 
   tap_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   hold_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  icon_tap_action:
-    action: toggle
+    entity: '[[[ return entity?.entity_id ]]]'
 
   icon_hold_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
-
-  entity_picture: |
-    [[[
-      if (variables.icon) return window.hemmaIconUrl(variables.icon);
-      const s = (entity?.state || '').toLowerCase();
-      if (s === 'cleaning' || s === 'returning') return window.hemmaIconUrl('vacuum-clean');
-      if (s === 'charging')                      return window.hemmaIconUrl('vacuum-charge');
-      return window.hemmaIconUrl('vacuum');
-    ]]]
-
-  show_entity_picture: |
-    [[[
-      const s = (entity?.state || '').toLowerCase();
-      return !['unknown', 'unavailable'].includes(s);
-    ]]]
-
-  styles:
-    card:
-      - --hemma-icon-mask-image: |
-          [[[
-            if (variables.icon) return `url('${window.hemmaIconUrl(variables.icon)}')`;
-            const s = (entity?.state || '').toLowerCase();
-            if (s === 'cleaning' || s === 'returning') return `url('${window.hemmaIconUrl('vacuum-clean')}')`;
-            if (s === 'charging')                      return `url('${window.hemmaIconUrl('vacuum-charge')}')`;
-            return `url('${window.hemmaIconUrl('vacuum')}')`;
-          ]]]
+    entity: '[[[ return entity?.entity_id ]]]'

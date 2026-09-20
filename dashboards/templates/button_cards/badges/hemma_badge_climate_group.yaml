@@ -1,20 +1,3 @@
-# Climate Badge
-# Aggregates temperature into one tappable badge.
-# Tap to expand/collapse the sub-badges row (driven by input_select.hemma_expanded_row).
-#
-# Variables:
-#   enabled          - show/hide this badge (default: true)
-#   temp_sensor      - entity_id for primary temperature sensor
-#   temp_sensor_2    - entity_id for 2nd temperature sensor (optional, for range)
-#   temp_sensor_3    - entity_id for 3rd temperature sensor (optional, for range)
-#   temp_sensor_4    - entity_id for 4th temperature sensor (optional, for range)
-#   temp_sensor_5    - entity_id for 5th temperature sensor (optional, for range)
-#   humidity_sensor  - entity_id for humidity sensor (used by sub-badges row only)
-#   quality_sensor   - entity_id for air quality sensor (used by sub-badges row only)
-#   temp_unit        - 'F' or 'C' (default: 'F')
-#   climate_entity   - climate entity to check for active HVAC (spins fan icon)
-#   climate_entity_2 - 2nd climate entity to check (optional, for multi-zone)
-#   climate_entity_3 - 3rd climate entity to check (optional, for multi-zone)
 hemma_badge_climate_group:
   template: [hemma_badge_base]
 

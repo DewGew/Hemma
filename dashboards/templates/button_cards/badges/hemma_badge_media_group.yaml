@@ -1,14 +1,3 @@
-# Media Group Badge
-# Shows how many of several media players / game sessions are currently active.
-# Tap to expand/collapse the individual media sub-badges row
-# (driven by input_select.hemma_expanded_row).
-#
-# Variables:
-#   enabled                    - show/hide this badge (default: true)
-#   always_visible             - show even when nothing is active (default: false)
-#   pause_timeout_minutes      - minutes a paused player still counts as active (default: 10)
-#   entity_1 - entity_14       - media_player entity IDs to track
-#   pc_count                   - number of live PC sources (Discord/Steam); hemma_room computes it
 hemma_badge_media_group:
   template: [hemma_badge_base]
 
@@ -199,8 +188,6 @@ hemma_badge_media_group:
           [[[
             return entity?.state === 'media' ? 'rgba(0,0,0,0.6)' : 'var(--secondary-text-color)';
           ]]]
-      # Neutral by design, like Apple's Speakers & TVs badge: the glyph is never
-      # tinted, it just follows the pill.
       - --hemma-icon-color: >
           [[[
             return entity?.state === 'media'

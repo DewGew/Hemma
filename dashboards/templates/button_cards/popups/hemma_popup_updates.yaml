@@ -1,369 +1,403 @@
-# Updates Popup
 hemma_popup_updates:
   template:
-    - hemma_popup_base
-
+  - hemma_popup_base
   tap_action:
     haptic: light
-    action: >
+    action: |
       [[[
-        return typeof window.browser_mod !== 'undefined' ? 'fire-dom-event' : 'more-info';
+        return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
-    browser_mod:
-      service: browser_mod.popup
-      data:
-        tag: '[[[ return (entity?.entity_id || "hemma_update").replace(/\./g, "_") + "_popup"; ]]]'
-        title: ""
-        dismissable: true
-        adaptive: true
-        size: auto
-        content: |
-          [[[
-            const allUpdateIds = Object.keys(states).filter(id => id.startsWith('update.'));
-            const _allIds = JSON.stringify(allUpdateIds);
+    hemma_popup:
+      title: Software Updates
+      dismissable: true
+      popup_styles:
+      - style: all
+        styles: |
+          /* 16px inside the content edge, which is where cover and lock put
+             it: 8px container + 26px card padding, less that inset. */
+          --hemma-popup-gutter-wide: 18px;
+          --hemma-popup-row-label-size: 15px;
+          /* One size for the trailing text. A pending row renders it as the
+             row's action and a restart row as its value, so both have to be
+             named or the two columns disagree. */
+          --hemma-popup-row-action-size: 14px;
+          --hemma-popup-row-value-size: 14px;
+          @media (max-width: 600px) {
+            --hemma-popup-row-label-size: 14px;
+            --hemma-popup-row-action-size: 13px;
+            --hemma-popup-row-value-size: 13px;
+          }
+          /* Same header as the sheets: the close on its own surface, the same
+             gutter, and room under the bar so the first section is not up
+             against it. */
+          .header { padding-top: var(--hemma-popup-header-gap, 10px);
+                    padding-bottom: var(--hemma-popup-header-gap, 10px); }
+          /* The chrome arrives with the first plate instead of being there
+             on frame one while everything under it fades in. */
+          --hemma-popup-chrome-enter:
+            hemma-popup-chrome-in 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+          .header-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+          .header-close {
+            border-radius: 50%;
+            background: var(--hemma-popup-row-fill, rgba(255, 255, 255, 0.10));
+            backdrop-filter: var(--hemma-popup-plate-backdrop, blur(24px) saturate(180%));
+            -webkit-backdrop-filter: var(--hemma-popup-plate-backdrop, blur(24px) saturate(180%));
+            box-shadow: var(--hemma-popup-plate-shadow, none);
+          }
+          .content .container { padding-top: 14px !important; }
+      content: |
+        [[[
+          const updateIds = Object.keys(states).filter(id => id.startsWith('update.'));
+          const _allIds = JSON.stringify(updateIds);
+          const updates = updateIds.map(id => states[id])
+            .filter(e => e.state === 'on')
+            .sort((a, b) =>
+              (a.attributes.friendly_name || a.entity_id)
+                .localeCompare(b.attributes.friendly_name || b.entity_id)
+            );
 
-            const _aggSnip = `
-              const _ids = ${_allIds};
-              const _updates = _ids.map(id => states[id]).filter(e => e && e.state === 'on')
-                .sort((a, b) => (a.attributes.friendly_name || a.entity_id).localeCompare(b.attributes.friendly_name || b.entity_id));
-              const _restart = _ids.map(id => states[id]).filter(e => {
-                if (!e) return false;
-                const rs = (e.attributes.release_summary || '').toLowerCase();
-                return rs.includes('restart') && e.state === 'off' && e.attributes.installed_version === e.attributes.latest_version;
-              });
-              const count = _updates.length;
-              const hasUpdates = count > 0;
-              const hasRestart = _restart.length > 0;
-              const hasAny = hasUpdates || hasRestart;
-            `;
+          const restartEntities = updateIds.map(id => states[id])
+            .filter(e => {
+              const rs = (e.attributes.release_summary || '').toLowerCase();
+              return rs.includes('restart') && e.state === 'off' && e.attributes.installed_version === e.attributes.latest_version;
+            })
+            .sort((a, b) =>
+              (a.attributes.friendly_name || a.entity_id)
+                .localeCompare(b.attributes.friendly_name || b.entity_id)
+            );
 
-            // Object.keys() (not Object.values()) avoids subscribing this card to
-            // every entity in HA - only to the update.* ids it maps over.
-            const updateIds = Object.keys(states).filter(id => id.startsWith('update.'));
-            const updates = updateIds.map(id => states[id])
-              .filter(e => e.state === 'on')
-              .sort((a, b) =>
-                (a.attributes.friendly_name || a.entity_id)
-                  .localeCompare(b.attributes.friendly_name || b.entity_id)
-              );
+          /* Styles */
+          const noHoverStyle = [
+            ':host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; }',
+            'ha-card { background: transparent !important; border: none !important; border-radius: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; cursor: default !important; }',
+            'ha-card:hover { box-shadow: none !important; border-color: transparent !important; }',
+            'ha-ripple { display: none !important; }',
+          ].join('\n') + '\n@media (max-width: 600px) { ha-card { padding-left: 14px !important; padding-right: 14px !important; } }';
 
-            const restartEntities = updateIds.map(id => states[id])
-              .filter(e => {
-                const rs = (e.attributes.release_summary || '').toLowerCase();
-                return rs.includes('restart') && e.state === 'off' && e.attributes.installed_version === e.attributes.latest_version;
-              })
-              .sort((a, b) =>
-                (a.attributes.friendly_name || a.entity_id)
-                  .localeCompare(b.attributes.friendly_name || b.entity_id)
-              );
-
-            const hasAny = updates.length > 0 || restartEntities.length > 0;
-
-            /* Styles */
-            const noHoverStyle = [
-              ':host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; }',
-              'ha-card { background: transparent !important; border: none !important; border-radius: 0 !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; cursor: default !important; }',
-              'ha-card:hover { box-shadow: none !important; border-color: transparent !important; }',
-              'ha-ripple { display: none !important; }',
-            ].join('\n') + '\n@media (max-width: 600px) { ha-card { padding-left: 14px !important; padding-right: 14px !important; } }';
-
-            const tileTapStyle = [
-              ':host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: inset 0 1px 0.5px -0.5px rgba(255,255,255,calc(var(--hemma-popup-tiles-glow-top-tight,0.20) * 1.5)), inset 0 -1px 0.5px -0.5px rgba(255,255,255,calc(var(--hemma-popup-tiles-glow-bottom-tight,0.15) * 1.5)), inset 0 3px 6px -3px rgba(255,255,255,calc(var(--hemma-popup-tiles-glow-top-soft,0.08) * 1.5)), inset 0 -3px 6px -3px rgba(255,255,255,calc(var(--hemma-popup-tiles-glow-bottom-soft,0.05) * 1.5)) !important; }',
-              'ha-card { background: var(--hemma-popup-tiles-fill, rgba(255,255,255,0.08)) !important; border: none !important; border-radius: 24px !important; box-shadow: inset 0 1px 0.5px -0.5px rgba(255,255,255,var(--hemma-popup-tiles-glow-top-tight,0.20)), inset 0 -1px 0.5px -0.5px rgba(255,255,255,var(--hemma-popup-tiles-glow-bottom-tight,0.15)), inset 0 3px 6px -3px rgba(255,255,255,var(--hemma-popup-tiles-glow-top-soft,0.08)), inset 0 -3px 6px -3px rgba(255,255,255,var(--hemma-popup-tiles-glow-bottom-soft,0.05)) !important; backdrop-filter: var(--hemma-popup-tiles-backdrop, blur(10px) saturate(1.1)) !important; -webkit-backdrop-filter: var(--hemma-popup-tiles-backdrop, blur(10px) saturate(1.1)) !important; cursor: pointer !important; transform: scale(1) !important; transition: background-color var(--hemma-popup-tile-hover-duration, 0.2s) ease, transform var(--hemma-popup-tile-hover-duration, 0.2s) ease, box-shadow 0.2s ease !important; }',
-              'ha-card:hover { background: var(--hemma-popup-tile-hover, rgba(255,255,255,0.09)) !important; transform: scale(var(--hemma-popup-tile-hover-scale, 1.008)) !important; }',
-              'ha-ripple { display: none !important; }',
-            ].join('\n');
-
-            /* Badge pill (tracks all update.* entities) */
-            const badgePillCard = {
-              type: 'custom:button-card',
-              entity: entity?.entity_id,
-              tap_action: `[[[
-                ${_aggSnip}
-                if (count > 1) return { action: 'call-service', service: 'update.install', target: { entity_id: _updates.map(e => e.entity_id) }, service_data: {}, confirmation: { text: 'Install all ' + count + ' updates now?' } };
-                if (count === 1) return { action: 'call-service', service: 'browser_mod.more_info', service_data: { entity: _updates[0].entity_id } };
-                if (hasRestart) return { action: 'call-service', service: 'homeassistant.restart', service_data: {}, confirmation: { text: 'Restart Home Assistant now?' } };
-                return { action: 'none' };
-              ]]]`,
-              show_icon: false, show_name: false, show_label: false, show_state: false,
-              card_mod: {
-                style: [
-                  `:host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: ${hasAny ? 'inset 0 1px 0.5px -0.5px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-top-tight,0.30) * 150%), transparent), inset 0 -1px 0.5px -0.5px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-bottom-tight,0.20) * 150%), transparent), inset 0 3px 6px -3px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-top-soft,0.10) * 150%), transparent), inset 0 -3px 6px -3px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-bottom-soft,0.06) * 150%), transparent)' : 'none'} !important; }`,
-                  `ha-card { background: linear-gradient(135deg, var(--pill-sheen) 0%, transparent 58%), var(--pill-bloom), linear-gradient(var(--pill-fill-tinted), var(--pill-fill-tinted)), var(--hemma-glass-pill-fill,rgba(255,255,255,0.12)) !important; border: none !important; border-radius: var(--hemma-pill-radius,999px) !important; padding: var(--hemma-pill-padding,11px 16px) !important; backdrop-filter: var(--hemma-glass-pill-backdrop, none) !important; -webkit-backdrop-filter: var(--hemma-glass-pill-backdrop, none) !important; box-shadow: inset 0 1px 0.5px -0.5px var(--pill-glow-top-tight), inset 0 -1px 0.5px -0.5px var(--pill-glow-bottom-tight), inset 0 3px 6px -3px var(--pill-glow-top-soft), inset 0 -3px 6px -3px var(--pill-glow-bottom-soft) !important; cursor: ${hasAny ? 'pointer' : 'default'} !important; position: relative !important; overflow: visible !important; transition: transform 0.15s ease, box-shadow 0.2s ease !important; --pca: var(--hemma-glass-pill-corner-angle,126deg); --pcp: calc(var(--pca) - 90deg); --pct: calc(180deg - var(--pca)); --pill-glow-top-tight: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-top-tight,0.30) * 100%), transparent) !important; --pill-glow-top-soft: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,65%), white) calc(var(--hemma-glass-pill-glow-top-soft,0.10) * 100%), transparent) !important; --pill-glow-bottom-tight: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-bottom-tight,0.20) * 100%), transparent) !important; --pill-glow-bottom-soft: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,65%), white) calc(var(--hemma-glass-pill-glow-bottom-soft,0.06) * 100%), transparent) !important; --pill-corner-hue-cool: var(--pill-accent,#ffffff); --pill-corner-hue-warm: var(--pill-accent,#ffffff); --pill-corner-cool: color-mix(in srgb, color-mix(in srgb, var(--pill-corner-hue-cool) var(--hemma-glass-pill-corner-tint,100%), white) calc(var(--hemma-glass-pill-corner-alpha,0.95) * 100%), transparent); --pill-corner-warm: color-mix(in srgb, color-mix(in srgb, var(--pill-corner-hue-warm) var(--hemma-glass-pill-corner-tint,100%), white) calc(var(--hemma-glass-pill-corner-alpha,0.95) * 100%), transparent); --pill-corner-core: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) 22%, white) calc(var(--hemma-glass-pill-corner-alpha,0.95) * 100%), transparent); --pill-corner-cool-lo: color-mix(in srgb, color-mix(in srgb, var(--pill-corner-hue-cool) var(--hemma-glass-pill-corner-tint,100%), white) calc(var(--hemma-glass-pill-corner-alpha,0.95) * var(--hemma-glass-pill-corner-falloff,0.72) * 100%), transparent); --pill-corner-warm-lo: color-mix(in srgb, color-mix(in srgb, var(--pill-corner-hue-warm) var(--hemma-glass-pill-corner-tint,100%), white) calc(var(--hemma-glass-pill-corner-alpha,0.95) * var(--hemma-glass-pill-corner-falloff,0.72) * 100%), transparent); --pill-corner-core-lo: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) 22%, white) calc(var(--hemma-glass-pill-corner-alpha,0.95) * var(--hemma-glass-pill-corner-falloff,0.72) * 100%), transparent); --pill-fill-tinted: color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-accent-fill,30%), transparent); --pill-sheen: color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-accent-sheen,14%), transparent); --pill-bloom: radial-gradient(ellipse 32% 64% at 18% 0%, color-mix(in srgb, color-mix(in srgb, var(--pill-corner-hue-cool) var(--hemma-glass-pill-corner-tint,100%), white) calc(var(--hemma-glass-pill-corner-bloom-alpha,0.3) * 100%), transparent), transparent 70%), radial-gradient(ellipse 32% 64% at 82% 100%, color-mix(in srgb, color-mix(in srgb, var(--pill-corner-hue-warm) var(--hemma-glass-pill-corner-tint,100%), white) calc(var(--hemma-glass-pill-corner-bloom-alpha,0.3) * var(--hemma-glass-pill-corner-falloff,0.72) * 100%), transparent), transparent 70%); }`,
-                  '@supports (color: oklch(from white l c h)) { ha-card { --pill-corner-hue-cool: oklch(from var(--pill-accent,#ffffff) l calc(c * 0.92) calc(h + var(--hemma-glass-pill-dispersion-deg,10))) !important; --pill-corner-hue-warm: oklch(from var(--pill-accent,#ffffff) l calc(c * 0.92) calc(h - var(--hemma-glass-pill-dispersion-deg,10))) !important; --pill-fill-tinted: oklch(from var(--pill-accent,#ffffff) min(l, var(--hemma-glass-pill-fill-l,0.82)) max(c, var(--hemma-glass-pill-fill-c,0.18)) h / var(--hemma-glass-pill-accent-fill,30%)) !important; } }',
-                  'ha-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px; background: conic-gradient(from 0deg, transparent 0deg calc(90deg - 1.16 * var(--pcp)), rgba(0,0,0,calc(var(--hemma-glass-pill-cap-shade,0.18) * var(--hemma-glass-pill-corner-falloff,0.72))) calc(90deg - 0.77 * var(--pcp)) calc(90deg - 0.33 * var(--pcp)), transparent calc(90deg - 0.05 * var(--pcp)), color-mix(in srgb, var(--pill-corner-cool-lo) 16%, transparent) calc(var(--pca) - 0.78 * var(--pcp)), color-mix(in srgb, var(--pill-corner-cool-lo) 48%, transparent) calc(var(--pca) - 0.5 * var(--pcp)), var(--pill-corner-cool-lo) calc(var(--pca) - 0.22 * var(--pcp)), var(--pill-corner-core-lo) var(--pca), var(--pill-corner-warm-lo) calc(var(--pca) + 0.15 * var(--pct)), color-mix(in srgb, var(--pill-corner-warm-lo) 52%, transparent) calc(var(--pca) + 0.37 * var(--pct)), color-mix(in srgb, var(--pill-corner-warm-lo) 26%, transparent) calc(var(--pca) + 0.59 * var(--pct)), color-mix(in srgb, var(--pill-corner-warm-lo) 10%, transparent) calc(var(--pca) + 0.81 * var(--pct)), transparent 180deg, transparent calc(270deg - 1.16 * var(--pcp)), rgba(0,0,0,var(--hemma-glass-pill-cap-shade,0.18)) calc(270deg - 0.77 * var(--pcp)) calc(270deg - 0.33 * var(--pcp)), transparent calc(270deg - 0.05 * var(--pcp)), color-mix(in srgb, var(--pill-corner-cool) 16%, transparent) calc(var(--pca) + 180deg - 0.78 * var(--pcp)), color-mix(in srgb, var(--pill-corner-cool) 48%, transparent) calc(var(--pca) + 180deg - 0.5 * var(--pcp)), var(--pill-corner-cool) calc(var(--pca) + 180deg - 0.22 * var(--pcp)), var(--pill-corner-core) calc(var(--pca) + 180deg), var(--pill-corner-warm) calc(var(--pca) + 180deg + 0.15 * var(--pct)), color-mix(in srgb, var(--pill-corner-warm) 52%, transparent) calc(var(--pca) + 180deg + 0.37 * var(--pct)), color-mix(in srgb, var(--pill-corner-warm) 26%, transparent) calc(var(--pca) + 180deg + 0.59 * var(--pct)), color-mix(in srgb, var(--pill-corner-warm) 10%, transparent) calc(var(--pca) + 180deg + 0.81 * var(--pct)), transparent 360deg); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; pointer-events: none; }',
-                  'ha-card::before { content: ""; position: absolute; inset: 0; border-radius: inherit; background: transparent; transition: background 0.15s ease; pointer-events: none; }',
-                  hasAny ? '@media (hover: hover) { :host(:hover) ha-card::before { background: var(--hemma-pill-hover-overlay, rgba(255,255,255,0.10)); } }' : '',
-                  'ha-card:active { transform: scale(0.96) !important; }',
-                  'ha-ripple { display: none !important; }',
-                ].join('\n'),
-              },
-              styles: {
-                card: [
-                  { '--pill-accent': `[[[
-                    ${_aggSnip}
-                    return hasUpdates ? 'var(--hemma-popup-primary-color, #00c3d0)' : hasRestart ? 'var(--hemma-popup-yellow-color, #ffd600)' : 'var(--hemma-popup-green-color, #30D158)';
-                  ]]]` },
-                  /* Corner-angle default (126deg) is tuned for a ~90x38 pill; this
-                   * label's ~120x38 box needs ~114deg or the highlight core lands
-                   * past the corner, on the flat bottom edge. */
-                  { '--hemma-glass-pill-corner-angle': '114deg' },
-                  { border: 'none' },
-                ],
-                grid: [{ 'grid-template-areas': '"c"' }, { 'grid-template-columns': '1fr' }],
-                custom_fields: { c: [{ 'justify-self': 'center' }] },
-              },
-              custom_fields: {
-                c: `[[[
-                  ${_aggSnip}
-                  const label = count > 1 ? 'Update All' : hasUpdates ? count + ' available' : hasRestart ? 'Restart pending' : 'Up to date';
-                  return '<span style="font-size:13px;font-weight:600;letter-spacing:0.01em;color:#ffffff;font-family:var(--primary-font-family,system-ui);white-space:nowrap;">' + label + '</span>';
-                ]]]`,
-              },
+          /* Shared popup anatomy: hero, then grouped rows. The glass status pill
+             and the advice sentence are both gone - the state is the hero and
+             the action is a button only when there is something to do. */
+          const UI = window._hemmaUI;
+          if (UI) {
+            const nameOf = (e) =>
+              (e.attributes.title || e.attributes.friendly_name || e.entity_id)
+                .replace(/\s+Update$/i, '');
+            const verOf = (e) => {
+              const a = e.attributes || {};
+              return (a.installed_version && a.latest_version && a.installed_version !== a.latest_version)
+                ? a.installed_version + ' \u2192 ' + a.latest_version
+                : (a.installed_version || a.latest_version || null);
             };
 
-            /* Header */
-            const headerCard = {
+            const areas = [];
+            const fields = {};
+            const fstyle = {};
+            const add = (name, html) => {
+              areas.push('"' + name + '"');
+              fields[name] = html;
+              fstyle[name] = [{ 'justify-self': 'stretch' }];
+              /* A section heading belongs to its list, so it pulls back some of
+                 the grid's 18px row gap - but only some. At -14px the heading
+                 sat 12px off the plate, which was right for a line of text and
+                 too tight once the heading carried an action beside it. -4px
+                 leaves 22px, which reads as a heading over a card rather than a
+                 label stuck to one. */
+              if (/head$/.test(name)) {
+                fstyle[name].push({ 'margin-bottom': '-4px' });
+              }
+            };
+
+            /* Restored: the brand logo was there before the redesign and I
+               dropped it. HA serves it as /api/brands/... which 403s from a raw
+               <img> since 2026.7, so it is rewritten to the public host. An
+               entity with no logo passes image: null and gets the placeholder,
+               which keeps every row the same shape. */
+            const logoOf = (e) => {
+              let pic = e?.attributes?.entity_picture || null;
+              if (pic && pic.startsWith('/api/brands/')) {
+                const parts = pic.split('/');
+                pic = 'https://brands.home-assistant.io/_/'
+                  + parts[parts.length - 2] + '/' + parts[parts.length - 1];
+              }
+              return pic;
+            };
+
+            const n = updates.length;
+            /* No chip. "Pending" restated what "1 update available" already
+               says, and as a fixed-width object beside the value it landed on
+               top of the sub-line on a phone. The only status worth its own
+               color is a restart that is actually outstanding, and that is a
+               sentence, so it belongs in the sub. */
+            /* No headline when there are updates. The hero slot is built for a
+               STATE WORD - "Bad", "Normal", "Light Upload" - and a bare "2" at
+               40px does not fill it the way a word does; the count is already
+               the length of the list underneath. When there is nothing to do,
+               though, there is no list to speak for itself, so "Up to date"
+               stays: that is a state word, and it is the whole answer - and
+               "Up to date" is not the answer while a restart is still owed, so
+               the outstanding one gets the slot instead. */
+            if (!n && !restartEntities.length) {
+              add('hero', UI.hero({ label: 'Status', value: 'Up to date' }));
+            }
+
+            /* The action is a ROW in the group it acts on, not a card of its
+               own floating above one. Home puts "Add Automation" at the foot of
+               the automations group; Settings puts "Erase All Content and
+               Settings" inside its section. A standalone block was a bar the
+               width of the popup for a single tap. */
+            const busy = updates.filter(e => e.attributes.in_progress).length;
+
+            /* A real button-card, not markup. button-card's `confirmation:` is
+               what puts Home Assistant's own dialog in front of the action -
+               that is the native prompt this popup had before the redesign, and
+               the reason a restart could never happen on one stray tap. A div
+               handled by our delegated listener calls the service directly and
+               has no dialog at all.
+               Sized to its label and centered: a pill, not a bar the width of
+               the sheet. */
+            /* A section header that can carry an action: caption left, button
+               right, on one line. This is the App Store's Updates screen and it
+               is why the button is not floating under the list any more - an
+               action that applies to a section belongs to that section's
+               heading, not to the space below it.
+               It has to be a card rather than group()'s own labelAction,
+               because labelAction fires the service through our delegated
+               listener with no dialog in front of it. The whole point of the
+               button being a real button-card is tap_action.confirmation, and
+               that is the native prompt this popup fought to get back. */
+            const headText = (text) =>
+              '<div style="font-family:var(--primary-font-family, system-ui);'
+                + 'font-size:15px;font-weight:600;letter-spacing:-0.01em;'
+                + 'text-align:left;color:var(--hemma-popup-tiles-text-primary, #fff);">'
+                + text + '</div>';
+
+            const sectionHead = (caption, btn) => ({
               type: 'custom:button-card',
-              entity: entity?.entity_id,
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,
-              card_mod: { style: noHoverStyle },
+              card_mod: { style: [
+                ':host { --ha-card-box-shadow: none !important;'
+                  + ' --button-card-box-shadow: none !important;'
+                  + ' --button-card-box-shadow-hover: none !important;'
+                  + ' --ha-card-backdrop-filter: none !important; }',
+                'ha-card { background: transparent !important; border: none !important;'
+                  + ' box-shadow: none !important; backdrop-filter: none !important;'
+                  + ' -webkit-backdrop-filter: none !important; padding: 0 !important;'
+                  + ' border-radius: 0 !important; overflow: visible !important;'
+                  + ' will-change: auto !important; cursor: default !important; }',
+                '#container { overflow: visible !important; }',
+                '#t, #b { overflow: visible !important; text-overflow: clip !important; }',
+                'ha-ripple { display: none !important; }',
+              ].join('\n') },
               styles: {
-                card: [
-                  { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                  { padding: '28px 28px 0 28px' },
-                ],
-                grid: [
-                  { 'grid-template-areas': '"title badge"' },
-                  { 'grid-template-columns': '1fr auto' },
-                  { 'align-items': 'flex-start' },
-                ],
-                custom_fields: {
-                  title: [{ 'justify-self': 'start' }, { 'text-align': 'left' }],
-                  badge: [{ 'justify-self': 'end' }, { 'align-self': 'flex-start' }],
-                },
+                card: [{ background: 'transparent' }, { border: 'none' },
+                       { 'box-shadow': 'none' }, { padding: '0 4px 8px' }],
+                grid: [{ 'grid-template-areas': btn ? '"t b"' : '"t"' },
+                       { 'grid-template-columns': btn ? '1fr max-content' : '1fr' },
+                       { 'align-items': 'center' }, { 'column-gap': '12px' }],
+                /* overflow: visible on both. button-card puts an `ellipsis`
+                   class on every custom field wrapper, and it clips - which
+                   with a nowrap text button trims its last characters at the
+                   trailing edge. Same class that squared off the plate shadows
+                   in the widget popups. */
+                custom_fields: btn
+                  ? { t: [{ 'justify-self': 'start' }, { overflow: 'visible' }],
+                      b: [{ 'justify-self': 'end' }, { overflow: 'visible' }] }
+                  : { t: [{ 'justify-self': 'start' }, { overflow: 'visible' }] },
               },
-              custom_fields: {
-                title: '<div style="font-family:var(--primary-font-family,system-ui);color:var(--hemma-popup-tiles-text-primary, #ffffff);">'
-                  + '<div style="font-size:16px;font-weight:500;letter-spacing:-0.01em;">System</div>'
-                  + '<div style="font-size:14px;color:var(--hemma-popup-tiles-text-secondary, rgba(255,255,255,0.75));font-weight:400;">Updates · Software</div>'
-                + '</div>',
-                badge: { card: badgePillCard },
-              },
-            };
-
-            /* Advice text */
-            const adviceCard = {
-              type: 'custom:button-card',
-              entity: entity?.entity_id,
-              tap_action: { action: 'none' },
-              show_icon: false, show_name: false, show_label: false, show_state: false,
-              card_mod: { style: noHoverStyle },
-              styles: {
-                card: [
-                  { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                  { padding: '20px 28px 18px 28px' },
-                ],
-                grid: [{ 'grid-template-areas': '"body"' }, { 'grid-template-columns': '1fr' }],
-                custom_fields: { body: [{ 'justify-self': 'stretch' }, { width: '100%' }, { 'text-align': 'left' }] },
-              },
-              custom_fields: {
-                body: `[[[
-                  ${_aggSnip}
-                  const advice = hasRestart && hasUpdates ? 'Restart + ' + count + ' update' + (count > 1 ? 's' : '')
-                               : hasRestart ? 'Restart required'
-                               : hasUpdates ? 'Available Updates'
-                               : 'Everything is up to date';
-                  return '<div style="font-family:var(--primary-font-family,system-ui);">'
-                    + '<div style="font-size:22px;color:var(--primary-text-color,#ffffff);font-weight:400;letter-spacing:-.5px;">' + advice + '</div>'
-                  + '</div>';
-                ]]]`,
-              },
-            };
-
-            /* Tile factory */
-            const makeTileCard = (entityId) => {
-              const _eid = JSON.stringify(entityId);
-
-              const _kindSnip = `
-                const eid = ${_eid};
-                const e = states[eid];
-                const rs = (e?.attributes?.release_summary || '').toLowerCase();
-                const needsRestart = rs.includes('restart') && e?.state === 'off' && e?.attributes?.installed_version === e?.attributes?.latest_version;
-                const hasUpdate = e?.state === 'on';
-                const inProg = e?.attributes?.in_progress === true;
-              `;
-
-              const pillCard = {
-                type: 'custom:button-card',
-                entity: entityId,
-                tap_action: `[[[
-                  ${_kindSnip}
-                  if (needsRestart) return { action: 'call-service', service: 'homeassistant.restart', service_data: {}, confirmation: { text: 'Restart Home Assistant now?' } };
-                  if (hasUpdate && inProg) return { action: 'none' };
-                  return { action: 'more-info' };
-                ]]]`,
-                show_icon: false, show_name: false, show_label: false, show_state: false,
-                card_mod: {
-                  style: [
-                    ':host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; opacity: 0; animation: hemmaPillReveal 0s linear 0.2s forwards; }',
-                    '@keyframes hemmaPillReveal { to { opacity: 1; } }',
-                    'ha-card { border: none !important; border-radius: 999px !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; cursor: pointer !important; transition: background 0.2s ease, opacity 0.2s ease, filter 0.15s ease, transform 0.15s ease !important; }',
-                    'ha-card:hover { filter: brightness(1.18) !important; transform: scale(1.008) !important; }',
-                    'ha-ripple { display: none !important; }',
-                  ].join('\n'),
-                },
-                styles: {
-                  card: [
-                    { background: `[[[
-                      ${_kindSnip}
-                      if (needsRestart) return 'rgba(255,214,0,0.2)';
-                      if (hasUpdate) return inProg ? 'rgba(68,152,195,0.35)' : 'var(--hemma-popup-primary-color, #00c3d0)';
-                      return 'rgba(103,245,160,0.18)';
-                    ]]]` },
-                    { 'border-radius': '999px' }, { 'box-shadow': 'none' },
-                    { padding: `[[[ return window.matchMedia('(max-width:600px)').matches ? '9px 14px' : '12px 20px'; ]]]` },
-                  ],
-                  grid: [{ 'grid-template-areas': '"label"' }, { 'grid-template-columns': '1fr' }],
-                  custom_fields: { label: [{ 'justify-self': 'center' }] },
-                },
-                custom_fields: {
-                  label: `[[[
-                    ${_kindSnip}
-                    const isMobile = window.matchMedia('(max-width:600px)').matches;
-                    const fontSize = isMobile ? '13px' : '14px';
-                    let text, color;
-                    if (needsRestart) { text = 'Restart'; color = 'var(--hemma-popup-yellow-color, #ffd600)'; }
-                    else if (hasUpdate) {
-                      text = inProg ? 'Updating...' : 'Details';
-                      color = inProg ? 'rgba(255,255,255,0.55)' : '#ffffff';
-                    } else {
-                      text = 'Details';
-                      color = 'var(--hemma-popup-green-color, #30D158)';
-                    }
-                    return '<span style="font-size:' + fontSize + ';font-weight:600;color:' + color + ';white-space:nowrap;letter-spacing:0.01em;">' + text + '</span>';
-                  ]]]`,
-                },
-              };
-
-              return {
-                type: 'custom:button-card',
-                entity: entityId,
-                tap_action: `[[[
-                  ${_kindSnip}
-                  if (hasUpdate && inProg) return { action: 'none' };
-                  return { action: 'more-info' };
-                ]]]`,
-                show_icon: false, show_name: false, show_label: false, show_state: false,
-                card_mod: { style: tileTapStyle },
-                styles: {
-                  card: [
-                    { background: 'var(--hemma-popup-tiles-fill, rgba(255,255,255,0.08))' }, { border: 'none' }, { 'border-radius': '24px' },
-                    { 'box-shadow': 'none' },
-                    { padding: `[[[ return window.matchMedia('(max-width:600px)').matches ? '14px 12px 14px 14px' : '16px 16px 16px 20px'; ]]]` },
-                  ],
-                  grid: [
-                    { 'grid-template-areas': '"body update"' },
-                    { 'grid-template-columns': '1fr auto' },
-                    { 'align-items': 'center' },
-                  ],
-                  custom_fields: {
-                    body:   [{ 'justify-self': 'stretch' }, { 'text-align': 'left' }, { 'min-width': '0' }, { overflow: 'hidden' }],
-                    update: [{ 'justify-self': 'end' }, { 'align-self': 'center' }],
-                  },
-                },
-                custom_fields: {
-                  body: `[[[
-                    ${_kindSnip}
-                    const name = (e?.attributes?.friendly_name || eid).replace(/ Update$/i, '').replace(/ Firmware$/i, '');
-                    let picture = e?.attributes?.entity_picture;
-                    if (picture && picture.startsWith('/api/brands/')) {
-                      const p = picture.split('/');
-                      picture = 'https://brands.home-assistant.io/_/' + p[p.length - 2] + '/' + p[p.length - 1];
-                    }
-                    const isMobile = window.matchMedia('(max-width:600px)').matches;
-                    const iconPx   = isMobile ? 24 : 28;
-                    const gapPx    = isMobile ? 8  : 12;
-                    const nameFont = isMobile ? 13 : 14;
-                    const subFont  = isMobile ? 11 : 12;
-                    const iconHtml = picture
-                      ? '<img src="' + picture + '" style="width:' + iconPx + 'px;height:' + iconPx + 'px;border-radius:8px;object-fit:contain;flex-shrink:0;" />'
-                      : '<div style="width:' + iconPx + 'px;height:' + iconPx + 'px;border-radius:8px;background:rgba(255,255,255,0.08);flex-shrink:0;display:flex;align-items:center;justify-content:center;">'
-                        + '<ha-icon icon="mdi:package-variant" style="--mdc-icon-size:16px;width:16px;height:16px;color:rgba(255,255,255,0.35);"></ha-icon></div>';
-
-                    let textHtml;
-                    if (needsRestart) {
-                      const version = e?.attributes?.installed_version || '—';
-                      textHtml = '<div style="font-size:' + nameFont + 'px;color:var(--hemma-popup-tiles-text-primary,#ffffff);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</div>'
-                        + '<div style="font-size:' + subFont + 'px;color:var(--hemma-popup-yellow-color,#ffd600);margin-top:3px;">' + version + ' · Restart pending</div>';
-                    } else if (hasUpdate) {
-                      const installed = e?.attributes?.installed_version || '—';
-                      const latest = e?.attributes?.latest_version || '—';
-                      const nameColor = inProg ? 'rgba(255,255,255,0.4)' : 'var(--hemma-popup-tiles-text-primary, #ffffff)';
-                      const latestColor = inProg ? 'rgba(68,152,195,0.4)' : 'var(--hemma-popup-primary-color, #00c3d0)';
-                      textHtml = '<div style="font-size:' + nameFont + 'px;color:' + nameColor + ';font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</div>'
-                        + '<div style="font-size:' + subFont + 'px;color:var(--hemma-popup-tiles-text-muted, rgba(255,255,255,0.52));margin-top:3px;">'
-                          + installed + ' → <span style="color:' + latestColor + ';">' + latest + '</span>'
-                        + '</div>';
-                    } else {
-                      const version = e?.attributes?.installed_version || '—';
-                      textHtml = '<div style="font-size:' + nameFont + 'px;color:var(--hemma-popup-tiles-text-primary,#ffffff);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + name + '</div>'
-                        + '<div style="font-size:' + subFont + 'px;color:var(--hemma-popup-green-color,#30D158);margin-top:3px;">' + version + ' · Up to date</div>';
-                    }
-
-                    return '<div style="display:flex;align-items:center;gap:' + gapPx + 'px;min-width:0;">'
-                      + iconHtml
-                      + '<div style="min-width:0;overflow:hidden;">' + textHtml + '</div>'
-                      + '</div>';
-                  ]]]`,
-                  update: { card: pillCard },
-                },
-              };
-            };
-
-            const allTileAreas = [
-              ...restartEntities.map((_, i) => '"r' + i + '"'),
-              ...updates.map((_, i) => '"u' + i + '"'),
-            ].join(' ');
-            const tileCustomFields = {};
-            const tileFieldStyles  = {};
-            restartEntities.forEach((e, i) => {
-              tileCustomFields['r' + i] = { card: makeTileCard(e.entity_id) };
-              tileFieldStyles['r'  + i] = [{ 'justify-self': 'stretch' }];
-            });
-            updates.forEach((e, i) => {
-              tileCustomFields['u' + i] = { card: makeTileCard(e.entity_id) };
-              tileFieldStyles['u'  + i] = [{ 'justify-self': 'stretch' }];
+              custom_fields: Object.assign({ t: caption },
+                btn ? { b: { card: btn } } : {}),
             });
 
-            const listCard = hasAny ? {
+            /* Text, not a filled pill. On a section heading the App Store
+               sets Update All in the same type as the heading and the same
+               color as the per-row actions - and a pill there is both heavier
+               than the thing it sits beside and taller than it, which is what
+               left it almost touching the list below. Matching the caption's
+               line height gives it the caption's gap for free, rather than
+               tuning a padding to fake one. */
+            const btnLabel = (text, tint) =>
+              '<div style="font-family:var(--primary-font-family,system-ui);'
+                + 'font-size:15px;font-weight:500;letter-spacing:-0.01em;color:' + tint + ';'
+                + 'white-space:nowrap;width:max-content;flex:none;'
+                + 'overflow:visible;text-overflow:clip;">' + text + '</div>';
+
+            const actionButton = (label, tap) => ({
               type: 'custom:button-card',
-              entity: entity?.entity_id,
+              show_icon: false, show_name: false, show_label: false, show_state: false,
+              tap_action: tap,
+              haptic: 'medium',
+              card_mod: { style: [
+                ':host { --ha-card-box-shadow: none !important;'
+                  + ' --button-card-box-shadow: none !important;'
+                  + ' --button-card-box-shadow-hover: none !important;'
+                  + ' --ha-card-backdrop-filter: none !important;'
+                  + ' display: block !important; }',
+                /* border-radius: 0 and overflow: visible are the fix for the
+                   clipped last letter. ha-card clips to its own radius by
+                   default, and dropping the pill's background left the theme's
+                   radius still in place - so the corner cut the end off a
+                   nowrap label that runs to the card's edge. A text button has
+                   no shape of its own to preserve. */
+                'ha-card { background: transparent !important; border: none !important;'
+                  + ' box-shadow: none !important; border-radius: 0 !important;'
+                  + ' overflow: visible !important;'
+                  + ' backdrop-filter: none !important; -webkit-backdrop-filter: none !important;'
+                  + ' cursor: pointer !important;'
+                  + ' width: max-content !important; min-width: max-content !important;'
+                  // and a few px so no glyph ever sits on an edge
+                  + ' padding: 2px 6px !important; margin: 0 !important;'
+                  + ' will-change: auto !important;'
+                  + ' transition: opacity .14s ease !important; }',
+                'ha-card::before, ha-card::after { display: none !important; }',
+                '#container { overflow: visible !important; }',
+                '#t { overflow: visible !important; text-overflow: clip !important; }',
+                '@media (hover: hover) { ha-card:hover { opacity: 0.7 !important; } }',
+                'ha-card:active { opacity: 0.5 !important; }',
+                'ha-ripple { display: none !important; }',
+                '#container { padding: 0 !important; }',
+              ].join('\n') },
+              styles: {
+                card: [{ background: 'transparent' }, { padding: '2px 6px' },
+                       { 'box-shadow': 'none' }, { width: 'max-content' }],
+                grid: [{ 'grid-template-areas': '"t"' },
+                       { 'grid-template-columns': 'max-content' },
+                       { 'justify-items': 'end' }],
+                custom_fields: { t: [{ 'justify-self': 'end' }, { overflow: 'visible' }] },
+              },
+              custom_fields: { t: label },
+            });
+
+            const TEAL = 'var(--hemma-color-teal, #00C3D0)';
+            const WARN = 'var(--hemma-popup-ui-warn, #FF9F0A)';
+
+            /* Counted in a nested template, which the parent card re-evaluates
+               on every update.* state change - reading each id through the
+               states Proxy is what subscribes it. Everything about the heading
+               moves once the installs finish: the caption, the label, the tint
+               and the service, and none of it can be settled here, because the
+               popup's card is built once at open and never again. */
+            const headCount = ' const _ids = ' + _allIds + ';'
+              + ' const _pending = []; let _rest = 0;'
+              + ' _ids.forEach(function (id) {'
+              + '   const s = states[id]; if (!s) return;'
+              + '   const a = s.attributes || {};'
+              + '   if (s.state === "on") { if (!a.in_progress) _pending.push(id); return; }'
+              + '   if (String(a.release_summary || "").toLowerCase().indexOf("restart") !== -1'
+              + '       && a.installed_version && a.installed_version === a.latest_version) _rest++;'
+              + ' });'
+              + ' const _waiting = !_pending.length && _rest > 0;';
+
+            if (n) {
+              const rows = updates.map(e => ({
+                entity: e.entity_id,
+                image: logoOf(e),
+                label: nameOf(e),
+                sub: verOf(e),
+                action: e.attributes.in_progress ? 'Updating' : 'Update',
+                actionTone: 'accent',
+                /* An update whose notes say it needs a restart is not finished
+                   when it installs - the new version is not running yet, which
+                   is exactly what HA itself calls "Restart required". Green
+                   "Installed" would say done.
+                   The test has to be a RULE the bridge evaluates, not a branch
+                   taken here: release_summary is empty while the update is
+                   pending and only says "Restart of Home Assistant required"
+                   once the install has finished, so reading it at build time
+                   sends every row down the "Installed" branch. */
+                actionLive: {
+                  rules: [
+                    { attr: 'in_progress', text: 'Updating',
+                      color: 'var(--hemma-popup-ui-fill-2, rgba(255,255,255,0.45))' },
+                    { attr: 'state', eq: 'off',
+                      and: [{ attr: 'release_summary', has: 'restart' }],
+                      text: 'Restart required', color: WARN },
+                    { attr: 'state', eq: 'off', text: 'Installed',
+                      color: 'var(--hemma-popup-ui-good, #30D158)' },
+                  ],
+                  text: 'Update',
+                  color: TEAL,
+                },
+              }));
+              /* One heading that follows the work. Update All while more than
+                 one is left to install - a single update needs none, its own
+                 row is the button - then Restart Now the moment the last
+                 install lands on something that says it needs one. That last
+                 turn is the whole point: an update that needs a restart is not
+                 finished when it installs, and the popup you installed from is
+                 still open and is where you would look for the button. */
+              const headBtn = actionButton(
+                '[[[' + headCount
+                  + ' if (_waiting) return ' + JSON.stringify(btnLabel('Restart Now', WARN)) + ';'
+                  + ' if (_pending.length > 1) return ' + JSON.stringify(btnLabel('Update All', TEAL)) + ';'
+                  + ' return ""; ]]]',
+                '[[[' + headCount
+                  + ' if (_waiting) return { action: "call-service",'
+                  + '   service: "homeassistant.restart", service_data: {},'
+                  + '   confirmation: { text: "Restart Home Assistant now?" } };'
+                  + ' if (_pending.length > 1) return { action: "call-service",'
+                  + '   service: "update.install", target: { entity_id: _pending },'
+                  + '   service_data: {},'
+                  + '   confirmation: { text: "Install all " + _pending.length + " updates now?" } };'
+                  + ' return { action: "none" }; ]]]');
+              add('listhead', { card: sectionHead(
+                '[[[' + headCount
+                  + ' return _waiting ? ' + JSON.stringify(headText('Waiting on a restart'))
+                  + ' : ' + JSON.stringify(headText('Available Updates')) + '; ]]]',
+                headBtn) });
+              add('list', UI.group(rows, null));
+            }
+            if (restartEntities.length) {
+              const rrows = restartEntities.map(e => ({
+                entity: e.entity_id,
+                image: logoOf(e),
+                label: nameOf(e),
+                sub: e.attributes.installed_version || null,
+                value: 'Restart required',
+                valueTone: 'warn',
+              }));
+              /* Same shape: the restart belongs to the section that is waiting
+                 on it, not to the floor of the popup. */
+              const restartBtn = (!n && restartEntities.length)
+                ? actionButton(btnLabel('Restart Now', WARN), {
+                    action: 'call-service',
+                    service: 'homeassistant.restart',
+                    service_data: {},
+                    confirmation: { text: 'Restart Home Assistant now?' },
+                  })
+                : null;
+              if (n || restartBtn) {
+                add('resthead', { card: sectionHead(
+                  headText('Waiting on a restart'), restartBtn) });
+              }
+              add('restart', UI.group(rrows, null));
+            }
+
+
+            const uiCard = {
+              type: 'custom:button-card',
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,
               card_mod: { style: noHoverStyle },
               styles: {
                 card: [
                   { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                  { padding: '4px 28px 20px 28px' },
+                  { padding: '6px 26px 22px 26px' },
                 ],
                 grid: [
-                  { 'grid-template-areas': allTileAreas },
+                  { 'grid-template-areas': areas.join(' ') },
                   { 'grid-template-columns': '1fr' },
-                  { gap: '8px' },
-                  { 'align-items': 'start' },
+                  { 'row-gap': '18px' },
                 ],
-                custom_fields: tileFieldStyles,
+                custom_fields: fstyle,
               },
-              custom_fields: tileCustomFields,
-            } : null;
+              custom_fields: fields,
+            };
+            return { type: 'vertical-stack', cards: [uiCard] };
+          }
 
-            const cards = hasAny ? [headerCard, adviceCard, listCard] : [headerCard, adviceCard];
-
-            return { type: 'vertical-stack', cards };
-          ]]]
-
+          return { type: 'vertical-stack', cards: [] };
+        ]]]
   icon_tap_action:
     haptic: light
     action: more-info

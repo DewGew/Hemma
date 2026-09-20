@@ -30,8 +30,6 @@
 
   const SPRING_IN = 'cubic-bezier(0.32, 0.72, 0, 1)';
   const EASE_OUT  = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-  // Vertical alignment of the overlay title within the header button-card.
-  // 0 = card top edge, 1 = card bottom edge. Increase to move title lower.
   const TITLE_VCENTER = 0.45;
 
   const LANDSCAPE_PHONE_VAR = '--hemma-landscape-phone'; // '0' or '1', flipped by @media
@@ -52,25 +50,17 @@
     } catch (_) { return false; }
   };
 
-  // Scroll-header mode tunables.
-  // Once the popup is on screen a sub-pixel Now Playing nudge reads as a twitch,
-  // not as an alignment fix, so late passes ignore anything under this.
   const NP_LATE_DEAD_ZONE  = 1.25;
   const COMPACT_BAR_HEIGHT = 44; // compact nav title content height, below the safe-area inset
   const BADGE_LOCK_GAP     = 6;  // gap between compact bar bottom and the pinned badge row
-  // Inactive pill background while the popup is open. Mirrors the themes'
-  // badge-background - update both together.
   const BADGE_INACTIVE_BG  = 'rgba(46,48,56,0.78)';
 
   window._hemmaFilterOverlayBuild = '2026-08-20-np-order';
 
   let _movedBadgeRow = null; // { owner, wrapper, el, parent, sibling }
-  // Set at discovery so _hemmaNpTrace() can sample the row without piercing
-  // the smart-row shadow DOM by hand.
+  let _pinnedPill = null;
   let _npTraceTarget = null;
 
-  // Per-frame sampler: call it, then tap the Media badge, and it prints one
-  // line per frame in which Now Playing's top or margin actually changed.
   window._hemmaNpTrace = function (ms) {
     const w = _npTraceTarget;
     if (!w) { console.log('np-trace: open the Media popup once first'); return; }
@@ -91,12 +81,8 @@
     };
     requestAnimationFrame(tick);
   };
-  // The dashboard badge row's resting top, so the adopted row lands on the same
-  // pixel instead of a hand-tuned margin. { top, vw, vh }
   let _badgeNaturalTop = null;
 
-  // Only valid with the dashboard scrolled to the top: the row is sticky, so a
-  // scrolled measurement reads the stuck position, not the resting one.
   function _measureBadgeNaturalTop(badgeEl) {
     if (!badgeEl) return _badgeNaturalTop;
     const se = _dashHeader?.scrollEl;
@@ -113,8 +99,6 @@
     return _badgeNaturalTop;
   }
 
-  // Folds the measured drift into the wrapper's margin. Guarded so a bad
-  // measurement leaves the hand-tuned fallback margin in place.
   function _alignAdoptedBadgeRow(badgeW, badgeEl, natural, maxShift = 12, dead = 0.1) {
     if (!badgeW || !badgeEl || !natural) return;
     const card  = badgeEl.shadowRoot?.querySelector('ha-card') || badgeEl;
@@ -134,23 +118,105 @@
     return shift;
   }
 
-  // button-card renders on lit's microtask, which lands after the callback that
-  // set hass but still inside the frame it paints. Anything measuring a moved
-  // row has to force that render down first or it reads the pre-render height.
+  // button-card renders on lit's microtask, after this callback.
   function _flushRender(el) {
     try {
       if (el && typeof el.performUpdate === 'function') el.performUpdate();
     } catch (_) {}
   }
-  // iOS decides a pan gesture's fate at touchstart, and mutating layout inside
-  // the scroller while a finger is down kills it until the finger lifts.
+  // iOS decides a pan gesture's fate at touchstart; don't mutate layout there.
   let _touchActive = false;
   document.addEventListener('touchstart', () => { _touchActive = true; },  { passive: true, capture: true });
   document.addEventListener('touchend',   (e) => { _touchActive = e.touches.length > 0; }, { passive: true, capture: true });
   document.addEventListener('touchcancel',(e) => { _touchActive = e.touches.length > 0; }, { passive: true, capture: true });
-  // The overlay currently presenting. A closing overlay's deferred badge
-  // cleanup must not strip styles a newly opened one just applied.
   let _activeOverlay = null;
+
+  function _findChromePill(root) {
+    const walk = (node, depth) => {
+      if (!node || depth > 16 || !node.querySelectorAll) return null;
+      for (const el of node.querySelectorAll('button-card')) {
+        const t = el._config?.template;
+        const list = Array.isArray(t) ? t : (t ? [t] : []);
+        if (list.includes('hemma_mobile_chrome')) return el;
+      }
+      for (const el of node.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+          const hit = walk(el.shadowRoot, depth + 1);
+          if (hit) return hit;
+        }
+      }
+      return null;
+    };
+    return walk(root, 0);
+  }
+
+  function _pinChromePill(host, searchRoot) {
+    const el = _findChromePill(searchRoot);
+    if (!el || el.parentNode === host) return;
+    const parent = el.parentNode;
+    if (!_pinnedPill) {
+      _pinnedPill = { host, parent, sibling: el.nextSibling, obs: null };
+      const obs = new MutationObserver(() => {
+        if (_pinnedPill && _pinnedPill.host.isConnected) {
+          requestAnimationFrame(() => _pinChromePill(host, searchRoot));
+        }
+      });
+      try { obs.observe(parent, { childList: true }); } catch (_) {}
+      _pinnedPill.obs = obs;
+    }
+    host.querySelectorAll('button-card').forEach((c) => { if (c !== el) c.remove(); });
+    host.insertBefore(el, host.firstChild);
+    // No per-button highlight: the capsule answers the tap as one shape.
+    el.style.setProperty('--hemma-chrome-fill-hover', 'transparent');
+    el.style.setProperty('--ha-ripple-pressed-color', 'transparent');
+    el.style.setProperty('--ha-ripple-hover-color', 'transparent');
+  }
+
+  function _hideChromePill() {
+    const host = _pinnedPill?.host;
+    if (!host) return;
+    host.style.transition = 'opacity 200ms ease-out, filter 200ms ease-out';
+    host.style.filter = 'blur(8px)';
+    host.style.opacity = '0';
+    host.style.pointerEvents = 'none';
+  }
+
+  function _showChromePill() {
+    const host = _pinnedPill?.host;
+    if (!host) return;
+    host.style.transition = 'none';
+    host.style.transformOrigin = '50% 30%';
+    host.style.transform = 'scale(0.93) translateY(20px)';
+    host.style.opacity = '0';
+    host.style.filter = 'blur(8px)';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (_activeOverlay) return;
+      host.style.transition = `transform 0.62s ${SPRING_IN},`
+        + ` opacity 0.50s ${EASE_OUT}, filter 0.40s ${EASE_OUT}`;
+      host.style.transform = 'scale(1) translateY(0px)';
+      host.style.opacity = '1';
+      host.style.filter = 'blur(0px)';
+      host.style.pointerEvents = 'auto';
+      // filter and transform have to GO, not settle at a no-op value.
+      setTimeout(() => {
+        if (_activeOverlay) return;
+        host.style.removeProperty('transition');
+        host.style.removeProperty('transform');
+        host.style.removeProperty('transform-origin');
+        host.style.removeProperty('filter');
+      }, 700);
+    }));
+  }
+
+  function _unpinChromePill() {
+    const m = _pinnedPill;
+    if (!m) return;
+    _pinnedPill = null;
+    try { m.obs?.disconnect(); } catch (_) {}
+    const el = m.host.querySelector('button-card');
+    if (el && m.parent?.isConnected) m.parent.insertBefore(el, m.sibling);
+    m.host.remove();
+  }
 
   function _restoreBadgeRow() {
     const m = _movedBadgeRow;
@@ -190,8 +256,7 @@
   let _dashBarOn  = false; // frosted bar visible (hysteresis state)
   let _dashTitleStyle = null;
 
-  // The dashboard scrolls in an inner shadow-DOM container, and scroll events
-  // don't cross shadow boundaries, so document-level listeners never see them.
+  // The dashboard scrolls in an inner shadow-DOM container; scroll doesn't cross it.
   function _findScrollAncestor(el) {
     let node = el;
     for (let i = 0; node && i < 40; i++) {
@@ -299,8 +364,7 @@
     const ext = _rowContentRight(row) - inner.getBoundingClientRect().left;
     if (ext > row.clientWidth + 4 && ext <= cap &&
         Math.abs(ext - inner.getBoundingClientRect().width) > 4) {
-      // Needs !important - the template's own max-content rule beats a plain
-      // inline style.
+      // Needs !important: the template's own max-content rule beats a plain rule.
       inner.style.setProperty('width', `${Math.ceil(ext)}px`, 'important');
     }
   }
@@ -338,8 +402,6 @@
       if (!hit) return;
       inner = hit.firstElementChild;
       if (hit.scrollWidth > hit.clientWidth + 4) {
-        // A real scroll container, so iOS handles it natively and this drive
-        // only covers desktop and emulators.
         useNative = true;
         maxPan = hit.scrollWidth - hit.clientWidth;
       } else if (inner) {
@@ -416,13 +478,13 @@
       _dashHeader.veil?.remove();
       _dashHeader.edge?.remove();
       _dashHeader.title?.remove();
+      _unpinChromePill();
       _dashHeader = null;
     }
     const target = inst._appendTarget;
     if (!target || !inst._headerEl) return;
 
-    // Reset the filter on load. It's a global entity, so a popup left open on
-    // one device would otherwise greet every other one.
+    // The filter entity is global, so a popup left open elsewhere would leak into this one.
     if (inst._hass?.states?.['input_select.hemma_mobile_filter']?.state !== 'all') {
       try {
         inst._hass.callService('input_select', 'select_option', {
@@ -432,9 +494,7 @@
       } catch (_) {}
     }
 
-    // Masks anchor to the safe-area inset. The stop has to be hard - any
-    // falloff renders as partial blur above the hairline.
-    const st = (px) => `calc(env(safe-area-inset-top, 0px) + ${px}px)`;
+    const st = (px) => `calc(env(safe-area-inset-top, 0px) + var(--hemma-mobile-chrome-drop, 4px) + ${px}px)`;
     const hardStop = (px, maxA = 1) => {
       const c = maxA >= 1 ? 'black' : `rgba(0,0,0,${maxA})`;
       return `linear-gradient(to bottom, ${c} 0px, ${c} ${st(px)}, transparent ${st(px)})`;
@@ -475,7 +535,7 @@
     const edge = document.createElement('div');
     edge.style.cssText = [
       'position:fixed', 'left:0', 'right:0',
-      'top:calc(env(safe-area-inset-top, 0px) + 51px)',
+      'top:calc(env(safe-area-inset-top, 0px) + var(--hemma-mobile-chrome-drop, 4px) + 51px)',
       'height:11px', 'z-index:112', 'pointer-events:none', 'opacity:0',
       'transition:opacity 220ms ease-in-out',
       'background:linear-gradient(to bottom, rgba(18,20,26,0.025), rgba(18,20,26,0))',
@@ -490,8 +550,6 @@
         if (_dashHeader) _dashHeader.bgCard = bgCard;
       }
       if (!bgCard) {
-        // Fall back to a plain dark veil rather than letting bright content
-        // bloom through the title.
         if (!veilInner.style.backgroundImage) {
           veilInner.style.backgroundImage = 'linear-gradient(rgba(24,28,38,0.92), rgba(24,28,38,0.92))';
         }
@@ -512,8 +570,6 @@
       }
     };
 
-    // Built once for the page rather than per popup, but it reads the same
-    // live CSS var, so it survives rotation too.
     if (!_dashTitleStyle?.isConnected) {
       _dashTitleStyle = document.createElement('style');
       _dashTitleStyle.textContent =
@@ -525,7 +581,7 @@
     title.style.cssText = [
       'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:112',
       `height:${DASH_BAR_HEIGHT}px`,
-      'padding-top:env(safe-area-inset-top, 0px)',
+      'padding-top:calc(env(safe-area-inset-top, 0px) + var(--hemma-mobile-chrome-drop, 4px))',
       'padding-left:max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px))',
       'box-sizing:content-box',
       'display:flex', 'align-items:center', 'justify-content:flex-start',
@@ -539,10 +595,43 @@
       else se?.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
+    const pillHost = document.createElement('div');
+    pillHost.style.cssText = [
+      'position:fixed',
+      'top:calc(env(safe-area-inset-top, 0px) + var(--hemma-mobile-chrome-drop, 4px))',
+      'right:16px', 'z-index:113', 'pointer-events:auto',
+    ].join(';');
+
+    const pillFlash = document.createElement('div');
+    pillFlash.style.cssText = [
+      'position:absolute', 'inset:0', 'border-radius:22px',
+      'background:rgba(255,255,255,0.22)',
+      'opacity:0', 'pointer-events:none',
+    ].join(';');
+    pillHost.appendChild(pillFlash);
+    pillHost.addEventListener('pointerdown', (ev) => {
+      const r = pillHost.getBoundingClientRect();
+      const x = r.width ? ((ev.clientX - r.left) / r.width) * 100 : 50;
+      pillFlash.style.background = 'radial-gradient(circle at '
+        + Math.max(0, Math.min(100, x)).toFixed(1) + '% 50%,'
+        + ' rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.15) 55%,'
+        + ' rgba(255,255,255,0.05) 100%)';
+      pillFlash.style.transition = 'opacity 140ms ease-out';
+      pillFlash.style.opacity = '1';
+      setTimeout(() => {
+        pillFlash.style.transition = 'opacity 420ms cubic-bezier(0.4,0,0.6,1)';
+        pillFlash.style.opacity = '0';
+      }, 150);
+    }, true);
+
     target.appendChild(grad);
     target.appendChild(veil);
     target.appendChild(edge);
     target.appendChild(title);
+    target.appendChild(pillHost);
+    requestAnimationFrame(() => {
+      _pinChromePill(pillHost, inst._container || document);
+    });
 
     const hide = () => {
       _dashBarOn                = false;
@@ -556,6 +645,7 @@
     const update = () => {
       if (!grad.isConnected) return;
       if (_activeOverlay) { hide(); return; }
+      if (_pinnedPill && _pinnedPill.host.style.opacity === '0') _showChromePill();
       let headerEl = inst._headerEl;
       if (!headerEl?.isConnected || !inst._container?.isConnected) {
         // Both are nulled on dismiss, and HA can re-render the cards.
@@ -571,12 +661,10 @@
       const safeTop   = barBottom - DASH_BAR_HEIGHT;
       const p = Math.max(0, Math.min(1,
         (barBottom + 24 - rect.bottom) / (barBottom + 24 - safeTop)));
-      // Sequential cross-fade, as in the popup: the large title is gone by 45%
-      // of the window and the compact one enters after 55%.
       const tp = Math.min(1, p / 0.45);
       if (nameEl) {
         nameEl.style.animation  = 'none'; // titleFadeIn's fill:both beats inline opacity
-        nameEl.style.opacity    = String(0.9 * (1 - tp)); // 0.9 is its resting opacity
+        nameEl.style.opacity    = String(1 - tp); // full white at rest, like Apple's large titles
       }
       const nameText = nameEl?.textContent?.trim();
       if (nameText && title.textContent !== nameText) title.textContent = nameText;
@@ -608,11 +696,9 @@
     };
     const scrollEl = _findScrollAncestor(inst._container) || window;
     scrollEl.addEventListener('scroll', onScroll, { passive: true });
-    // touchmove crosses shadow boundaries, so the fade stays responsive
-    // mid-gesture even if the scroll container was mis-detected.
     document.addEventListener('touchmove', onScroll, { passive: true, capture: true });
 
-    _dashHeader = { grad, veil, edge, title, scrollEl, onScroll, update, hide, inst, bgCard: null };
+    _dashHeader = { grad, veil, edge, title, pillHost, scrollEl, onScroll, update, hide, inst, bgCard: null };
     update();
   }
 
@@ -682,6 +768,7 @@
       this._gradientBlurEl = null;
       if (_movedBadgeRow && _movedBadgeRow.owner === this) _restoreBadgeRow();
       if (_activeOverlay === this) _activeOverlay = null;
+      _showChromePill();
       this._blurLayerEl = this._overlayEl = this._contentEl = null;
       this._cardEls = [];
       this._scalableEls  = [];
@@ -698,8 +785,6 @@
         if (slug) config = { ...config, filter_category: 'room_' + slug };
       }
       if (!config.filter_category) throw new Error('hemma-filter-overlay: filter_category or room required');
-      // The Scenes page has no dashboard cards to auto-collect, so build its
-      // one section here rather than making every user paste it.
       if (config.filter_category === 'room_scenes' && !config.sections) {
         config = { ...config, sections: [{
           full_width: true,
@@ -708,7 +793,11 @@
             type: 'custom:button-card',
             template: 'hemma_scene_row',
             variables: { layout: 'grid' },
-            styles: { card: [{ padding: `0 calc(var(--hemma-rail-left, 16px) + ${LANDSCAPE_GUTTER_CALC}) 0 calc(max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) + ${LANDSCAPE_GUTTER_CALC})` }] },
+            // The card carries the entity grid's inset; the row's own rail padding would double it.
+            styles: {
+              card: [{ padding: `0 calc(var(--hemma-rail-left, 16px) + ${LANDSCAPE_GUTTER_CALC}) 0 calc(max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) + ${LANDSCAPE_GUTTER_CALC})` }],
+              custom_fields: { scenes_row: [{ 'padding-left': '0 !important' }, { 'padding-right': '0 !important' }] },
+            },
           }],
         }] };
       }
@@ -722,8 +811,6 @@
       for (const el of this._cardEls) { try { el.hass = v; } catch (_) {} }
       const filter = v?.states?.['input_select.hemma_mobile_filter']?.state;
 
-      // Fires once the filter confirms 'all' after a dismiss. The delay lets
-      // smart-row's fast sort snap the cards under the still-opaque blur first.
       if (this._pendingBlurFade && filter === 'all' && prevFilter !== 'all') {
         setTimeout(() => {
           if (!this._pendingBlurFade) return;
@@ -774,8 +861,7 @@
         this._bodyScrollStyle = s;
       }
 
-      // Must be injected here, not document.head - those styles don't reach
-      // into a shadow root.
+      // Must be injected here: document.head doesn't reach this shadow root.
       if (!this._noScrollStyle) {
         const s = document.createElement('style');
         s.textContent = [
@@ -798,8 +884,6 @@
         background:           'rgba(0, 0, 0, 0.22)',
         pointerEvents:        'none',
         display:              'none',
-        // Its own compositing layer, so the blur doesn't flicker when the
-        // content behind it re-sorts during a filter change.
         transform:            'translateZ(0)',
         webkitTransform:      'translateZ(0)',
         willChange:           'transform',
@@ -822,8 +906,7 @@
         display:            'none',
       });
 
-      // Dismiss on a tap in empty space. A tap on a card retargets e.target to
-      // the button-card host, so only bare overlay/content hits match.
+      // A tap on a card retargets e.target, so test the composed path instead.
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay || e.target === content) {
           this._dismiss();
@@ -840,16 +923,12 @@
       overlay.appendChild(content);
       this._contentEl = content;
 
-      // Cards are already visible as the sheet slides up, so suppress their own
-      // entrance animation.
       content.style.setProperty('--hemma-anim-delay',    '-1s');
       content.style.setProperty('--hemma-anim-duration', '0.001s');
 
       const sections = this._config.sections || [];
       for (let i = 0; i < sections.length; i++) {
         const section = sections[i];
-        // A static section renders in place with no slide-up, so it lines up
-        // with the matching dashboard section behind it.
         const animIdx = section.static ? null : i;
 
         // Omit a section's name to get a flat, headerless card group.
@@ -882,8 +961,6 @@
         for (const el of this._cardEls) { try { el.hass = this._hass; } catch (_) {} }
       }
 
-      // Set up the collapsing header once per view. Discovery can fail this
-      // early while cards are still rendering, so keep retrying for a while.
       const tryDashExtras = (n) => {
         const headerDone = !!_dashHeader?.grad?.isConnected;
         if (!_activeOverlay) {
@@ -902,8 +979,6 @@
       if (!el) return;
       if (this._hass) { try { el.hass = this._hass; } catch (_) {} }
       const wrap = document.createElement('div');
-      // A null animIndex means static: visible immediately, appearing with the
-      // overlay fade like the title and sub-badges.
       wrap.style.cssText = `display:block;width:100%;box-sizing:border-box;opacity:${animIndex == null ? '1' : '0'};`;
       if (animIndex != null) wrap._animIndex = animIndex;
       wrap.appendChild(el);
@@ -916,14 +991,10 @@
       wrap.style.cssText = 'display:block;width:100%;box-sizing:border-box;opacity:0;margin-bottom:8px;touch-action:pan-y;';
       wrap._animIndex = animIndex;
 
-      // The column count needs a real media query rather than a one-time JS
-      // check, so it follows a rotation while the popup is open.
       if (!this._entityGridStyle) {
         const st = document.createElement('style');
         st.textContent =
           '.hemma-entity-grid{grid-template-columns:repeat(2,minmax(0,1fr));}' +
-          // Same fixed tracks + dense packing hemma-smart-row gives its entity
-          // rows, or a large card's 1fr icon row collapses in the popup.
           '@media (max-width:767px) and (orientation:portrait),' +
           '(max-height:500px) and (orientation:portrait),' +
           '(max-height:600px) and (orientation:landscape){' +
@@ -951,8 +1022,6 @@
         const card = this._helpers.createCardElement(cardCfg);
         if (!card) continue;
         if (this._hass) { try { card.hass = this._hass; } catch (_) {} }
-        // Built fresh, not DOM-moved, so there is no wrapper to tag.
-        // Fail-safe against a stale hemma-core.js - see smart-row.js.
         const cardSize = window.hemmaCardSize?.(cardCfg)
           || (String(cardCfg?.variables?.size || '').toLowerCase() === 'large' ? 'large' : 'small');
         if (cardSize === 'large') card.dataset.hemmaSize = 'large';
@@ -970,8 +1039,6 @@
       if ((this._config.sections || []).length) { this._autoSectionsDone = true; return; }
       const container = this._container;
       if (!container || !this._helpers || !this._contentEl) return;
-      // In room mode the popup is a single room: every card from that room, no
-      // category filter, and no section header since the title already names it.
       const roomMode = this._config.room || null;
       const rooms = [];
       let pending = null; // last seen room header
@@ -1008,8 +1075,10 @@
       if (roomMode && this._config.scenes !== false && window._hemmaSC) {
         let sceneCount = 0;
         try {
-          sceneCount = window._hemmaSC.list(
-            this._hass?.states || {}, this._hass, { room: roomMode }).length;
+          const c = this._config;
+          sceneCount = window._hemmaSC.list(this._hass?.states || {}, this._hass, {
+            room: roomMode, scenes: c.scenes, scene_exclude: c.scene_exclude, scene_order: c.scene_order,
+          }).length;
         } catch (_) { sceneCount = 0; }
         if (sceneCount) {
           this._appendRevealCard({
@@ -1040,13 +1109,9 @@
             template:  'hemma_mobile_header',
             full_width: true,
             name:      room.name,
-            // room_key lets a tap on a room name inside a category popup switch
-            // straight to that room's popup.
             variables: { room_key: room.roomKey || null,
                          mobile_filter_categories: null },
             styles:    {
-              // Mirrors hemma_mobile_header.yaml's padding formula.
-              // Popups clone the header rather than reuse it, so keep in sync.
               card:          [{ padding: `24px var(--hemma-rail-left, 16px) 10px calc(max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) + ${LANDSCAPE_GUTTER_CALC})` }],
               custom_fields: { arrow: [{ display: 'none' }] },
             },
@@ -1095,8 +1160,6 @@
       if (this._favPopupDone) return;
       const container = this._container;
       if (!container || !this._helpers || !this._contentEl) return;
-      // The dashboard's Favorites section is a header named "Favorites"
-      // immediately followed by its smart-row.
       let rowEl = null, seenHeader = false;
       for (const kid of container.children) {
         if (!seenHeader) {
@@ -1174,16 +1237,13 @@
         const sr = hsr.shadowRoot;
         if (sr) {
           for (const wrapper of sr.querySelectorAll('.card-wrapper')) {
-            // Category popups adopt the badge row, so exempt it there. Room
-            // popups don't, so it's suppressed like any other wrapper.
             if (wrapper === this._badgeRowWrapper && !this._config?.room) continue;
             if (this._headerEl && wrapper.contains(this._headerEl)) continue;
             wrapper.style.setProperty('--hemma-anim-name',     'none');
             wrapper.style.setProperty('--hemma-anim-duration', '0.001s');
             wrapper.style.setProperty('--hemma-anim-delay',    '-1s');
             wrapper.style.setProperty('opacity', '0', 'important');
-            // opacity:0 elements still hit-test, and an invisible wrapper above
-            // the overlay would swallow touches meant for it.
+            // opacity:0 still hit-tests.
             wrapper.style.setProperty('pointer-events', 'none', 'important');
             this._suppressedWrappers.push(wrapper);
           }
@@ -1204,23 +1264,15 @@
       if (this._titleEl) { this._titleEl.remove(); this._titleEl = null; }
       this._backBtn?.remove();
       this._backBtn = null;
-      // Scroll-header teardown: drop the compact title and return the badge row
-      // to its dashboard slot, at the same viewport position it left.
       if (this._compactHeaderEl) { this._compactHeaderEl.remove(); this._compactHeaderEl = null; }
       if (this._gradientBlurEl)  { this._gradientBlurEl.remove();  this._gradientBlurEl  = null; }
-      // The badge row is restored instantly, never animated, so it reads as a
-      // fixed anchor while everything else springs in around it.
       if (_movedBadgeRow && _movedBadgeRow.owner === this) _restoreBadgeRow();
-      // Idempotent - a filter-to-filter switch forces this from the next
-      // overlay's _animIn too.
       const npWasMoved = !!this._npSaved;
       this._restoreMovedWrappers();
       if (npWasMoved && this._npWrapper) {
         this._npWrapper.style.setProperty('position', 'relative', 'important');
         this._npWrapper.style.setProperty('z-index', '51', 'important');
       }
-      // Capture before nulling: _runBlurFade needs it to un-hide the header as
-      // the zoom-fade starts, while its wrapper is still transparent.
       const headerEl      = this._headerEl;
       this._headerEl      = null;
       const headerWrapper = this._headerWrapper;
@@ -1237,8 +1289,6 @@
         this._badgeRowEl.style.removeProperty('backdrop-filter');
         this._badgeRowEl.style.removeProperty('-webkit-backdrop-filter');
         this._badgeRowEl.style.removeProperty('box-shadow');
-        // Above the blur, so the badge stays visible through the fade. The rest
-        // of the cleanup is deferred to _runBlurFade.
         this._badgeRowEl.style.setProperty('z-index', '51', 'important');
       }
       const badgeRowEl = this._badgeRowEl;
@@ -1279,8 +1329,6 @@
       const { blurEl, overlayEl, scalableEls = [], headerEl, badgeRowEl, headerWrapper,
         npWrappers = [] } = args;
       const scalableSet   = new Set(scalableEls);
-      // Now Playing wrappers held above the blur are already at their final
-      // position, so they must skip the reveal's snap and spring.
       const npHoldSet     = new Set(npWrappers.filter(Boolean));
       const animContainer = this._container; // capture before cleanup nulls it
       const outerHost     = animContainer ? animContainer.host : null;
@@ -1348,8 +1396,6 @@
         el.style.removeProperty('pointer-events');
         el.style.transition = 'none';
         if (zoomHeaderSet.has(el)) {
-          // Start low and zoomed out; springs back in the double-rAF below.
-          // Must be set before the observer attaches so it isn't reverted.
           el.style.opacity         = '0';
           el.style.transformOrigin = '50% 30%';
           el.style.transform       = 'scale(0.93) translateY(20px)';
@@ -1366,13 +1412,11 @@
         for (const mut of mutations) {
           const t = mut.target;
           if (t.style.display === 'none') t.style.display = '';
-          // Leave !important alone - that's our own suppression stamp.
+          // Leave !important alone: it is the suppression stamp.
           if (t.style.opacity === '0' && !t.style.getPropertyPriority('opacity')) {
             t.style.removeProperty('opacity');
             t.style.removeProperty('pointer-events');
           }
-          // showWrapper sets height:0 and animates up; snap to auto so the
-          // grow isn't visible.
           if (t.style.height === '0px' || t.style.height === '0') {
             t.style.transition = 'none';
             t.style.removeProperty('height');
@@ -1394,9 +1438,8 @@
         if (this._showing) return;
         blurEl.style.transition = `opacity 0.50s ${EASE_OUT}`;
         blurEl.style.opacity    = '0';
-        // Springs only when actually revealing the dashboard - not when another
-        // overlay took the stage (its blur is fading IN over all of this).
         if (_activeOverlay) return;
+        _showChromePill();
         // Header springs in from a zoomed-out/below position.
         if (headerWrapper) {
           headerWrapper.style.transition = `transform 0.62s ${SPRING_IN}, opacity 0.50s ${EASE_OUT}`;
@@ -1457,8 +1500,6 @@
         overlayEl.style.clipPath   = '';
         overlayEl.style.opacity    = '1';
         overlayEl.style.overflow   = '';
-        // Skip if another overlay opened meanwhile - it has already applied its
-        // own positioning to this same shared badge row.
         if (badgeRowEl && !_activeOverlay) {
           badgeRowEl.style.removeProperty('z-index');
           badgeRowEl.style.removeProperty('position');
@@ -1469,8 +1510,6 @@
           badgeRowEl.style.removeProperty('transform');
           badgeRowEl.style.removeProperty('transition');
         }
-        // A room popup can dismiss with the page still scrolled, and update()
-        // would otherwise wait for the next scroll event to redraw the bar.
         if (!_activeOverlay) { try { _dashHeader?.update(); } catch (_) {} }
         for (const w of npWrappers) {
           if (!w) continue;
@@ -1529,8 +1568,6 @@
           const val = cs.getPropertyValue(v)?.trim();
           if (val) this._overlayEl.style.setProperty(v, val);
         }
-        // The blur layer already does this; a second blur on the cards
-        // themselves renders them solid and dark.
         this._overlayEl.style.setProperty('--ha-card-backdrop-filter', 'none');
       } catch (_) {}
     }
@@ -1592,8 +1629,6 @@
         if (bc) { this._subBadgesEl = bc; this._subBadgesWrapper = kids[i]; break; }
       }
 
-      // Now Playing sits right after the sub-badges row, and is moved into the
-      // media popup so the popup shows the dashboard's real element.
       this._npWrapper = null;
       if (this._subBadgesWrapper) {
         const sbIdx = kids.indexOf(this._subBadgesWrapper);
@@ -1655,8 +1690,6 @@
           } else {
             this._subBadgesSavedParent.appendChild(this._subBadgesWrapper);
           }
-          // Same reconnect poke as above, or the chips card keeps rendering its
-          // popup state on the dashboard until the next hass update.
           const bc = this._getBC(this._subBadgesWrapper);
           if (bc && this._hass) { try { bc.hass = this._hass; } catch (_) {} }
         }
@@ -1685,6 +1718,7 @@
       const prevOverlay = _activeOverlay;
       _activeOverlay = this;
       _dashHeader?.hide();
+      _hideChromePill();
       _restoreBadgeRow();
       if (prevOverlay && prevOverlay !== this) prevOverlay._restoreMovedWrappers();
       this._restoreMovedWrappers();
@@ -1721,8 +1755,6 @@
       headerWrapper?.style.removeProperty('pointer-events');
       this._headerWrapper = headerWrapper;
 
-      // Measured here: the row is back in the dashboard flow and nothing has
-      // been suppressed or moved yet.
       const badgeNaturalTop = this._config?.room
         ? null : _measureBadgeNaturalTop(this._badgeRowEl);
 
@@ -1740,8 +1772,6 @@
             wrapper.style.setProperty('--hemma-anim-duration', '0.001s');
             wrapper.style.setProperty('--hemma-anim-delay',    '-1s');
             wrapper.style.setProperty('opacity', '0', 'important');
-            // opacity:0 elements still hit-test, and an invisible wrapper above
-            // the overlay would swallow touches meant for it.
             wrapper.style.setProperty('pointer-events', 'none', 'important');
             this._suppressedWrappers.push(wrapper);
           }
@@ -1765,8 +1795,6 @@
       const nameRect   = nameSrcEl?.getBoundingClientRect();
 
       const filterState = this._hass?.states?.['input_select.hemma_mobile_filter']?.state;
-      // Room popups use the room name; category popups capitalize the filter
-      // value. 'presence' displays as People, so it needs an explicit entry.
       const CATEGORY_TITLES = { presence: 'People' };
       const titleText   = this._config?.room
         ? this._config.room
@@ -1784,8 +1812,6 @@
         `calc(env(safe-area-inset-top, 0px) + 52px + calc(12px * var(${LANDSCAPE_PHONE_VAR}, 0)))`);
       titleEl.style.setProperty('padding-left',
         `calc(max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) + ${LANDSCAPE_GUTTER_CALC})`);
-      // Copy the dashboard title's text metrics so the margin-top above lands
-      // the glyphs at exactly the same y.
       if (nameSrcEl && nameRect?.height) {
         const ncs = getComputedStyle(nameSrcEl);
         if (ncs.fontSize)      titleEl.style.fontSize      = ncs.fontSize;
@@ -1838,13 +1864,9 @@
           `top:calc(env(safe-area-inset-top, 0px) + 4px + calc(12px * var(${LANDSCAPE_PHONE_VAR}, 0)))`,
           'width:40px', 'height:40px', 'border-radius:50%',
           'display:flex', 'align-items:center', 'justify-content:center',
-          // Transparent fill with a convex sheen lit from above. No drop
-          // shadow - the rim and outer wraps do the grounding.
           'background-image:radial-gradient(140% 90% at 50% -20%,' +
             'rgba(255,255,255,0.14), rgba(255,255,255,0.04) 45%, transparent 62%)',
           'background-color:rgba(255,255,255,0.07)',
-          // Deliberately low: a heavier blur smears the title scrolling
-          // beneath into washes that make the whole disc flicker.
           'backdrop-filter:blur(10px) saturate(1.2)',
           '-webkit-backdrop-filter:blur(10px) saturate(1.2)',
           'cursor:pointer', 'z-index:61',
@@ -1869,8 +1891,6 @@
         'opacity:0', 'transform:translateY(5px)', 'pointer-events:none',
       ].join(';');
       compactEl.textContent = titleText;
-      // Tapping it scrolls back to the top; the scroll handler toggles
-      // pointer-events so it's only tappable while visible.
       compactEl.addEventListener('click', () => {
         this._overlayEl?.scrollTo({ top: 0, behavior: 'smooth' });
       });
@@ -1883,8 +1903,6 @@
         this._headerEl.style.setProperty('visibility', 'hidden', 'important');
       }
 
-      // Chips render as bare text in the popup. Set the chrome vars now, before
-      // anything is visible, or the pill backgrounds flash first.
       if (this._subBadgesWrapper) {
         this._subBadgesWrapper.style.setProperty('--badge-background', 'transparent');
         this._subBadgesWrapper.style.setProperty('--badge-blur', '0px');
@@ -1902,8 +1920,6 @@
 
         overlayEl.style.transform = 'translateY(0)';
         overlayEl.style.display   = 'block';
-        // The exit set pointer-events:none so the fading overlay couldn't
-        // swallow gestures meant for what replaced it.
         overlayEl.style.pointerEvents = '';
 
         this._badgeShadowCards = [];
@@ -1941,8 +1957,6 @@
           this._subBadgesSavedSibling = this._subBadgesWrapper.nextSibling;
           this._subBadgesWrapper.removeAttribute('data-collapsed-spacer');
           this._subBadgesWrapper.style.setProperty('display',    'block', 'important');
-          // Sits below the pill row; room popups have none, so the chips tuck
-          // up under the title instead.
           this._subBadgesWrapper.style.setProperty('width',      '100%', 'important');
           this._subBadgesWrapper.style.setProperty('margin-top',
             this._config?.room ? '6px' : '16px', 'important');
@@ -1981,8 +1995,6 @@
           badgeEl.style.removeProperty('left');
           badgeEl.style.removeProperty('right');
           badgeEl.style.removeProperty('width');
-          // A room popup before this one suppressed the wrapper like any other,
-          // so clear its stamps or the pills arrive invisible.
           badgeW.style.removeProperty('opacity');
           badgeW.style.removeProperty('pointer-events');
           badgeW.style.setProperty('position',   'sticky',       'important');
@@ -2015,8 +2027,6 @@
         overlayEl.style.transform  = 'translateY(0)';
         overlayEl.style.clipPath   = '';
         overlayEl.style.opacity    = seamlessNp ? '1' : '0';
-        // Scrollable from the first frame. _dismiss clears overflow so the
-        // clip-path is the only clip during the exit, so re-assert it here.
         overlayEl.style.overflowY = 'auto';
         overlayEl.style.overflowX = 'hidden';
         overlayEl.style.display   = 'block';
@@ -2031,8 +2041,6 @@
           this._npWrapper.style.setProperty('width', '100%', 'important');
           this._npWrapper.style.setProperty('padding-left', LANDSCAPE_GUTTER_CALC, 'important');
           this._npWrapper.style.removeProperty('margin-top');
-          // The alignment below stamps margin-top; a transition on it from any
-          // stylesheet turns that stamp into a visible glide.
           this._npWrapper.style.setProperty('transition', 'none', 'important');
           this._contentEl.insertBefore(this._npWrapper, this._subBadgesWrapper.nextSibling);
         }
@@ -2056,8 +2064,6 @@
           }
         }
 
-        // Both of the above move what sits over Now Playing, so its offset is
-        // measured only once nothing above it can still shift this frame.
         const npAdopted = seamlessNp && !isLandscapePhone() &&
           this._npWrapper?.parentNode === this._contentEl;
         if (npAdopted) _alignAdoptedEl(this._npWrapper, npNaturalTop, 160);
@@ -2114,20 +2120,14 @@
           blurEl.style.transition    = `opacity 0.30s ease`;
           blurEl.style.opacity       = '1';
 
-          // The header recedes as the blur comes in; _runBlurFade springs it
-          // back on dismiss.
           if (headerWrapper) {
             headerWrapper.style.transition      = `transform 0.42s ${EASE_OUT}, opacity 0.30s ${EASE_OUT}`;
             headerWrapper.style.transformOrigin = '50% 30%';
             headerWrapper.style.transform       = 'scale(0.93) translateY(20px)';
             headerWrapper.style.opacity         = '0';
-            // Same trap as the suppressed wrappers: faded out, it still spans
-            // the title area and would intercept touches there.
             headerWrapper.style.setProperty('pointer-events', 'none', 'important');
           }
 
-          // Normally the overlay fades in and the title and chips come with it.
-          // On a media entry it's already opaque, so those fade individually.
           if (seamlessNp) {
             for (const el of [this._titleEl, this._subBadgesWrapper]) {
               if (!el) continue;
@@ -2184,8 +2184,6 @@
       const hdr       = this._compactHeaderEl;
       if (!this._showing || this._scrollHandler) return;
       if (_movedBadgeRow && _movedBadgeRow.owner !== this) return;
-      // Room popups have no badge row, so their bar is title and back button
-      // only and the badge elements aren't required.
       const noBadge = !!this._config?.room;
       if (!overlayEl || !contentEl || !titleEl || !hdr ||
           (!noBadge && (!badgeW || !badgeEl))) return;
@@ -2196,8 +2194,6 @@
 
       const hdrRect = hdr.getBoundingClientRect();
       const lockTop = hdrRect.bottom + BADGE_LOCK_GAP;
-      // The bar's bottom anchors to the pinned pill row, or to the compact
-      // title in popups that have no pills.
       let badgeBottom = hdrRect.bottom - 4;
 
       if (!noBadge) {
@@ -2232,8 +2228,6 @@
           badgeW.style.setProperty('top',      `${lockTop}px`, 'important');
           badgeW.style.setProperty('z-index',  '30',           'important');
           if (pillBf) badgeW.style.setProperty('--ha-card-backdrop-filter', pillBf);
-          // DOM moves reset descendant scroll positions, and tapping a badge on
-          // the right must not snap the row back to the left.
           const badgesScroller = badgeEl.shadowRoot?.querySelector('#badges');
           const badgesSL       = badgesScroller ? badgesScroller.scrollLeft : 0;
           contentEl.insertBefore(badgeW, titleEl.nextSibling);
@@ -2247,8 +2241,6 @@
             sub.style.setProperty('margin-top', `${(curMt + subShift).toFixed(2)}px`, 'important');
           }
         } else {
-          // Pre-moved (common case): refresh the sticky lock in case the
-          // compact bar measured differently at rAF1 (font/safe-area settling).
           badgeW.style.setProperty('top', `${lockTop}px`, 'important');
         }
       }
@@ -2275,8 +2267,6 @@
       ].join(';');
       gradWrap.appendChild(grad);
 
-      // Hairline and faint shadow at the bar's bottom, mirroring the dashboard
-      // bar's edge treatment in _ensureDashboardHeader.
       const barEdge = document.createElement('div');
       barEdge.style.cssText = [
         'position:absolute', 'left:0', 'right:0',
@@ -2297,8 +2287,6 @@
         }
         const vh = window.innerHeight || 800;
         veil = document.createElement('div');
-        // Hard-edged mask matching the blur bar, with mask and transform split
-        // across two elements for the same reason as the dashboard veil.
         const veilMask = popupHard(badgeBottom + 12, 0.5);
         veil.style.cssText = [
           'position:absolute', 'top:0', 'left:0', 'right:0',
@@ -2314,14 +2302,10 @@
           'filter:blur(44px) saturate(1.02)', 'transform:scale(1.12)',
         ].join(';');
         if (bgAfter) {
-          // ::after already includes the hero tint layer; prepend the popup
-          // blur layer's dark tint so the veil matches the popup backdrop.
           veilInner.style.backgroundImage    = `linear-gradient(rgba(0,0,0,0.22), rgba(0,0,0,0.22)), ${bgAfter.backgroundImage}`;
           veilInner.style.backgroundPosition = `0 0, ${bgAfter.backgroundPosition}`;
           veilInner.style.backgroundSize     = `100% 100%, ${bgAfter.backgroundSize}`;
         } else {
-          // Fall back to a plain dark veil so bright content still recedes
-          // behind the pills.
           veilInner.style.backgroundImage = 'linear-gradient(rgba(24,28,38,0.92), rgba(24,28,38,0.92))';
         }
         veil.appendChild(veilInner);
@@ -2360,8 +2344,6 @@
       // Give the popup's sub-badge/Now Playing rows real scrollWidth.
       _fixRowWidths(contentEl);
 
-      // Same re-dispatch as in _animIn, catching an update dropped by a late
-      // reconnect.
       for (const w of [this._subBadgesWrapper, this._npWrapper]) {
         const bc = w && this._getBC(w);
         if (bc && this._hass) {
@@ -2389,6 +2371,7 @@
       const overlayEl = this._overlayEl;
       if (!blurEl || !overlayEl) return;
       if (_activeOverlay === this) _activeOverlay = null;
+      _showChromePill();
 
       this._suppressedWrappers = [];
       this._hiddenSmartRows    = [];
@@ -2397,8 +2380,6 @@
         const sr = hsr.shadowRoot;
         if (sr) {
           for (const wrapper of sr.querySelectorAll('.card-wrapper')) {
-            // Category popups adopt the badge row and keep it visible; room
-            // popups suppress it like any other wrapper.
             if (wrapper === this._badgeRowWrapper && !this._config?.room) continue;
             if (this._headerEl && wrapper.contains(this._headerEl)) continue;
             wrapper.style.transition = 'none';
@@ -2408,8 +2389,6 @@
             wrapper.style.setProperty('--hemma-anim-duration', '0.001s');
             wrapper.style.setProperty('--hemma-anim-delay',    '-1s');
             wrapper.style.setProperty('opacity', '0', 'important');
-            // opacity:0 elements still hit-test, and an invisible wrapper above
-            // the overlay would swallow touches meant for it.
             wrapper.style.setProperty('pointer-events', 'none', 'important');
             this._suppressedWrappers.push(wrapper);
           }

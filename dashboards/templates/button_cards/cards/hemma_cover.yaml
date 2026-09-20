@@ -1,13 +1,3 @@
-# Cover Card
-#
-# Variables:
-#   icon_open    - OPTIONAL override for the open glyph
-#   icon_closed  - OPTIONAL override for the closed glyph
-#
-# Neither is set by default: window.hemmaCoverKind resolves the pair from the
-# entity's device_class, so a blind gets blind glyphs and a garage gets doors.
-# These must stay OUT of `variables:` - a declared default wins the whole `||`
-# chain, which is what pinned every cover to a curtain.
 hemma_cover:
   template: [hemma_entity]
 
@@ -34,7 +24,7 @@ hemma_cover:
         return ['open', 'opening'].includes(s) ? 'cover.close_cover' : 'cover.open_cover';
       ]]]
     service_data:
-      entity_id: '[[[ return entity.entity_id ]]]'
+      entity_id: '[[[ return entity?.entity_id ]]]'
 
   entity_picture: |
     [[[

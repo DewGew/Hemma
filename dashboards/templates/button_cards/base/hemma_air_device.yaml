@@ -8,18 +8,18 @@ hemma_air_device:
 
   tap_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   hold_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   icon_tap_action:
     action: toggle
 
   icon_hold_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   variables:
     mobile_filter_category: climate

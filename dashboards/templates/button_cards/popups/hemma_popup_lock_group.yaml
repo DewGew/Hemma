@@ -2,7 +2,7 @@ hemma_popup_lock:
   template:
   - hemma_popup_base
   variables:
-    room_name: Access Control
+    room_name: null
     locks: []
     battery_entities: {}
     door_sensors: {}
@@ -13,7 +13,13 @@ hemma_popup_lock:
         return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
     hemma_popup:
-      title: Locks
+      title: |
+        [[[
+          /* The lock badge's own `name:` is a template, and _config.name holds
+             its raw source, so only a plain name may fall through to here. */
+          const n = String(this._config?.name || '').trim();
+          return (variables.room_name || (n.startsWith('[[[') ? '' : n)).trim() || 'Locks';
+        ]]]
       dismissable: true
       popup_styles:
       - style: all
@@ -100,7 +106,6 @@ hemma_popup_lock:
                               .map(id => (typeof id === 'string' ? id.trim() : id))
                               .filter(_validId);
           const lockIds  = _declared.length ? _declared : (groupId && _validId(groupId) ? [groupId] : []);
-          const roomName = variables.room_name || 'Access Control';
 
           const _gid     = JSON.stringify(groupId);
           const _lockIds = JSON.stringify(lockIds);
@@ -664,11 +669,6 @@ hemma_popup_lock:
                     + '.lktg{position:relative;width:' + W + 'px;height:' + H + 'px;'
                     +   'border-radius:var(--hemma-popup-control-radius, 37px);'
                     +   'background:rgba(0,0,0,0.34);overflow:hidden;}'
-                    // The highlight is a pseudo-element rather than a second
-                    // background: a color cannot transition to a gradient, so
-                    // tinting the track directly would snap instead of fade.
-                    // It sits under the thumb because the thumb is positioned
-                    // and this is not, so only the dark part lifts.
                     + '.lktg::before{content:"";position:absolute;inset:0;'
                     +   'border-radius:inherit;pointer-events:none;'
                     +   'background:var(--hemma-toggle-hover-tint, rgba(255,255,255,0.02));'
@@ -718,8 +718,6 @@ hemma_popup_lock:
                 return {
                   entity: id,
                   icon: locked ? 'lock' : 'lock-open',
-                  // parity with the toggle: the lock reads teal in both
-                  // states, the open/closed glyph carries which one it is
                   iconTone: 'accent',
                   label: states[id]?.attributes?.friendly_name || id,
                   sub: bits.length ? bits : null,
@@ -810,4 +808,4 @@ hemma_popup_lock:
           : 'lock.unlock';
       ]]]
     service_data:
-      entity_id: '[[[ return entity.entity_id ]]]'
+      entity_id: '[[[ return entity?.entity_id ]]]'

@@ -84,13 +84,9 @@ hemma_now_playing_controls:
         if (!variables.ring || !variables.src?.controls?.toggle) return '';
         const s = variables.src;
         const SW = 2.2;
-        // 0.5 units of clearance between the stroke's outer edge and the viewBox boundary - sitting
-        // exactly on the boundary leaves the outermost half-pixel to any ancestor's clip.
         const R = 20 - (SW / 2) - 0.5;
         const C = 2 * Math.PI * R;
 
-        // Idle/on/standby players keep reporting a stale dur and pos, so the state has to gate the
-        // arc too - otherwise an app sitting on a loaded-but-unplayed item draws a bare track.
         const st = String(s.state || '').toLowerCase();
         const trackable = st === 'playing' || st === 'buffering' || st === 'paused';
 
@@ -100,8 +96,6 @@ hemma_now_playing_controls:
           const now = Math.min(s.dur, Math.max(0, s.pos + elapsed));
           const frac = Math.max(0, Math.min(1, now / s.dur));
           const remain = Math.max(0, s.dur - now);
-          // Same trick as the primary tile's linear bar: seed the real offset, then let one
-          // linear keyframe run out the remaining seconds so it advances between state updates.
           const anim = s.playing && remain > 0
             ? `animation: np-ring-advance ${remain.toFixed(1)}s linear forwards;`
             : '';

@@ -59,8 +59,6 @@ hemma_scene_row:
         // Surface key survives a card rebuild; smart-row recreates its children.
         const _key = (variables.layout || 'row') + '|' + (variables.room || '') + '|' + ids.join(',');
 
-        // While chips are sliding, hand back the identical markup so nothing
-        // re-renders out from under the animation.
         if (SC.frozenHtml) {
           const _frozen = SC.frozenHtml(_key);
           if (_frozen) return _frozen;
@@ -80,8 +78,6 @@ hemma_scene_row:
         const _sid = SC.surfaceId ? SC.surfaceId(_key) : null;
         const ord = SC.order ? SC.order(ids, states, _sid) : null;
 
-        // Drive the FLIP from the field that actually renders the chips, rather
-        // than relying on sc_init having found this card's rail.
         if (SC.flip) {
           if (!_self._scBusyBound) {
             _self._scBusyBound = true;

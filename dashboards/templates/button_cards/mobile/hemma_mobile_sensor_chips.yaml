@@ -51,8 +51,6 @@ hemma_mobile_sensor_chips:
       climate_row:
         - display: >
             [[[
-              // hemma_expanded_row is desktop/tablet-only; ignoring it here stops
-              // desktop badge taps from toggling rows on mobile.
               const filter = states['input_select.hemma_mobile_filter']?.state ?? 'all';
               return filter === 'climate' ? 'block' : 'none';
             ]]]
@@ -92,10 +90,12 @@ hemma_mobile_sensor_chips:
         - "-ms-overflow-style": none
         - padding-left: "max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) !important"
         - padding-right: "var(--hemma-rail-left, 16px) !important"
-        - margin: "0 0 24px 0 !important"
+        - margin: "0 !important"
         - width: "100%"
         - box-sizing: border-box
         - height: auto
+        # The climate badges read order from this (default 1); lights and motion set none.
+        - --hemma-badge-order-climate: "0"
 
   custom_fields:
 

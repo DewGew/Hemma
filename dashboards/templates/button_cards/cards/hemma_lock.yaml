@@ -1,8 +1,3 @@
-# Lock Card
-#
-# Variables:
-#   icon_locked   - icon shown while locked (default: 'lock-fill')
-#   icon_unlocked - icon shown while unlocked (default: 'lock-open-fill')
 hemma_lock:
   template: [hemma_entity]
 
@@ -31,11 +26,11 @@ hemma_lock:
 
   tap_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   hold_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   icon_tap_action:
     action: call-service
@@ -47,11 +42,11 @@ hemma_lock:
           : 'lock.unlock';
       ]]]
     service_data:
-      entity_id: '[[[ return entity.entity_id ]]]'
+      entity_id: '[[[ return entity?.entity_id ]]]'
 
   icon_hold_action:
     action: more-info
-    entity: '[[[ return entity.entity_id ]]]'
+    entity: '[[[ return entity?.entity_id ]]]'
 
   state:
     - value: unlocked
@@ -84,8 +79,6 @@ hemma_lock:
 
   styles:
     card:
-      # lock-fill.svg's viewBox origin is negative - ~6% transparent padding
-      # baked into the artwork, so it needs 60% * 1.06 to match every other icon.
       - --hemma-icon-mask-scale: 63.6%
       - --hemma-icon-mask-image: |
           [[[

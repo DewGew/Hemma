@@ -1,16 +1,3 @@
-# Lock Group Sub-Badge  (Home dashboard)
-# Aggregates every lock into one "Locks" badge and opens the shared lock group
-# popup, the way the Lights badge aggregates lights. Rooms keep using
-# hemma_badge_security with their own single lock - this is for the Home view,
-# which covers the whole house.
-#
-# Variables:
-#   enabled          - show/hide (default: true)
-#   label            - title override (default: "Locks")
-#   locks            - list of lock entity_ids (also drives the popup)
-#   battery_entities - lock_id -> battery entity_id  (popup)
-#   door_sensors     - lock_id -> contact sensor entity_id (popup)
-#   room_name        - popup heading
 hemma_badge_lock_group:
   template: [hemma_badge_base, hemma_popup_lock]
 

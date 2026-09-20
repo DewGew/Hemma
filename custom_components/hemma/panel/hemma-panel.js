@@ -1,28 +1,13 @@
-// Hemma config panel.
-// Generator and form schema carried over verbatim from the tested slice.
 
-// Kept in step with manifest.json by harnesses/versioncheck.js - the panel is
-// served as a static file and cannot read the manifest at runtime.
 const PANEL_VERSION = "2.1.0";
-// The view rebuilds the bundle before answering, so a Save cannot write
-// templates older than the files on disk. The static copy is the fallback
-// for anyone whose integration predates the view.
 const TEMPLATES_URL = "/api/hemma/templates";
 const TEMPLATES_URL_STATIC = "/hemma_panel/hemma-templates.json";
 
-// What Hemma needs that it does not ship. Its own cards - hemma-nav,
-// hemma-smart-row, hemma-filter-overlay - and its layout-card copy come with
-// it; these do not. A missing one renders as an empty card with no
-// explanation, so the panel is the one place that can say what is wrong.
-//
-// uix provides card_mod, which 21 of the templates use, so without it nothing
-// looks right. That one blocks. A missing card costs you one popup, so it
-// warns instead.
 const REQUIREMENTS = [
-  { kind: "integration", id: "uix", label: "UI eXtension",
+  { kind: "integration", id: "uix", label: "UI eXtension", required: true,
     why: "provides card_mod, which Hemma's templates use throughout",
     repo: "Lint-Free-Technology/uix", docs: "https://uix.lf.technology" },
-  { kind: "card", id: "button-card", label: "button-card",
+  { kind: "card", id: "button-card", label: "button-card", required: true,
     why: "every Hemma tile is one", repo: "custom-cards/button-card" },
   { kind: "card", id: "apexcharts-card", label: "apexcharts-card",
     why: "the energy popup's charts", repo: "RomRider/apexcharts-card" },
@@ -38,6 +23,17 @@ function stable(x) {
   if (Array.isArray(x)) return "[" + x.map(stable).join(",") + "]";
   return "{" + Object.keys(x).sort().map((k) => JSON.stringify(k) + ":" + stable(x[k])).join(",") + "}";
 }
+
+const MODS = new Set();
+const modAvail = (f) => !f.needsMod || MODS.has(f.needsMod);
+
+const KIOSK_DIALOG = {
+  hemma_hide_dialog_logbook: ["hide_dialog_logbook", true],
+  hemma_hide_dialog_light_actions: ["hide_dialog_light_settings_actions", true],
+  hemma_hide_dialog_history: ["hide_dialog_header_history", false],
+  hemma_hide_dialog_breadcrumb: ["hide_dialog_header_breadcrumb_navigation", false],
+  hemma_hide_dialog_attributes: ["hide_dialog_attributes", false],
+};
 
 const omit = (obj, keys) => {
   const out = {};
@@ -69,7 +65,7 @@ function extractConfig(lovelace) {
       return;
     }
     if (cards.length > 3) {
-      warnings.push(`view "${v.path}" has ${cards.length - 3} extra card(s) after the smart row - preserved as-is`);
+      warnings.push(`view "${v.path}" has ${cards.length - 3} extra card(s) after the smart row - kept as they are, and listed under Other cards in that room's settings`);
     }
     const [hero, nav, row] = cards;
     if (hero.template !== "hemma_room") warnings.push(`view "${v.path}" card[0] template is ${hero.template}`);
@@ -120,24 +116,16 @@ function expandConfig(compact, scaffold, extras, templates) {
   return out;
 }
 
-// ─── mobile generator ─────────────────────────────────────────────────────────
-// A phone "room" has no container: a header card, the nested smart row after it,
-// a filter overlay whose `room:` matches the header, and a `room_chips` entry.
-// Only the first two are structure, so that pair is what the extractor reads.
 
 const MOBILE_SHELL = "hemma_mobile_bg";
 const MOBILE_HEADER = "hemma_mobile_header";
 const SMART_ROW = "custom:hemma-smart-row";
 
-// A declaration, not a const: the harnesses eval the generator slice out of
-// this file, and only declarations survive that into the calling scope.
 function isMobileConfig(lovelace) {
   return ((((lovelace || {}).views || [])[0] || {}).cards || [])
     .some((c) => (c || {}).template === MOBILE_SHELL);
 }
 
-// Absent and empty are different: a header with no `variables` must come back
-// with no `variables`, or the round trip fails on a key it invented.
 const put = (obj, key, val) => { if (val !== undefined) obj[key] = val; return obj; };
 
 function extractMobileConfig(lovelace) {
@@ -167,9 +155,6 @@ function extractMobileConfig(lovelace) {
     row: omit(outer, ["cards"]),
   };
 
-  // One pass, in order. A header followed by a smart row is a room; anything
-  // else is chrome and keeps its place by index. The Scenes header is chrome
-  // by this rule and correctly so - a scene row follows it, not tiles.
   const kids = outer.cards || [];
   const rooms = [];
   const items = [];
@@ -187,8 +172,6 @@ function extractMobileConfig(lovelace) {
       i++;
       continue;
     }
-    // A header with no row after it is not a mistake: Scenes is one, and its
-    // scene row is a card in its own right. Headers label sections, not tiles.
     items.push({ card: clone(card) });
   }
 
@@ -215,8 +198,6 @@ function expandMobileConfig(compact, scaffold, extras, templates, chrome) {
     if (!room) return;
     const header = clone(room._header) || {};
     put(header, "name", clone(room.name));
-    // Empty means the header never had one. Writing `variables: {}` back would
-    // invent a key the file did not carry and fail the round trip.
     const hv = clone(room.variables);
     if (hv && Object.keys(hv).length) header.variables = hv;
     kids.push(header);
@@ -234,31 +215,26 @@ function expandMobileConfig(compact, scaffold, extras, templates, chrome) {
     ],
   };
 
+
   const out = clone(extras) || {};
   if (templates) out.button_card_templates = templates;
   out.views = [view, ...(clone(chrome.extraViews) || [])];
   return out;
 }
 
-// ─── building a phone dashboard ───────────────────────────────────────────────
-// Chrome comes from the shipped example verbatim; only the three room-derived
-// things are made fresh, since each carries a name a new dashboard does not
-// share. YOUR_* placeholders are dropped or the dashboard draws broken badges.
 const FILTER_OVERLAY = "custom:hemma-filter-overlay";
 const MOBILE_CHIPS = "hemma_mobile_sensor_chips";
 const MOBILE_FAVORITES = "Favorites";
 
-// The six the phone's filter row offers, in the order it offers them. The badge
-// model can describe more than this; the filter row is only ever these.
 const PHONE_FILTERS = ["climate", "lights", "people", "media", "security", "energy"];
 
-// The badge pills, in the order the dashboards draw them with no badge_order
-// set. Same six the phone filters by, and the ids badge_order is written in.
 const BADGE_ORDER_IDS = ["climate", "lights", "people", "media", "security", "energy"];
+const ROOM_SECTION_ORDER = ["climate", "lights", "media", "security", "energy", "presence"];
+const ROOM_SECTION_LABEL = { climate: "Climate", lights: "Lights", media: "Media",
+  security: "Security", energy: "Energy", presence: "People", other: "Other" };
 
-// hemma-core's HEMMA_FILTER_CATEGORIES, which is what the row itself filters on.
-// A tile states its category outright with mobile_filter_category; otherwise its
-// template decides, and a template that names none is never filtered in.
+const BADGE_SWITCH_KEYS = BADGE_ORDER_IDS.map((id) => "show_" + id);
+
 const FILTER_CATEGORIES = {
   hemma_thermostat: "climate",
   hemma_air_purifier: "climate",
@@ -267,6 +243,7 @@ const FILTER_CATEGORIES = {
   hemma_humidifier: "climate",
   hemma_light: "lights",
   hemma_media: "media",
+  hemma_game: "media",
   hemma_energy: "energy",
   hemma_lock: "security",
   hemma_camera: "security",
@@ -289,9 +266,6 @@ const tileCategory = (tile) => {
   return null;
 };
 
-// hemma_mobile_header strips every non-alphanumeric rather than hyphenating, so
-// "Living Room" is room_livingroom. The panel's own slug() hyphenates; using it
-// here would key the chips map to something the header never looks up.
 const roomKeyOf = (name) =>
   "room_" + String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 
@@ -312,9 +286,6 @@ const dropPlaceholders = (val) => {
   return val;
 };
 
-// Structure kept, sample content gone. A nested card whose own entity is a
-// sample is DROPPED, not stripped: a stripped one still draws, pointing at
-// nothing. Sample entities also hide under `sections`, not just `variables`.
 const isSample = (v) => typeof v === "string" && v.indexOf("YOUR_") !== -1;
 
 const pruneSampleCards = (val) => {
@@ -381,8 +352,6 @@ function blankMobileState(mobile, names) {
 
   const items = [];
   kids.forEach((c, i) => {
-    // The overlays sit where the example put them; with none to copy they go
-    // immediately before the first section, which is where they read.
     if (ovProto && (i === firstOverlay || (firstOverlay < 0 && i === firstPair))) {
       overlays().forEach((o) => items.push(o));
     }
@@ -408,9 +377,6 @@ function blankMobileState(mobile, names) {
   };
 }
 
-// The two halves share a vocabulary, so a chrome card is filled by asking its
-// template which variables it declares. Only the sub badge row needs a table:
-// it reads the same sensors under names of its own.
 const CHIPS_FROM_ROOM = {
   temp_entity: "temp_sensor_1",
   humidity_entity: "humidity_sensor",
@@ -426,8 +392,6 @@ function seedChrome(card, templates, src) {
   if (!decl) return card;
   const out = clone(card);
   const vars = { ...(out.variables || {}) };
-  // Mirror exactly: CLEAR where the room does not set it, or the example's own
-  // value survives and the pair disagrees from birth.
   const roomDecl = ((templates || {}).hemma_room || {}).variables || {};
   Object.keys(decl).forEach((k) => {
     const shared = Object.prototype.hasOwnProperty.call(roomDecl, k);
@@ -447,8 +411,6 @@ function seedChrome(card, templates, src) {
   return out;
 }
 
-// The overview room becomes Favorites; every other room becomes a section. The
-// tile vocabulary is identical across the two, so tiles carry over as they are.
 function mobileFromRooms(mobile, templates, rooms) {
   const list = rooms || [];
   const home = list.find((r) => r.path === "home") || list[0] || {};
@@ -462,21 +424,50 @@ function mobileFromRooms(mobile, templates, rooms) {
   const src = home.variables || {};
   st.chrome.items = st.chrome.items.map((it) => (it.card !== undefined
     ? { card: seedChrome(it.card, templates, src) } : it));
-  // The overview room's photo becomes the phone's single hero. Its rooms are
-  // sections of one view, so there is nowhere for a second one to go.
   st.scaffold.shell = seedChrome(st.scaffold.shell, templates, src);
   return st;
 }
 
-// A sibling is the same stem plus -mobile, never just any mobile dashboard.
-// A declaration, not a const arrow: harnesses eval this slice.
+// A sibling is the same stem plus -mobile, never any other mobile dashboard.
+function markPhoneManaged(cfg, showBell, showAssist) {
+  (function walk(cards) {
+    (cards || []).forEach((c) => {
+      if (!c || typeof c !== "object") return;
+      if (c.template === "hemma_mobile_weather") {
+        c.variables = { ...(c.variables || {}), hemma_ui_managed: true };
+        if (showBell === false) c.variables.show_notifications = false;
+        else delete c.variables.show_notifications;
+        if (showAssist === false) c.variables.show_assist = false;
+        else delete c.variables.show_assist;
+      }
+      walk(c.cards);
+    });
+  })((cfg.views || []).reduce((a, v) => a.concat(v.cards || []), []));
+  return cfg;
+}
+
+function bellOnFor(pair) {
+  const rooms = (((pair || {}).desktop || {}).compact || {}).rooms || [];
+  const home = rooms.find((r) => r.path === "home") || rooms[0] || {};
+  return (home.variables || {}).show_notifications !== false;
+}
+
+function assistOnFor(pair) {
+  const rooms = (((pair || {}).desktop || {}).compact || {}).rooms || [];
+  const home = rooms.find((r) => r.path === "home") || rooms[0] || {};
+  return (home.variables || {}).show_assist !== false;
+}
+
+// The dashboard hides the button when Assist is not loaded, so the preview does too.
+function assistShown(V, hass) {
+  return (V || {}).show_assist !== false
+    && !!(hass && hass.config && (hass.config.components || []).includes("conversation"));
+}
+
 function mobilePathOf(url_path) {
   return String(url_path || "").replace(/[-_]mobile$/i, "") + "-mobile";
 }
 
-// Which generator a dashboard belongs to is decided once, on load, and rides on
-// the state as `surface`. Save must not sniff the config again: by then it is
-// holding edits, and a second guess could route them to the other expander.
 function extractAny(lovelace) {
   return isMobileConfig(lovelace) ? extractMobileConfig(lovelace) : extractConfig(lovelace);
 }
@@ -492,13 +483,7 @@ function expandAny(state, parts) {
     : expandConfig(compact, scaffold, extras, templates);
 }
 
-// ─── the pair ─────────────────────────────────────────────────────────────────
-// Each half keeps its own config; the pair adds single entry, routed off the
-// bundle. The wide half holds badge sources per ROOM, the phone one set for the
-// whole dashboard - which is why the overview room becomes Favorites.
 
-// Which mobile cards read a key. EVERY one gets written: media_player_1 is read
-// by the badge row and by Now Playing, and writing one is how they drift.
 function mobileTargetsFor(key, templates) {
   const out = [];
   Object.keys(templates || {}).forEach((name) => {
@@ -509,9 +494,6 @@ function mobileTargetsFor(key, templates) {
   return out;
 }
 
-// The chips row reads three of the same sensors under names of its own, so a
-// shared key has an alias there. Inverted from the seeding table so both
-// directions come from one declaration.
 const CHIPS_ALIAS_OF = (() => {
   const out = {};
   Object.keys(CHIPS_FROM_ROOM).forEach((mobileKey) => {
@@ -523,8 +505,6 @@ const CHIPS_ALIAS_OF = (() => {
 const sameRoomName = (a, b) =>
   String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
-// Which mobile section a wide room corresponds to. The overview room pairs with
-// Favorites by position, not by name - nothing is called both.
 function linkPair(dstate, mstate) {
   const rooms = (dstate.compact || {}).rooms || [];
   const sections = (mstate.compact || {}).rooms || [];
@@ -549,8 +529,32 @@ function linkPair(dstate, mstate) {
   return { links, orphanRooms, orphanSections };
 }
 
-// Every mobile card that holds `key`, as live references into the state, so a
-// write lands in the config the expander will read.
+const MOBILE_SUPERSEDED = {
+  hemma_mobile_filter_badges: {
+    temp_sensor_1: "temp_sensor", climate_entity_1: "climate_entity",
+    media_player_1: "media_entity_1", media_player_2: "media_entity_2",
+    media_player_3: "media_entity_3", media_player_4: "media_entity_4",
+    media_player_5: "media_entity_5",
+    psn_1: "psn_entity_1", psn_2: "psn_entity_2",
+    discord_online: "discord_online_entity", discord_game: "discord_game_entity",
+    steam_online: "steam_online_entity", steam_game: "steam_game_entity",
+    security_lock_entity: "lock_entity", security_lock_entity_2: "lock_entity_2",
+    energy_power_entity: "power_entity",
+  },
+};
+
+const MOBILE_UNSET_SHOWS = {
+  hemma_mobile_bg: { image: "home-demo" },
+};
+
+const holderValue = (h) => {
+  const vars = h.card.variables || {};
+  const v = vars[h.key];
+  if (v !== undefined && v !== null && v !== "") return v;
+  const old = (MOBILE_SUPERSEDED[h.card.template] || {})[h.key];
+  return old ? vars[old] : v;
+};
+
 function mobileHoldersOf(mstate, key, templates) {
   const wanted = mobileTargetsFor(key, templates);
   const alias = CHIPS_ALIAS_OF[key];
@@ -562,22 +566,17 @@ function mobileHoldersOf(mstate, key, templates) {
     out.push({ card, key: card.template === MOBILE_CHIPS && alias ? alias : key });
   };
   (((mstate.chrome || {}).items) || []).forEach((it) => take(it.card));
-  // The background card is the view's shell, not one of the row's children, so
-  // it is not in chrome.items. Without this the hero photo is the one shared
-  // setting a write could never reach.
   take((mstate.scaffold || {}).shell);
   return out;
 }
 
-// What the two halves say about one key. Absent is not a value: a key the phone
-// simply does not carry is not a disagreement, it is a key with one home.
 function pairValues(pair, roomIdx, key) {
   const room = ((pair.desktop.compact || {}).rooms || [])[roomIdx];
   const link = pair.link.links[roomIdx];
   const out = { desktop: room ? (room.variables || {})[key] : undefined, mobile: [] };
   if (!link || link.section === null || !link.overview) return out;
   mobileHoldersOf(pair.mobile, key, pair.templates).forEach((h) => {
-    out.mobile.push({ template: h.card.template, key: h.key, value: (h.card.variables || {})[h.key] });
+    out.mobile.push({ template: h.card.template, key: h.key, value: holderValue(h) });
   });
   return out;
 }
@@ -585,9 +584,6 @@ function pairValues(pair, roomIdx, key) {
 const emptyVal = (v) => v === undefined || v === null || v === ""
   || (Array.isArray(v) && !v.length);
 
-// The phone side of a shared write, on its own so the form and pairWrite cannot
-// drift apart: the form has already written the wide room by the time it gets
-// here, and calling pairWrite would write that room twice.
 function pairWriteMobile(pair, roomIdx, key, value) {
   const link = (pair.link.links || [])[roomIdx];
   if (!link || link.section === null || !link.overview) return 0;
@@ -596,14 +592,14 @@ function pairWriteMobile(pair, roomIdx, key, value) {
     h.card.variables = h.card.variables || {};
     if (emptyVal(value)) delete h.card.variables[h.key];
     else h.card.variables[h.key] = clone(value);
+    const old = (MOBILE_SUPERSEDED[h.card.template] || {})[h.key];
+    if (old) delete h.card.variables[old];
     if (!Object.keys(h.card.variables).length) delete h.card.variables;
     n++;
   });
   return n;
 }
 
-// Set a shared field once. Returns how many places took it, so the caller can
-// say so rather than claiming a write it did not make.
 function pairWrite(pair, roomIdx, key, value) {
   const room = ((pair.desktop.compact || {}).rooms || [])[roomIdx];
   let n = 0;
@@ -616,14 +612,9 @@ function pairWrite(pair, roomIdx, key, value) {
   return n + pairWriteMobile(pair, roomIdx, key, value);
 }
 
-// Every key both halves can hold. Walking this rather than the values actually
-// set is what catches the commonest drift of all: a source filled in on one
-// dashboard and never on the other.
 function sharedKeys(templates, editable) {
   const room = ((templates || {}).hemma_room || {}).variables || {};
   return Object.keys(room).filter((k) => {
-    // Only what the panel can edit. hemma_room declares 152 variables and many
-    // are internal, so reporting them offers a choice with no control behind it.
     if (editable && !editable.has(k)) return false;
     return mobileTargetsFor(k, templates).length > 0 || CHIPS_ALIAS_OF[k] !== undefined;
   });
@@ -631,9 +622,6 @@ function sharedKeys(templates, editable) {
 
 const isSet = (v) => v !== undefined && v !== null && v !== "";
 
-// Where the two already disagree, for a pair set up by hand twice. `differs` is
-// a contradiction; the two `only` kinds are a gap. A key neither half sets is
-// not reported.
 function pairConflicts(pair) {
   const out = [];
   const keys = sharedKeys(pair.templates, pair.editable);
@@ -643,9 +631,12 @@ function pairConflicts(pair) {
     keys.forEach((key) => {
       const dv = (room.variables || {})[key];
       mobileHoldersOf(pair.mobile, key, pair.templates).forEach((h) => {
-        const mv = (h.card.variables || {})[h.key];
+        const mv = holderValue(h);
         if (!isSet(dv) && !isSet(mv)) return;
         if (isSet(dv) && isSet(mv) && stable(dv) === stable(mv)) return;
+        // Unset is not a disagreement when it already shows the other side's value.
+        const shows = (MOBILE_UNSET_SHOWS[h.card.template] || {})[h.key];
+        if (isSet(dv) && !isSet(mv) && shows !== undefined && stable(dv) === stable(shows)) return;
         const kind = isSet(dv) && isSet(mv) ? "differs"
           : isSet(dv) ? "onlyDesktop" : "onlyMobile";
         out.push({ room: i, roomName: room.name, key, kind,
@@ -656,23 +647,14 @@ function pairConflicts(pair) {
   return out;
 }
 
-// Phone-only tile keys a sync must not wipe. `size` is NOT one: it is inert on
-// a wide tile, and setting it in one place is the point.
+// Phone-only tile keys a sync must not wipe. `size` is not one: it is inert on the wide side.
 const MOBILE_ONLY_TILE_KEYS = ["mobile_filter_category"];
 
-// A declaration, like isMobileConfig and mobilePathOf: the harnesses eval this
-// slice and const arrows do not survive into the calling scope.
 function tileTwinKey(t) {
   return stable([t.template, t.entity || ""]);
 }
 
-// Matched by template AND entity, never by position. A wide tile with no twin is
-// COPIED, a phone tile with no twin REMOVED. Exceptions: hemma_derived is left
-// alone, and a tile with no entity does not cross - two unconfigured tiles of
-// one type share a twin key.
-// Desktop expands the Security badge into sub badges; the phone filters to
-// TILES, so a camera has no path there unless one is made. Derived like the
-// People cards, into the camera's own area or else the first section.
+// Matched by template AND entity, never by position.
 function syncCamerasMobile(pair, hass) {
   const rooms = ((pair.desktop || {}).compact || {}).rooms || [];
   const home = rooms.find((r) => r.path === "home") || rooms[0];
@@ -683,8 +665,6 @@ function syncCamerasMobile(pair, hass) {
   const cams = (Array.isArray(V.security_cameras) ? V.security_cameras : [])
     .filter(Boolean);
 
-  // Only ever the one this made. A camera tile someone placed by hand is
-  // theirs, and is left exactly where they put it.
   let owned = null, ownedSec = null;
   sections.forEach((sec) => {
     (sec.tiles || []).forEach((t) => {
@@ -705,8 +685,6 @@ function syncCamerasMobile(pair, hass) {
   }
 
   if (owned) {
-    // Keep it in step rather than rebuilding it: the object identity is what
-    // the preview keys its tiles on.
     owned.entity = cams[0];
     owned.variables.cameras = cams.slice();
     return cams.length;
@@ -725,8 +703,6 @@ function syncCamerasMobile(pair, hass) {
   return cams.length;
 }
 
-// The area an entity belongs to, by way of its device when it has no area of
-// its own. Same walk _miniModel does for the light group's name.
 function hemmaAreaOf(hass, id) {
   const H = hass || {};
   const reg = (H.entities || {})[id];
@@ -736,10 +712,6 @@ function hemmaAreaOf(hass, id) {
   return aid ? (((H.areas || {})[aid] || {}).name || null) : null;
 }
 
-// The wide half puts Scenes on a nav route; the phone has no nav, so it gets an
-// overlay, a header and the row. None are in the shipped example, so they are
-// made here. The row is written bare: applyScenePick puts the scene list on the
-// hemma_scene_row TEMPLATE at save, and a copy on the card would drift.
 function syncScenesMobile(pair, on) {
   const chrome = (pair.mobile || {}).chrome;
   if (!chrome || !Array.isArray(chrome.items)) return 0;
@@ -766,8 +738,6 @@ function syncScenesMobile(pair, on) {
     items.splice(last + 1, 0, { card: { type: FILTER_OVERLAY, room: "Scenes" } });
   }
 
-  // Header and row go ahead of the first section, which is where the phone
-  // shows them: above Favorites, not buried under the rooms.
   if (headerAt < 0 || rowAt < 0) {
     if (rowAt >= 0) items.splice(rowAt, 1);
     if (headerAt >= 0) items.splice(headerAt, 1);
@@ -780,9 +750,6 @@ function syncScenesMobile(pair, on) {
   return 1;
 }
 
-// Presence does not filter tiles - no tile carries the category, and
-// filter-overlay skips sub badges for it. The popup carries its OWN cards, one
-// per person, derived from the wide half's presence_entity_*.
 function syncPresenceOverlay(pair) {
   const rooms = ((pair.desktop || {}).compact || {}).rooms || [];
   const home = rooms.find((r) => r.path === "home") || rooms[0];
@@ -806,12 +773,71 @@ function syncPresenceOverlay(pair) {
       type: "custom:button-card",
       template: "hemma_presence",
       entity: id,
-      // person_name is left off on purpose: the template derives it from the
-      // entity's friendly name, so a rename in HA follows without a re-save.
       variables: { person_entity: id },
     })),
   }];
   return people.length;
+}
+
+function syncBadgeSwitches(pair) {
+  const rooms = ((pair.desktop || {}).compact || {}).rooms || [];
+  const at = rooms.findIndex((r) => r.path === "home");
+  const idx = at >= 0 ? at : 0;
+  const room = rooms[idx];
+  if (!room) return 0;
+  const V = room.variables || {};
+  let off = 0;
+  BADGE_SWITCH_KEYS.forEach((k) => {
+    const hide = V[k] === false;
+    if (hide) off++;
+    pairWriteMobile(pair, idx, k, hide ? false : undefined);
+  });
+  return off;
+}
+
+const CHIPS_ROOM_KEYS = ["temp_entity", "humidity_entity", "entity_quality",
+  "aqi_room_name", "aqi_sensors", "lights_entity"];
+
+function syncRoomChips(pair) {
+  const rooms = ((pair.desktop || {}).compact || {}).rooms || [];
+  const sections = ((pair.mobile || {}).compact || {}).rooms || [];
+  const items = ((pair.mobile || {}).chrome || {}).items || [];
+  const entry = items.find((it) => it.card && it.card.template === MOBILE_CHIPS);
+  if (!entry) return 0;
+  const card = entry.card;
+  const chips = clone(((card.variables || {}).room_chips) || {});
+  let filled = 0;
+  ((pair.link || {}).links || []).forEach((link) => {
+    if (link.overview || link.section === null) return;
+    const room = rooms[link.room];
+    const sec = sections[link.section];
+    if (!room || !sec || !sec.name) return;
+    const V = room.variables || {};
+    const key = roomKeyOf(sec.name);
+    const next = { ...(chips[key] || {}) };
+    CHIPS_ROOM_KEYS.forEach((k) => { delete next[k]; });
+    const set = (k, v) => { if (!emptyVal(v)) next[k] = clone(v); };
+    if (V.show_climate !== false) {
+      Object.keys(CHIPS_FROM_ROOM).forEach((k) => set(k, V[CHIPS_FROM_ROOM[k]]));
+      set("aqi_sensors", CHIPS_AQI_FROM_ROOM.map((k) => V[k]).filter(Boolean));
+      if (next.temp_entity || next.humidity_entity || next.entity_quality) {
+        set("aqi_room_name", sec.name);
+      }
+    }
+    if (V.show_lights !== false) set("lights_entity", V.light_group_entity);
+    chips[key] = next;
+    if (next.temp_entity || next.humidity_entity || next.entity_quality
+      || next.lights_entity || next.motion_entity) filled++;
+  });
+  // The row lays out for any entry at all, so an empty {} is a blank gap on the device.
+  Object.keys(chips).forEach((k) => {
+    if (!chips[k] || !Object.keys(chips[k]).length) delete chips[k];
+  });
+  card.variables = card.variables || {};
+  if (Object.keys(chips).length) card.variables.room_chips = chips;
+  else delete card.variables.room_chips;
+  if (!Object.keys(card.variables).length) delete card.variables;
+  return filled;
 }
 
 function syncPairTiles(pair) {
@@ -820,6 +846,7 @@ function syncPairTiles(pair) {
   let synced = 0;
   let added = 0;
   let dropped = 0;
+  let moved = 0;
   const unmatched = [];
   (pair.link.links || []).forEach((link) => {
     if (link.section === null) return;
@@ -844,9 +871,6 @@ function syncPairTiles(pair) {
       synced++;
     });
 
-    // Anything on the wide side the phone has not got. In the room's own order,
-    // appended - the phone sorts itself anyway when Smart Sort is on, and where
-    // it is off, the order set on the wide half is the one that was meant.
     (room.tiles || []).forEach((t) => {
       if (!t || !t.entity) return;
       const key = tileTwinKey(t);
@@ -857,10 +881,6 @@ function syncPairTiles(pair) {
       added++;
     });
 
-    // And anything the phone has that the wide half does not. A tile deleted
-    // before _removePairTwin existed, or deleted outside the panel, is an
-    // orphan nothing can reach - it stays on the phone dashboard for good
-    // otherwise. Hemma's own additions carry hemma_derived and are kept.
     const before = (sec.tiles || []).length;
     sec.tiles = (sec.tiles || []).filter((mt) => {
       if (!mt) return false;
@@ -868,8 +888,20 @@ function syncPairTiles(pair) {
       return byKey.has(tileTwinKey(mt));
     });
     dropped += before - sec.tiles.length;
+
+    const rank = new Map();
+    (room.tiles || []).forEach((t, i) => {
+      if (t && !rank.has(tileTwinKey(t))) rank.set(tileTwinKey(t), i);
+    });
+    const tail = (room.tiles || []).length;
+    const was = sec.tiles;
+    sec.tiles = was
+      .map((mt, i) => ({ mt, r: rank.has(tileTwinKey(mt)) ? rank.get(tileTwinKey(mt)) : tail, i }))
+      .sort((x, y) => x.r - y.r || x.i - y.i)
+      .map((p) => p.mt);
+    if (sec.tiles.some((mt, i) => mt !== was[i])) moved++;
   });
-  return { synced, added, dropped, unmatched };
+  return { synced, added, dropped, moved, unmatched };
 }
 
 function extractPair(desktopCfg, mobileCfg, templates, editable) {
@@ -887,8 +919,6 @@ function extractPair(desktopCfg, mobileCfg, templates, editable) {
   return pair;
 }
 
-// Both halves, each rebuilt by its own expander. Neither is derived from the
-// other, so a round trip check still means what it meant per dashboard.
 function expandPair(pair, parts) {
   const p = parts || {};
   return {
@@ -902,70 +932,44 @@ function expandPair(pair, parts) {
 const E = (key, label, domains) => ({ key, label, domains });
 const T = (key, label) => ({ key, label, type: "text" });
 const LIST = (key, label, domains) => ({ key, label, type: "list", domains });
-// A map is keyed by the entities in another field's list - one row per lock,
-// not a free-floating second list that happens to be the same length.
 const MAP = (key, label, over, domains) => ({ key, label, type: "map", over, domains });
 
-// Groups follow the anatomy of a room card rather than the variable prefixes,
-// so the panel reads in the order you meet things on the dashboard.
 const GROUPS = [
-  // lead: the photos card is tall, so it takes a column and the short ones stack
-  // beside it. Alternating strands a nearly empty card next to the photos.
   { id: "rooms", label: "Room", lead: true, icon: "room",
     iconColor: "var(--hemma-color-blue, #0088FF)",
-    blurb: "This room's name and photo, and everything that runs across the top." },
+    blurb: "The room's name, photo and top bar." },
   { id: "badges", label: "Badges", icon: "badge",
     iconColor: "var(--hemma-color-purple, #9333ea)",
-    // Said once here, not on each of the six: the same switch is a readout on
-    // the wide dashboard and the filter on the phone.
-    blurb: "The pills under the room name. Lights, climate, media, who's home. "
-      + "On a phone these are the filters, so turning one off takes its filter "
-      + "away too." },
+    blurb: "The pills under the room name. On a phone, they filter the tiles." },
   { id: "tiles", label: "Tiles", icon: "tile",
     iconColor: "var(--hemma-color-teal, #00C3D0)",
-    blurb: "The cards along the bottom of the room. Tap one to open its controls." },
+    blurb: "The cards along the bottom of the room." },
 ];
 
-// A "unit" is a set of fields you add together; menuGroup files popup detail
-// under its own heading. A repeat is a family of numbered slots: the + offers
-// the family once and reveals the next free slot.
 const R = (id, label, max, fields, menuGroup, kinds) => ({ id, label, max, fields, menuGroup: menuGroup || null, kinds: kinds || null });
 
-// The Media pill and the Now Playing panel are the same sources in two
-// presentations, so both sections offer the same list and write the same keys -
-// set a player under either and it is set for both. Fresh objects per call:
-// sectionFields caches its flattening on the section it was called with.
 const mediaRepeats = () => [
-  R("player", "Media player", 10, [{ ...E("media_player_%", "Media player %", ["media_player"]), ord: 10 }]),
-  R("plex", "Plex stream", 2, [{ ...E("plex_stream_%", "Plex stream %", ["sensor"]), ord: 12,
-    hint: "A Tautulli session sensor - title, viewer and poster all follow" }]),
-  // Sessions land on whichever slot is free, so hiding a viewer has to be a
-  // property of the source rather than of one slot.
+  R("player", "Media player", 10, [{ ...E("media_player_%", "Media player %", ["media_player"]),
+    sub: "players", ord: 10 }]),
+  R("plex", "Plex stream", 2, [{ ...E("plex_stream_%", "Plex stream %", ["sensor"]),
+    sub: "plex", ord: 12,
+    hint: "A Tautulli session sensor." }]),
   { ...T("plex_hide_users", "Hide these viewers"), unit: "plex", advanced: true, ord: 13,
     placeholder: "yourname, someone",
-    hint: "Plex usernames to leave off the dashboard, comma separated" },
-  // Either shape works: the collector reads the title from an attribute or,
-  // failing that, from the state.
-  R("psn", "PlayStation", 2, [{ ...E("psn_%", "PlayStation %", ["sensor"]), ord: 14,
-    hint: "The account's now-playing or session sensor - either one" }]),
+    hint: "Usernames to hide, separated by commas." },
+  R("psn", "PlayStation", 2, [{ ...E("psn_%", "PlayStation %", ["sensor"]),
+    sub: "psn", ord: 14,
+    hint: "The account's now playing or session sensor." }]),
 ];
-// Discord and Steam report the same PC two ways, so they stay two units with
-// their own labels rather than one blended source.
 const mediaSources = () => [
-  // One entity: the user sensor carries presence, game, details and artwork.
-  // discord_game and its siblings still work as overrides, just aren't offered.
-  { ...E("discord_user", "Discord account", ["sensor"]), unit: "discord", unitLabel: "Discord", ord: 20,
-    // The Presence intent is privileged and off by default, and without it the
-    // sensor exists and looks healthy but never reports a game - which reads as
-    // a Hemma bug rather than a Discord setting. Worth the extra sentence.
-    hint: "Your user sensor from Discord Game - game, details and artwork all follow. "
-      + "If it never shows a game, enable your bot's Presence intent in Discord" },
+  { ...E("discord_user", "Discord account", ["sensor"]), unit: "discord", unitLabel: "Discord",
+    sub: "discord", ord: 20,
+    hint: "Your Discord Game user sensor. If no game appears, turn on your bot's Presence intent." },
   { ...T("discord_label", "Discord shown as"), unit: "discord", advanced: true, ord: 25, placeholder: "PC" },
 
-  // One entity: the account sensor carries presence, game and artwork.
-  // steam_game and its siblings still work as overrides, just aren't offered.
-  { ...E("steam_account", "Steam account", ["sensor"]), unit: "steam", unitLabel: "Steam", ord: 30,
-    hint: "Your account sensor from Steam - game and artwork follow" },
+  { ...E("steam_account", "Steam account", ["sensor"]), unit: "steam", unitLabel: "Steam",
+    sub: "steam", ord: 30,
+    hint: "Your Steam account sensor." },
   { ...T("steam_label", "Steam shown as"), unit: "steam", advanced: true, ord: 33, placeholder: "Steam" },
   { key: "duplicate_game", label: "Same game on both", type: "select", advanced: true, ord: 34,
     options: ["", "discord", "steam", "both"], needs: "steam",
@@ -973,8 +977,6 @@ const mediaSources = () => [
       steam: "Keep Steam", both: "Show both" } },
 ];
 
-// A dashboard cannot report either of these - a widget fed a dead entity just
-// fails to appear - so the panel is the only place they can be seen.
 const fieldFault = (f, val, hass) => {
   if (!f.domains || !val || !hass) return "";
   const st = hass.states[val];
@@ -988,27 +990,48 @@ const SECTIONS = [
     fields: [
       { key: "__name", label: "Room name", type: "text", always: true },
       { key: "image", label: "Background image", type: "image", always: true },
-      // kiosk-mode reads a root-level key at page load; the panel holds the
-      // choice as a room variable and projects it there on save.
-      { key: "hemma_hide_header", label: "Hide the HA header", type: "bool",
-        boolDefault: true, auto: true, scope: "dashboard",
-        hint: "The toolbar with the edit pencil - everything here is configured in this panel" },
-      { key: "font", label: "Font", type: "select", auto: true, scope: "dashboard",
+      { key: "__extras", label: "Other cards", type: "extras", noAdd: true,
+        hint: "Kept from the dashboard you imported. Hemma leaves them as they are, below the tiles." },
+    ],
+  },
+  {
+    label: "General", icon: "settings", iconColor: "var(--hemma-color-gray, #8E8E93)",
+    group: "rooms", scope: "dashboard",
+    subs: [
+      { id: "chrome", label: "Dashboard" },
+      { id: "dialogs", label: "Dialogs" },
+      { id: "text", label: "Text" },
+    ],
+    fields: [
+      { key: "show_assist", sub: "chrome", label: "Show Assist button", type: "bool",
+        boolDefault: true, auto: true, scope: "dashboard" },
+      { key: "hemma_hide_header", sub: "chrome", label: "Hide the HA header", type: "bool",
+        boolDefault: true, auto: true, scope: "dashboard" },
+      { key: "hemma_hide_dialog_logbook", sub: "dialogs", label: "Hide dialog logbook", type: "bool",
+        boolDefault: true, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
+      { key: "hemma_hide_dialog_light_actions", sub: "dialogs", label: "Hide light dialog actions", type: "bool",
+        boolDefault: true, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
+      { key: "hemma_hide_dialog_history", sub: "dialogs", label: "Hide dialog history button", type: "bool",
+        boolDefault: false, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
+      { key: "hemma_hide_dialog_breadcrumb", sub: "dialogs", label: "Hide dialog breadcrumbs", type: "bool",
+        boolDefault: false, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
+      { key: "hemma_hide_dialog_attributes", sub: "dialogs", label: "Hide dialog attributes", type: "bool",
+        boolDefault: false, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
+      { key: "font", sub: "text", label: "Font", type: "select", auto: true, scope: "dashboard",
         options: ["", "inter", "hanken", "system"],
         optionLabels: { "": "Default (theme)", inter: "Inter",
           hanken: "Hanken Grotesk", system: "System font" },
-        hint: "System uses SF Pro on Apple devices and the platform font elsewhere" },
+        hint: "System uses SF Pro on Apple devices." },
     ],
   },
   {
     label: "Weather", icon: "weather", iconColor: "var(--hemma-color-blue, #0088FF)", iconRaw: true, group: "rooms",
+    scope: "dashboard",
     fields: [
       E("weather_entity", "Weather", ["weather"]),
-      // The weather entity already reports a temperature; this only exists for
-      // people whose own outdoor sensor is better than their provider's.
       { ...E("weather_temp_sensor", "Temperature override", ["sensor"]),
         advanced: true, noAdd: true,
-        hint: "Leave empty to use the weather entity's own reading" },
+        hint: "Leave empty to use the weather entity's temperature." },
     ],
   },
   {
@@ -1016,39 +1039,81 @@ const SECTIONS = [
     fields: [
       E("time_entity", "Time sensor", ["sensor"]),
       { key: "use_12h", label: "12-hour clock", type: "bool", boolDefault: true, auto: true },
-      // Follows the sensor like the 12-hour switch, but tucked into Advanced:
-      // it is there when you expand it, with nothing to add first.
       { ...T("time_suffix", "Suffix"),
         auto: true, advanced: true, noAdd: true },
+    ],
+  },
+  {
+    label: "Notifications", icon: "bell", iconColor: "var(--hemma-color-red, #FF453A)",
+    group: "rooms", scope: "dashboard", toggle: "show_notifications",
+    fields: [
+      { key: "notify_safety", glyph: "exclamation", tone: "var(--hemma-popup-ui-bad, #FF453A)", label: "Leaks, smoke and CO", type: "bool", boolDefault: true,
+        always: true, ord: 0 },
+      { key: "notify_air", glyph: "co2-fill", tone: "var(--hemma-popup-ui-warn, #FF9F0A)", label: "High carbon dioxide", type: "bool", boolDefault: true,
+        always: true, ord: 1 },
+      { key: "notify_locks", glyph: "lock-fill", tone: "var(--hemma-popup-ui-good, #30D158)", label: "Locks", type: "bool", boolDefault: true,
+        always: true, ord: 2 },
+      { key: "notify_alarm", glyph: "alarm-fill", tone: "var(--hemma-popup-ui-good, #30D158)", label: "Alarm", type: "bool", boolDefault: true,
+        always: true, ord: 3 },
+      { key: "notify_doorbell", glyph: "doorbell", tone: "var(--hemma-color-teal, #00C3D0)", label: "Doorbell", type: "bool", boolDefault: true,
+        always: true, ord: 4 },
+      { key: "notify_doors", glyph: "door-open", tone: "var(--hemma-popup-ui-warn, #FF9F0A)", label: "Doors", type: "bool", boolDefault: true,
+        always: true, ord: 5 },
+      { key: "notify_people", glyph: "person", tone: "var(--hemma-popup-ui-good, #30D158)", label: "People", type: "bool", boolDefault: true,
+        always: true, ord: 6 },
+      { key: "notify_vacuum", glyph: "vacuum-charge", tone: "var(--hemma-color-teal, #00C3D0)", label: "Vacuum", type: "bool", boolDefault: true,
+        always: true, ord: 7 },
+      { key: "notify_appliances", glyph: "stove-fill", tone: "var(--hemma-popup-ui-good, #30D158)", label: "Appliances", type: "bool", boolDefault: true,
+        always: true, ord: 8 },
+      { key: "notify_plants", glyph: "plant", tone: "var(--hemma-popup-ui-warn, #FF9F0A)", label: "Plants", type: "bool", boolDefault: true,
+        always: true, ord: 9 },
+      { key: "notify_battery", glyph: "battery", tone: "var(--hemma-popup-ui-bad, #FF453A)", label: "Low battery", type: "bool", boolDefault: true,
+        always: true, ord: 10 },
+      { key: "notify_updates", glyph: "updates", tone: "var(--hemma-color-teal, #00C3D0)", label: "Updates", type: "bool", boolDefault: true,
+        always: true, ord: 11 },
+      { key: "notify_restart", glyph: "exclamation", tone: "var(--hemma-popup-ui-warn, #FF9F0A)", label: "Restart pending", type: "bool", boolDefault: true,
+        always: true, ord: 12 },
+
+      { ...LIST("notification_appliances", "Appliances to watch",
+        ["sensor", "binary_sensor", "switch", "vacuum"]),
+        always: true, advanced: true, ord: 12 },
+
+      { ...MAP("notification_appliance_timers", "Time remaining",
+        "notification_appliances", ["sensor"]),
+        auto: true, advanced: true, noAdd: true, ord: 13,
+        emptyHint: "Add an appliance above first." },
+
+      { ...T("notification_co2_ppm", "Carbon dioxide warning (ppm)"),
+        auto: true, advanced: true, noAdd: true, ord: 20, placeholder: "1400" },
+      { ...T("notification_open_minutes", "Door left open (minutes)"),
+        auto: true, advanced: true, noAdd: true, ord: 21, placeholder: "10" },
+      { ...T("notification_battery_threshold", "Low battery below (%)"),
+        auto: true, advanced: true, noAdd: true, ord: 22, placeholder: "20" },
     ],
   },
   {
     label: "Scenes", icon: "scenes", iconColor: "var(--hemma-color-purple, #9333ea)", group: "rooms",
     scope: "dashboard", col: "a",
     toggleFn: "scenes",
-    fields: [
-      { ...LIST("scenes", "Scenes to show", ["scene"]), always: true, ord: 1,
-        hint: "Every scene shows automatically, sorted by name. Add scenes here "
-          + "to pin a fixed list in the order you choose instead." },
-      { ...LIST("scene_exclude", "Scenes to hide"), domains: ["scene"],
-        auto: true, advanced: true, noAdd: true, ord: 2,
-        hint: "Never shown, whether the list above is automatic or one you pinned" },
-    ],
+    fields: [],
   },
   {
-    // Its own panel above the tiles, owning every source it can draw. The Media
-    // pill is the same list in its other presentation.
     label: "Now Playing", icon: "music", iconColor: "var(--hemma-color-pink, #ff4d70)", group: "rooms",
     toggleFn: "nowplaying",
+    subs: [
+      { id: "np", label: "" },
+      { id: "players", label: "Media players" },
+      { id: "plex", label: "Plex" },
+      { id: "psn", label: "PlayStation" },
+      { id: "discord", label: "Discord" },
+      { id: "steam", label: "Steam" },
+    ],
     fields: [
-      { ...T("pause_timeout_minutes", "Hide paused after (minutes)"), advanced: true, ord: 41,
+      { ...T("pause_timeout_minutes", "Hide paused after (minutes)"),
+        auto: true, advanced: true, noAdd: true, ord: 41,
         placeholder: "10" },
-      // The collapse lives in one HA helper shared by every room, so this is
-      // written to every room too - two rooms could not disagree about it
-      // without one of them lying.
       { key: "start_minimized", label: "Start minimized", type: "bool", boolDefault: false,
-        auto: true, scope: "dashboard", ord: 45,
-        hint: "Only the waveform shows until you tap it; it collapses again on every reload" },
+        auto: true, scope: "dashboard", ord: 5 },
 
       ...mediaSources(),
     ],
@@ -1062,12 +1127,9 @@ const SECTIONS = [
       { ...E("quality_sensor", "Air quality", ["sensor"]), ord: 4 },
       { key: "temp_unit", label: "Unit", type: "select", options: ["", "F", "C"], auto: true, ord: 1,
         optionLabels: { "": "Default (\u00b0F)", F: "Fahrenheit \u00b0F", C: "Celsius \u00b0C" } },
-      // "Show inline, not as a pill" said nothing about what either one is.
-      // What it does is swap the one Climate pill - which expands into
-      // Temperature, Humidity and Air Quality - for those three, always shown.
       { key: "show_climate_inline", label: "Separate climate badges", type: "bool",
         boolDefault: false, advanced: true,
-        hint: "Shows Temperature, Humidity and Air Quality on the row instead of one Climate pill that expands into them." },
+        hint: "Shows temperature, humidity and air quality as their own badges." },
       { ...E("aqi_entity_pm25", "PM2.5", ["sensor"]), unit: "aqi", unitLabel: "Air quality popup", menuGroup: "Popup detail" },
       { ...E("aqi_entity_pm10", "PM10", ["sensor"]), unit: "aqi" },
       { ...E("aqi_entity_voc", "VOC", ["sensor"]), unit: "aqi" },
@@ -1085,12 +1147,12 @@ const SECTIONS = [
     iconColor: "var(--hemma-badge-light-color, var(--hemma-color-yellow, #FFCC00))", group: "badges",
     fields: [
       { ...E("light_group_entity", "Light group", ["light"]), ord: 1,
-        hint: "The pill totals this group, and each light in it becomes a sub badge" },
+        hint: "Each light in the group becomes a sub badge." },
     ],
     repeats: [
       R("light", "Light", 10, [
         { ...E("light_entity_%", "Light %", ["light"]), ord: 2,
-          hint: "Listing lights here replaces the group's members as the sub badges" },
+          hint: "Replaces the group's lights as sub badges." },
       ]),
     ],
   },
@@ -1101,8 +1163,6 @@ const SECTIONS = [
   },
   {
     label: "Media", bid: "media", icon: "media", toggle: "show_media", iconColor: "var(--hemma-color-pink, #ff4d70)", group: "badges",
-    // This switch is the master for the pill AND the panel, which is why
-    // turning Now Playing on turns it back on.
     fields: mediaSources(),
     repeats: mediaRepeats(),
   },
@@ -1114,29 +1174,22 @@ const SECTIONS = [
       { ...E("security_lock_entity", "Lock", ["lock"]), noAdd: true, ord: 0 },
       { ...E("security_lock_entity_2", "Lock 2", ["lock"]), noAdd: true, ord: 0 },
 
-      // Not "group": how many locks you own is not a decision to make here.
-      // One or six, it is one badge and Hemma's lock popup either way.
-      { ...LIST("security_locks", "Locks", ["lock"]), unitLabel: "Locks", ord: 2,
-        hint: "One badge for all of them - one lock is fine" },
+      { ...LIST("security_locks", "Locks", ["lock"]), unitLabel: "Locks", ord: 2 },
       { ...T("security_locks_label", "Heading"), unitLabel: "Lock group heading",
         advanced: true, needs: "security_locks", ord: 3 },
       { ...MAP("security_door_sensors", "Door sensor", "security_locks", ["binary_sensor"]),
         unitLabel: "Door and window sensors", advanced: true, needs: "security_locks", ord: 4,
-        hint: "One contact sensor per lock, shown beside it in the popup",
+        hint: "Shown next to each lock in the popup.",
         emptyHint: "Add locks to the group first." },
       { ...MAP("security_lock_batteries", "Battery", "security_locks", ["sensor"]),
         unitLabel: "Lock batteries", advanced: true, needs: "security_locks", ord: 5,
         emptyHint: "Add locks to the group first." },
 
-      { ...LIST("security_cameras", "Cameras", ["camera"]), unitLabel: "Cameras", ord: 6,
-        hint: "One badge for all of them - one camera is fine" },
+      { ...LIST("security_cameras", "Cameras", ["camera"]), unitLabel: "Cameras", ord: 6 },
       { ...T("security_cameras_label", "Heading"), unitLabel: "Camera group heading",
         advanced: true, needs: "security_cameras", ord: 7 },
     ],
     repeats: [
-      // hemma_badge_security already switches on domain - lock, camera, contact
-      // sensor, garage cover - so one slot covers all of them and the kind only
-      // decides which entities the picker offers.
       R("secbadge", "Badge", 8, [
         { ...E("security_entity_%", "Device %", ["lock", "camera", "binary_sensor", "cover"]), ord: 1 },
         { ...T("security_label_%", "Label"), advanced: true, ord: 1 },
@@ -1150,12 +1203,8 @@ const SECTIONS = [
     label: "Energy", bid: "energy", icon: "energy", toggle: "show_energy",
     iconColor: "var(--hemma-badge-energy-color, var(--hemma-color-green, #30D158))", group: "badges",
     fields: [
-      // NOT auto: sectionLive means "some ADDABLE unit has a value", so auto
-      // would leave Energy with nothing addable and the section could never
-      // start.
       { ...E("energy_power_entity", "Room power", ["sensor"]), classes: ["power"], ord: 1,
-        hint: "The room's total draw - this is the number the Energy badge shows. "
-          + "Without it the badge falls back to today's cost" },
+        hint: "The number the Energy badge shows. Without it, the badge shows today's cost." },
       { ...E("energy_usage_today", "Usage today", ["sensor"]), classes: ["energy"], auto: true, ord: 2 },
       { ...E("energy_usage_month", "Usage this month", ["sensor"]), classes: ["energy"], auto: true, ord: 3 },
       { ...E("energy_cost_today", "Cost today", ["sensor"]), classes: ["monetary"], auto: true, ord: 4 },
@@ -1168,14 +1217,11 @@ const SECTIONS = [
           options: ["", "cost", "power", "energy"],
           optionLabels: { "": "Automatic", cost: "Running cost",
             power: "Power now (W)", energy: "Energy used (kWh)" },
-          hint: "Automatic reads the sensor itself - a cost sensor shows money, "
-            + "a kWh sensor shows kWh, anything else shows watts" },
+          hint: "Automatic picks cost, kWh or watts from the sensor." },
         { ...T("energy_label_%", "Label"), advanced: true, ord: 6 },
         { ...E("energy_cost_%", "Also show cost", ["sensor"]), classes: ["monetary"],
           advanced: true, ord: 6, placeholder: "Optional",
-          hint: "Only for a badge showing watts or kWh that should carry its cost "
-            + "as well, as \"8 W \u00b7 $1.23\". Leave empty when the sensor above "
-            + "is already a cost sensor" },
+          hint: "Adds cost to a watts or kWh badge, like 8 W · $1.23." },
       ]),
       R("endev", "Popup device", 6, [
         { ...T("energy_popup_name_%", "Name"), needs: "energy_entity_%", ord: 7 },
@@ -1200,9 +1246,6 @@ function sectionFields(sec) {
           ...f,
           key: f.key.replace("%", n),
           label: f.label.replace("%", n),
-          // So a repeat can depend on its OWN index - "Popup device 3" is only
-          // offered once sub-badge 3 exists, rather than all six showing up
-          // whether or not there is anything for them to override.
           needs: f.needs ? f.needs.replace("%", n) : f.needs,
           unit: rep.id + "#" + n,
           unitLabel: rep.label + " " + n,
@@ -1233,8 +1276,19 @@ const unitsOf = (sec) => {
   return [...seen.values()];
 };
 
+const dashScopedKeys = () => {
+  const out = new Set();
+  SECTIONS.forEach((sec) => {
+    sectionFields(sec).forEach((f) => {
+      if (f.key && (f.scope === "dashboard" || sec.scope === "dashboard")) out.add(f.key);
+    });
+  });
+  return [...out];
+};
+
 const FINGERPRINT_KEY = "hemma_template_fingerprint";
 const LAST_DASH_KEY = "hemma_panel_last_dashboard";
+const NOT_HEMMA_KEY = "hemma_panel_not_hemma_v1";
 
 const hashStr = (str) => {
   let h = 0x811c9dc5;
@@ -1248,14 +1302,6 @@ const fingerprintOf = (templates) => {
   return out;
 };
 
-// The bundle is built from dashboards/templates/**, where these are authored, so
-// it wins. Templates the bundle does not carry are left alone.
-// The scene row is built in filter-overlay.js, so its variables live in the
-// template defaults that refreshTemplates replaces on every save - the rooms
-// hold the choice and this projects it back. Null, not deleted: _hemmaSC.list
-// reads that as "discover everything".
-// The Home badge's sub badges are the OTHER rooms' energy costs, derived here
-// because only the panel sees across rooms. Any entry pins the list.
 function energySubsAuto(rooms) {
   const home = (rooms || [])[0];
   const V = home && home.variables;
@@ -1270,16 +1316,11 @@ function deriveEnergyRooms(rooms) {
   const V = home.variables;
   if (V.show_energy === false) return 0;
 
-  // Auto until you edit a slot. Absent means auto too, but only from an empty
-  // list - so a dashboard configured by hand before this existed is never
-  // rewritten out from under it.
   if (V.energy_subs_auto === false) return 0;
   if (V.energy_subs_auto === undefined) {
     for (let i = 1; i <= 6; i++) if (V["energy_entity_" + i]) return 0;
   }
 
-  // Rebuilt from scratch each time, so a room added, removed or renamed is
-  // picked up rather than appended around.
   for (let i = 1; i <= 6; i++) {
     ["energy_entity_", "energy_label_", "energy_unit_", "energy_popup_name_",
      "energy_popup_power_", "energy_popup_today_", "energy_popup_month_",
@@ -1307,34 +1348,143 @@ function deriveEnergyRooms(rooms) {
   return n;
 }
 
+const SCENE_KEYS = ["scenes", "scene_exclude", "scene_order", "scene_colors"];
+const SCENE_LIST_KEYS = SCENE_KEYS.slice(0, 3);
+
+function eachObject(o, fn) {
+  if (Array.isArray(o)) o.forEach((x) => eachObject(x, fn));
+  else if (o && typeof o === "object") {
+    fn(o);
+    Object.keys(o).forEach((k) => eachObject(o[k], fn));
+  }
+}
+
+function scenePrefValue(key, v) {
+  if (key === "scene_colors") {
+    const map = Array.isArray(v) ? Object.assign({}, ...v.filter((x) => x && typeof x === "object")) : v;
+    return map && typeof map === "object" && Object.keys(map).length ? clone(map) : null;
+  }
+  return Array.isArray(v) && v.length ? v.slice() : null;
+}
+
+function scenePrefsIn(root) {
+  const out = {};
+  const take = (holder) => {
+    if (!holder) return;
+    SCENE_KEYS.forEach((k) => {
+      if (out[k] === undefined) {
+        const val = scenePrefValue(k, holder[k]);
+        if (val) out[k] = val;
+      }
+    });
+  };
+  const rows = [], cards = [];
+  eachObject(root, (o) => {
+    if (o.template === "hemma_scene_row" && o.variables) rows.push(o.variables);
+    else if (o.type === "custom:hemma-nav" || o.type === FILTER_OVERLAY) cards.push(o);
+  });
+  rows.forEach(take);
+  cards.forEach(take);
+  const t = root && (root.button_card_templates || root.templates);
+  take(t && t.hemma_scene_row && t.hemma_scene_row.variables);
+  return out;
+}
+
+function seedScenePrefs(rooms, sources) {
+  const list = (rooms || []).filter((r) => r && r.variables);
+  if (!list.length) return 0;
+  const found = {};
+  SCENE_KEYS.forEach((k) => {
+    if (k === "scene_colors") {
+      const merged = {};
+      list.slice().reverse().forEach((r) => Object.assign(merged, scenePrefValue(k, r.variables[k]) || {}));
+      if (Object.keys(merged).length) found[k] = merged;
+      return;
+    }
+    const at = list.find((r) => scenePrefValue(k, r.variables[k]));
+    if (at) found[k] = scenePrefValue(k, at.variables[k]);
+  });
+  if (!Object.keys(found).length) {
+    (sources || []).forEach((src) => {
+      const got = scenePrefsIn(src);
+      Object.keys(got).forEach((k) => { if (found[k] === undefined) found[k] = got[k]; });
+    });
+  }
+  let n = 0;
+  list.forEach((r) => {
+    SCENE_KEYS.forEach((k) => {
+      const want = found[k];
+      if (stable(want === undefined ? null : want) === stable(scenePrefValue(k, r.variables[k]))) return;
+      if (want === undefined) delete r.variables[k];
+      else r.variables[k] = clone(want);
+      n++;
+    });
+  });
+  return n;
+}
+
 function applyScenePick(cfg, rooms) {
-  const t = cfg && cfg.button_card_templates;
-  if (!t) return;
+  if (!cfg) return;
   const src = ((rooms || [])[0] || {}).variables || {};
-  const pick = (k) => (Array.isArray(src[k]) && src[k].length ? src[k].slice() : null);
-  ["hemma_scene_row", "hemma_popup_scenes"].forEach((name) => {
-    if (!t[name] || !t[name].variables) return;
-    t[name].variables.scenes = pick("scenes");
-    t[name].variables.scene_exclude = pick("scene_exclude");
+  const val = (k) => scenePrefValue(k, src[k]);
+  if (cfg.button_card_templates) {
+    cfg.button_card_templates = clone(cfg.button_card_templates);
+    const row = cfg.button_card_templates.hemma_scene_row;
+    if (row && row.variables) {
+      SCENE_LIST_KEYS.forEach((k) => { row.variables[k] = val(k); });
+      row.variables.scene_colors = val("scene_colors") || {};
+    }
+  }
+  eachObject(cfg, (o) => {
+    const nav = o.type === "custom:hemma-nav";
+    if (nav || (o.type === FILTER_OVERLAY && o.room)) {
+      (nav ? SCENE_KEYS : SCENE_LIST_KEYS).forEach((k) => {
+        const x = val(k);
+        if (x) o[k] = x; else delete o[k];
+      });
+    } else if (o.template === "hemma_scene_row" && o.variables) {
+      SCENE_KEYS.forEach((k) => delete o.variables[k]);
+      if (!Object.keys(o.variables).length) delete o.variables;
+    }
   });
 }
 
-// A root-level key, not a card, so the preference rides in the rooms and is
-// written out here. Anything else under kiosk_mode is preserved - hide_sidebar
-// especially, since Hemma's hamburger is the only way back to the sidebar.
 function applyKiosk(cfg, rooms) {
   const v = (((rooms || [])[0] || {}).variables) || {};
   const hide = v.hemma_hide_header !== false;
   const prev = cfg.kiosk_mode || {};
-  cfg.kiosk_mode = {
+  const users = (prev.user_settings || []).map((u) => omit(u, ["hide_header"]));
+  const out = {
     ...prev,
     hide_header: hide,
     mobile_settings: { ...(prev.mobile_settings || {}), hide_header: hide },
   };
+  Object.keys(KIOSK_DIALOG).forEach((k) => {
+    const [key, def] = KIOSK_DIALOG[k];
+    if (v[k] === undefined && prev[key] === undefined) return;
+    out[key] = v[k] === undefined ? def : v[k] !== false;
+  });
+  if (users.length) out.user_settings = users;
+  cfg.kiosk_mode = out;
 }
 
-// Routes are per-dashboard and retargetRoutes rewrites them at save, so they
-// are never evidence that the card itself changed.
+function seedKiosk(rooms, cfg) {
+  const km = (cfg || {}).kiosk_mode;
+  const list = rooms || [];
+  if (!km || !list.length) return 0;
+  let n = 0;
+  const seed = (rv, on, def) => {
+    if (on === def) return;
+    list.forEach((r) => { if (r.variables[rv] === undefined) { r.variables[rv] = on; n++; } });
+  };
+  if (km.hide_header !== undefined) seed("hemma_hide_header", !!km.hide_header, true);
+  Object.keys(KIOSK_DIALOG).forEach((rv) => {
+    const [key, def] = KIOSK_DIALOG[rv];
+    if (km[key] !== undefined) seed(rv, !!km[key], def);
+  });
+  return n;
+}
+
 function withoutRoutes(o) {
   if (Array.isArray(o)) return o.map(withoutRoutes);
   if (o && typeof o === "object") {
@@ -1345,8 +1495,6 @@ function withoutRoutes(o) {
   return o;
 }
 
-// Routes carried over from a navbar-card dashboard open their menu through a
-// popup template; hemma-nav names the menu instead.
 function upgradeNavExtra(r) {
   const legacy = r && (r.popup !== undefined
     || (r.tap_action && r.tap_action.action === "open-popup"));
@@ -1372,13 +1520,6 @@ function refreshTemplates(current, bundleTemplates) {
     adopted.push(k);
   });
 
-  // A template retired upstream used to live in the dashboard forever, because
-  // this only ever added and overwrote. Every template Hemma ships is
-  // hemma_-prefixed, so an orphan in that namespace is one we dropped and can
-  // drop here too. Anything outside it is somebody's own work and is left
-  // alone - a custom tile has to survive a save. The fingerprint map cannot
-  // answer this: it is rewritten from the current bundle each time, so it has
-  // no memory of what we used to ship.
   const removed = [];
   const foreign = [];
   Object.keys(next).forEach((k) => {
@@ -1419,8 +1560,6 @@ const ROOM_ICONS = {
 
 const roomIcon = (name) => ROOM_ICONS[String(name || "").toLowerCase().trim()] || "mdi:home-variant";
 
-// Hemma's own glyphs, not MDI. An unknown name resolves to the set's "?" rather
-// than borrowing another room's icon, so a gap is visible.
 const ROOM_GLYPHS = {
   "home": "home",
   "living room": "living-room", "lounge": "living-room",
@@ -1439,14 +1578,9 @@ const ROOM_GLYPHS = {
   "garden": "plant", "patio": "plant", "backyard": "plant", "yard": "plant",
   "outdoor": "plant", "outside": "plant",
   "studio": "music",
-  // The phone layout's first section. Not a room, but it is a row in the rail
-  // like the rest and the fallback marker read as a missing glyph.
   "favorites": "favorites",
 };
 
-// Offered when the name gives nothing away, or when the auto pick is wrong.
-// Rooms only - the full set is mostly device glyphs, and scrolling past forty
-// of those to find a door is not a picker.
 const ROOM_ICON_CHOICES = [
   "home", "living-room", "kitchen", "bedroom", "chair", "desktop",
   "tv", "console", "media", "music", "door-closed", "plant", "fridge",
@@ -1467,17 +1601,37 @@ const roomIconLabel = (g) => ROOM_ICON_LABEL[g] || titleCase(g);
 const autoRoomGlyph = (name) =>
   ROOM_GLYPHS[String(name || "").toLowerCase().trim()] || "default";
 
-// A picked icon sticks; everything else follows the room's name, so renaming
-// moves the glyph. The pick lives on the header card's variables, so it survives
-// a save for free.
+const MENU_ICONS = {
+  "plus": "<path d=\"M12 5v14M5 12h14\"/>",
+  "pencil": "<path d=\"M5 19.5l1-4L16.5 5a2.1 2.1 0 0 1 3 3L9 18.5z\"/><path d=\"M14.5 7l3 3\"/>",
+  "grid": "<rect x=\"4.5\" y=\"4.5\" width=\"6\" height=\"6\" rx=\"1.6\"/><rect x=\"13.5\" y=\"4.5\" width=\"6\" height=\"6\" rx=\"1.6\"/><rect x=\"4.5\" y=\"13.5\" width=\"6\" height=\"6\" rx=\"1.6\"/><rect x=\"13.5\" y=\"13.5\" width=\"6\" height=\"6\" rx=\"1.6\"/>",
+  "trash": "<path d=\"M4.5 7h15\"/><path d=\"M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2\"/><path d=\"M6.5 7l.9 12a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12\"/>",
+  "undo": "<path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 0 11H12\"/>",
+  "open": "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"4.5\"/><path d=\"M10 14l4.5-4.5M10.5 9.5h4v4\"/>",
+  "import": "<path d=\"M12 4v10M8 10.5l4 3.5 4-3.5\"/><path d=\"M5 14.5v2.5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-2.5\"/>",
+  "phone": "<rect x=\"7\" y=\"3\" width=\"10\" height=\"18\" rx=\"2.6\"/><path d=\"M11 17.5h2\"/>",
+  "hints": "<path d=\"M9.5 18h5M10.5 21h3\"/><path d=\"M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z\"/>"
+};
+
+// The entity's own icon: its configured one, else what HA would draw for its state.
+function entityIconEl(hass, st) {
+  const own = st.attributes && st.attributes.icon;
+  if (!own && typeof customElements !== "undefined" && customElements.get("ha-state-icon")) {
+    const si = document.createElement("ha-state-icon");
+    si.hass = hass;
+    si.stateObj = st;
+    return si;
+  }
+  const ico = document.createElement("ha-icon");
+  ico.setAttribute("icon", own || "mdi:circle-small");
+  return ico;
+}
+
 const roomGlyph = (name, room) => {
   const chosen = ((room || {}).variables || {}).room_icon;
   return chosen || autoRoomGlyph(name);
 };
 
-// macOS menus scale out of the control that opened them. Scale and opacity
-// only: these carry backdrop-filter, and a filter here would take the blur with
-// it.
 const MAP_IN = [
   { opacity: 0, transform: "scale(0.70)" },
   { opacity: 1, transform: "scale(1.03)", offset: 0.52 },
@@ -1492,39 +1646,24 @@ const MENU_IN = [{ opacity: 0, transform: "scale(0.92)" }, { opacity: 1, transfo
 const MENU_OUT = [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.96)" }];
 // macOS decelerates into place and never travels past the target.
 const EASE = "cubic-bezier(.32,.72,0,1)";
-// Safari's own toggle is the reference: smooth, not snappy. EASE front-loads
-// too hard to read as a spring - released from rest means ZERO velocity, so the
-// curve eases in as well as out. Critically damped, no overshoot.
 const SEG_EASE = "cubic-bezier(.36,0,.16,1)";
 const SEG_MS = 380;
 
-// The preview and the Appearance card's photo slots fade in together on a room
-// change. Same keyframes, same timing, one place - they were two identical
-// literals and the preview still ran late, see _swapMap.
 const ROOM_FADE = [{ opacity: 0, filter: "blur(7px)" }, { opacity: 1, filter: "blur(0px)" }];
-// One dial for the whole room-switch morph, so the tab growing into its caret,
-// the tabs sliding along and the cards settling all stay in step. 1 is the
-// original pacing.
 const ROOM_MOTION = 1.35;
 const RT = (ms) => Math.round(ms * ROOM_MOTION);
 const ROOM_FADE_MS = RT(400);
 
-// Drawn at the real dashboard's size and SCALED, the way a design tool shows an
-// artboard: reflowing needs a minimum width and a definite container height, and
-// scaling needs neither. Returns null before layout - never invent a size.
-// Both shapes are drawn to the same rendered width, so a switch changes only the
-// height. The budget uses the taller of the two so neither overflows.
 const MAP_TALLEST = 486 / 700;
-// The layout breaks on the PANEL's width, never the viewport's: a media query
-// asks the window, and HA docks its sidebar at 256px, so a 1180px tablet hands
-// this element 924.
+// Every breakpoint here is the PANEL's width, not the viewport's.
+const PANEL_COMPACT = 1280;
+const PANEL_ROOMY = 1600;
+const SIDE_MIN = 212;
+const SIDE_MAX = 340;
+const SIDE_W_KEY = "hemma_panel_side_w";
 const PANEL_NARROW = 1000;
 const PANEL_TIGHT = 900;
 const PANEL_PHONE = 700;
-// Measured off the host's own left edge rather than its parent's clientWidth:
-// the host is width:var(--vpw), so reading a parent that shrink-wraps it would
-// feed this back into itself. Where HA starts the panel does not depend on how
-// wide the panel is, so the subtraction cannot loop.
 const panelW = (el) => {
   if (!el || !el.getBoundingClientRect) return window.innerWidth;
   const left = Math.max(0, el.getBoundingClientRect().left);
@@ -1533,15 +1672,7 @@ const panelW = (el) => {
 };
 const isNarrow = (el) => panelW(el) < PANEL_NARROW;
 const isPhone = (el) => panelW(el) < PANEL_PHONE;
-// A CONSTANT, not the container's measured height: that keeps changing while the
-// page loads - header settling, pills arriving, the font swapping - and each
-// change re-fitted the preview. The viewport height does not change during
-// load.
 const MAP_SHADOW_ROOM = 0;
-// `tallest` is the aspect the height budget is spent against. It was always
-// MAP_TALLEST, which is the tablet's - fine while every shape was landscape,
-// and wrong the moment a 390x844 phone joined them: a phone fitted to a
-// landscape ratio is three times too wide for the height it has.
 function fitWidth(availW, availH, cap, tallest) {
   if (!(availW >= 40)) return null;
   const ratio = tallest || MAP_TALLEST;
@@ -1575,9 +1706,6 @@ const FONT_STACKS = {
   hanken: '"Hanken Grotesk", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
   system: '-apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif',
 };
-// The @font-face blocks are a Lovelace resource, which only loads on a
-// dashboard - this is a panel, so the faces have to be asked for here or the
-// preview would letter Hanken in the panel's own font and lie about it.
 const FONT_CSS = "/local/hemma/fonts/hanken-grotesk.css";
 function ensureFontCss() {
   const ID = "hemma-panel-fontfaces";
@@ -1590,9 +1718,6 @@ function ensureFontCss() {
 }
 
 const ICON_DEFAULT = "Default";
-// Held DECODED for the life of the page: the bytes are cached, but a fresh <img>
-// still has to decode them and a decoded bitmap is dropped under memory
-// pressure. Keeping the element alive keeps the decode alive with it.
 const PHOTO_CACHE = new Map();
 const warmPhoto = (url) => {
   if (!url || PHOTO_CACHE.has(url)) return;
@@ -1609,10 +1734,6 @@ const iconUrl = (name) => {
   return ICON_DATA[k] || ICON_DATA.default;
 };
 
-// The shipped nav links to the author's own dashboard, embedded eleven times
-// over, so every route list is rewritten. `extras` goes on EVERY list, which is
-// what makes the Scenes switch stick - the template's own copy is replaced from
-// the bundle on every save.
 function retargetRoutes(root, urlPath, rooms, extras) {
   const out = clone(root);
   let rewritten = 0;
@@ -1634,19 +1755,31 @@ function retargetRoutes(root, urlPath, rooms, extras) {
 }
 
 
-// ─── tile catalog ─────────────────────────────────────────────────────────────
-// Types people set up by hand. Anything else in a room's row is preserved
-// untouched and shown read-only, so unknown tiles can be reordered but not
-// edited into something the template does not understand.
 
-// Inlined as data URIs: a fetch, even from cache, races the render that asks for
-// it, and this panel rebuilds on every keystroke. Regenerate with:
-//   cd /config/www/hemma/icons && python3 -c "
-//     import glob
-//     from urllib.parse import quote
-//     for f in sorted(glob.glob('*.svg')):
-//         print(f\"  \\\"{f[:-4]}\\\": \\\"data:image/svg+xml,{quote(open(f).read())}\\\",\")"
+// Inlined as data URIs: a fetch, even from cache, races the render that asks for them.
 const ICON_DATA = {
+  "alarm-fill": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2018.6727%2021.9079%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2221.9079%22%20opacity%3D%220%22%20width%3D%2218.6727%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M9.33013%2020.2344C14.4884%2020.2344%2018.6727%2016.0603%2018.6727%2010.9042C18.6727%205.74811%2014.4884%201.5741%209.33013%201.5741C4.17612%201.5741%204.44089e-16%205.74811%204.44089e-16%2010.9042C4.44089e-16%2016.0603%204.17612%2020.2344%209.33013%2020.2344ZM4.89525%2011.985C4.50976%2011.985%204.21341%2011.6887%204.21341%2011.3011C4.21341%2010.9302%204.50976%2010.6317%204.89525%2010.6317L8.6504%2010.6317L8.6504%205.3952C8.6504%205.00971%208.94886%204.71547%209.31978%204.71547C9.70738%204.71547%2010.0037%205.00971%2010.0037%205.3952L10.0037%2011.3011C10.0037%2011.6887%209.70738%2011.985%209.31978%2011.985ZM1.31884%204.08096C1.45591%204.08096%201.56384%204.05604%201.70091%203.94811L4.98116%201.48034C5.14315%201.35784%205.21791%201.21253%205.21791%201.05054C5.21791%200.842923%205.13069%200.67269%204.95412%200.521049C4.58241%200.178473%203.92238%200%203.34093%200C1.81075%200%200.594398%201.21846%200.594398%202.73598C0.594398%203.09695%200.660723%203.46636%200.760411%203.68854C0.866228%203.92932%201.06751%204.08096%201.31884%204.08096ZM17.3518%204.08096C17.5927%204.08096%2017.794%203.91897%2017.9123%203.68854C18.0202%203.47671%2018.0783%203.09695%2018.0783%202.73598C18.0783%201.21846%2016.8599%200%2015.3214%200C14.74%200%2014.08%200.178473%2013.7082%200.521049C13.542%200.67269%2013.4445%200.842923%2013.4445%201.05054C13.4445%201.21253%2013.5296%201.35784%2013.6916%201.48034L16.9593%203.94811C17.0964%204.05604%2017.2043%204.08096%2017.3518%204.08096ZM1.17042%2019.9665C1.46466%2020.2629%201.94331%2020.2629%202.2479%2019.9562L4.08347%2018.1185L3.03092%2017.0638L1.18077%2018.9119C0.876179%2019.2061%200.884419%2019.6827%201.17042%2019.9665ZM17.5023%2019.9665C17.7862%2019.6827%2017.7944%2019.2061%2017.492%2018.9119L15.6315%2017.0638L14.5789%2018.1185L16.4227%2019.9562C16.7294%2020.2629%2017.206%2020.2629%2017.5023%2019.9665Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "stove-fill": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2018.7724%2019.1609%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.1609%22%20opacity%3D%220%22%20width%3D%2218.7724%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M0%205.12808L18.7724%205.12808L18.7724%202.04088C18.7724%200.809761%2017.9857%200.00211021%2016.8025%200.00211021L1.95959%200.00211021C0.786749%200.00211021%200%200.809761%200%202.04088ZM4.00409%203.78079C3.44777%203.78079%202.99324%203.33662%202.99324%202.79276C2.99324%202.22609%203.44777%201.79437%204.00409%201.79437C4.5376%201.79437%205.00247%202.22609%205.00247%202.79276C5.00247%203.33662%204.5376%203.78079%204.00409%203.78079ZM7.58169%203.78079C7.03572%203.78079%206.57295%203.33662%206.57295%202.79276C6.57295%202.22609%207.03572%201.79437%207.58169%201.79437C8.12766%201.79437%208.58218%202.22609%208.58218%202.79276C8.58218%203.33662%208.12766%203.78079%207.58169%203.78079ZM11.1593%203.78079C10.6133%203.78079%2010.1588%203.33662%2010.1588%202.79276C10.1588%202.22609%2010.6133%201.79437%2011.1593%201.79437C11.7135%201.79437%2012.168%202.22609%2012.168%202.79276C12.168%203.33662%2011.7135%203.78079%2011.1593%203.78079ZM14.7472%203.78079C14.2013%203.78079%2013.7467%203.33662%2013.7467%202.79276C13.7467%202.22609%2014.2013%201.79437%2014.7472%201.79437C15.2932%201.79437%2015.7581%202.22609%2015.7581%202.79276C15.7581%203.33662%2015.2932%203.78079%2014.7472%203.78079ZM1.95959%2017.4111L16.8025%2017.4111C17.9857%2017.4111%2018.7724%2016.5931%2018.7724%2015.3702L18.7724%206.21229L0%206.21229L0%2015.3702C0%2016.5931%200.786749%2017.4111%201.95959%2017.4111ZM3.4334%2014.9847C2.87245%2014.9847%202.49652%2014.617%202.49652%2014.0457L2.49652%208.86396C2.49652%208.29267%202.87245%207.92497%203.4334%207.92497L15.3473%207.92497C15.9082%207.92497%2016.2841%208.29267%2016.2841%208.86396L16.2841%2014.0457C16.2841%2014.617%2015.9082%2014.9847%2015.3473%2014.9847ZM3.83496%2013.8984L14.9457%2013.8984C15.0916%2013.8984%2015.1978%2013.7818%2015.1978%2013.6338L15.1978%209.27588C15.1978%209.11751%2015.0916%209.00094%2014.9457%209.00094L3.83496%209.00094C3.68905%209.00094%203.58072%209.11751%203.58072%209.27588L3.58072%2013.6338C3.58072%2013.7818%203.68905%2013.8984%203.83496%2013.8984ZM2.78634%2019.1609C3.26287%2019.1609%203.57168%2018.8439%203.57168%2018.3777L3.57168%2016.4269L2.00099%2016.4269L2.00099%2018.3777C2.00099%2018.8439%202.32015%2019.1609%202.78634%2019.1609ZM15.9861%2019.1609C16.4523%2019.1609%2016.7714%2018.8439%2016.7714%2018.3777L16.7714%2016.4269L15.1904%2016.4269L15.1904%2018.3777C15.1904%2018.8439%2015.5096%2019.1609%2015.9861%2019.1609Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "stove": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2019.1636%2019.1774%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.1774%22%20opacity%3D%220%22%20width%3D%2219.1636%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.30116%2017.409L16.8625%2017.409C18.2444%2017.409%2019.1636%2016.4875%2019.1636%2015.1114L19.1636%202.28719C19.1636%200.919398%2018.2444%200%2016.8625%200L2.30116%200C0.919198%200%200%200.919398%200%202.28719L0%2015.1114C0%2016.4875%200.919198%2017.409%202.30116%2017.409ZM2.30729%2015.8383C1.86614%2015.8383%201.57069%2015.5219%201.57069%2015.0432L1.57069%202.36578C1.57069%201.88704%201.86614%201.56858%202.30729%201.56858L16.8481%201.56858C17.2975%201.56858%2017.5929%201.88704%2017.5929%202.36578L17.5929%2015.0432C17.5929%2015.5219%2017.2975%2015.8383%2016.8481%2015.8383ZM4.50916%204.30446C5.04267%204.30446%205.4765%203.87064%205.4765%203.34748C5.4765%202.80151%205.04267%202.37804%204.50916%202.37804C3.97354%202.37804%203.53972%202.80151%203.53972%203.34748C3.53972%203.87064%203.97354%204.30446%204.50916%204.30446ZM7.8901%204.30446C8.41537%204.30446%208.85954%203.87064%208.85954%203.34748C8.85954%202.80151%208.41537%202.37804%207.8901%202.37804C7.35659%202.37804%206.91242%202.80151%206.91242%203.34748C6.91242%203.87064%207.35659%204.30446%207.8901%204.30446ZM11.2607%204.30446C11.7963%204.30446%2012.2405%203.87064%2012.2405%203.34748C12.2405%202.80151%2011.7963%202.37804%2011.2607%202.37804C10.7375%202.37804%2010.2933%202.80151%2010.2933%203.34748C10.2933%203.87064%2010.7375%204.30446%2011.2607%204.30446ZM14.6437%204.30446C15.1793%204.30446%2015.6235%203.87064%2015.6235%203.34748C15.6235%202.80151%2015.1793%202.37804%2014.6437%202.37804C14.1185%202.37804%2013.6764%202.80151%2013.6764%203.34748C13.6764%203.87064%2014.1185%204.30446%2014.6437%204.30446ZM0.947138%206.4172L18.2269%206.4172L18.2269%205.13632L0.947138%205.13632ZM3.81426%2014.6845L15.3473%2014.6845C15.9082%2014.6845%2016.2634%2014.3251%2016.2634%2013.7641L16.2634%208.48098C16.2634%207.93039%2015.9082%207.57305%2015.3473%207.57305L3.81426%207.57305C3.26367%207.57305%202.90843%207.93039%202.90843%208.48098L2.90843%2013.7641C2.90843%2014.3251%203.26367%2014.6845%203.81426%2014.6845ZM4.24688%2013.5982C4.10097%2013.5982%203.99475%2013.492%203.99475%2013.3419L3.99475%208.9136C3.99475%208.76558%204.10097%208.6469%204.24688%208.6469L14.925%208.6469C15.0709%208.6469%2015.1771%208.76558%2015.1771%208.9136L15.1771%2013.3419C15.1771%2013.492%2015.0709%2013.5982%2014.925%2013.5982ZM2.78634%2019.1588C3.26287%2019.1588%203.57168%2018.8521%203.57168%2018.3756L3.57168%2016.4269L2.00099%2016.4269L2.00099%2018.3756C2.00099%2018.8521%202.32015%2019.1588%202.78634%2019.1588ZM16.367%2019.1588C16.8435%2019.1588%2017.1627%2018.8521%2017.1627%2018.3756L17.1627%2016.4269L15.5816%2016.4269L15.5816%2018.3756C15.5816%2018.8521%2015.9008%2019.1588%2016.367%2019.1588Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "allergens": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.8081%2023.9299%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2223.9299%22%20opacity%3D%220%22%20width%3D%2223.8081%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M7.86383%2022.9156C7.86383%2023.4798%207.41373%2023.9299%206.84746%2023.9299C6.29364%2023.9299%205.84354%2023.4798%205.84354%2022.9156C5.84354%2022.3493%206.29364%2021.9013%206.84746%2021.9013C7.41373%2021.9013%207.86383%2022.3493%207.86383%2022.9156ZM13.1188%2021.4837C13.1188%2022.0499%2012.6687%2022.4979%2012.1046%2022.4979C11.5383%2022.4979%2011.0882%2022.0499%2011.0882%2021.4837C11.0882%2020.9195%2011.5383%2020.4694%2012.1046%2020.4694C12.6687%2020.4694%2013.1188%2020.9195%2013.1188%2021.4837ZM3.40791%2020.152C3.40791%2020.7162%202.95992%2021.1663%202.39365%2021.1663C1.82949%2021.1663%201.37939%2020.7162%201.37939%2020.152C1.37939%2019.5858%201.82949%2019.1378%202.39365%2019.1378C2.95992%2019.1378%203.40791%2019.5858%203.40791%2020.152ZM16.0109%2017.0092C16.0109%2017.5733%2015.5629%2018.0234%2014.9966%2018.0234C14.4324%2018.0234%2013.9823%2017.5733%2013.9823%2017.0092C13.9823%2016.4429%2014.4324%2015.9949%2014.9966%2015.9949C15.5629%2015.9949%2016.0109%2016.4429%2016.0109%2017.0092ZM2.03064%2014.8838C2.03064%2015.45%201.58265%2015.898%201.01637%2015.898C0.452213%2015.898%200.00211021%2015.45%200.00211021%2014.8838C0.00211021%2014.3196%200.452213%2013.8695%201.01637%2013.8695C1.58265%2013.8695%202.03064%2014.3196%202.03064%2014.8838ZM20.7976%2014.503C20.7976%2015.0672%2020.3475%2015.5173%2019.7833%2015.5173C19.2171%2015.5173%2018.7691%2015.0672%2018.7691%2014.503C18.7691%2013.9368%2019.2171%2013.4888%2019.7833%2013.4888C20.3475%2013.4888%2020.7976%2013.9368%2020.7976%2014.503ZM4.94658%2010.2168C4.94658%2010.7831%204.49858%2011.2311%203.93231%2011.2311C3.36815%2011.2311%202.91805%2010.7831%202.91805%2010.2168C2.91805%209.65265%203.36815%209.20254%203.93231%209.20254C4.49858%209.20254%204.94658%209.65265%204.94658%2010.2168ZM23.8081%209.59138C23.8081%2010.1555%2023.358%2010.6056%2022.7917%2010.6056C22.2276%2010.6056%2021.7774%2010.1555%2021.7774%209.59138C21.7774%209.02511%2022.2276%208.57501%2022.7917%208.57501C23.358%208.57501%2023.8081%209.02511%2023.8081%209.59138ZM9.34783%207.17235C9.34783%207.72827%208.89983%208.17626%208.33356%208.17626C7.77975%208.17626%207.3193%207.72827%207.3193%207.17235C7.3193%206.60608%207.77975%206.15808%208.33356%206.15808C8.89983%206.15808%209.34783%206.60608%209.34783%207.17235ZM22.6461%204.0526C22.6461%204.61676%2022.196%205.06686%2021.6422%205.06686C21.0759%205.06686%2020.6279%204.61676%2020.6279%204.0526C20.6279%203.48632%2021.0759%203.03833%2021.6422%203.03833C22.196%203.03833%2022.6461%203.48632%2022.6461%204.0526ZM12.1617%202.19779C12.1617%202.76406%2011.7137%203.21416%2011.1474%203.21416C10.5936%203.21416%2010.1435%202.76406%2010.1435%202.19779C10.1435%201.64398%2010.5936%201.19387%2011.1474%201.19387C11.7137%201.19387%2012.1617%201.64398%2012.1617%202.19779ZM17.6715%201.04612C17.6715%201.61028%2017.2235%202.06038%2016.6676%202.06038C16.1034%202.06038%2015.6533%201.61028%2015.6533%201.04612C15.6533%200.479846%2016.1034%200.0318534%2016.6676%200.0318534C17.2235%200.0318534%2017.6715%200.479846%2017.6715%201.04612Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%20%3Cpath%20d%3D%22M12.1331%2015.9562C12.1331%2018.3143%2010.2461%2020.2198%207.90046%2020.2198C5.56514%2020.2198%203.65962%2018.3122%203.65962%2015.9562C3.65962%2013.6333%205.56514%2011.7464%207.90046%2011.7464C10.2337%2011.7464%2012.1331%2013.6333%2012.1331%2015.9562ZM5.28286%2015.9562C5.28286%2017.4166%206.45037%2018.5966%207.90046%2018.5966C9.35055%2018.5966%2010.5098%2017.4187%2010.5098%2015.9562C10.5098%2014.5289%209.33809%2013.3696%207.90046%2013.3696C6.46072%2013.3696%205.28286%2014.5289%205.28286%2015.9562ZM20.3521%208.36212C20.3521%2011.0546%2018.1475%2013.2592%2015.4675%2013.2592C12.7875%2013.2592%2010.5829%2011.0546%2010.5829%208.36212C10.5829%205.68422%2012.7875%203.4921%2015.4675%203.4921C18.1475%203.4921%2020.3521%205.68422%2020.3521%208.36212ZM12.2082%208.36212C12.2082%2010.1487%2013.6934%2011.6359%2015.4675%2011.6359C17.2519%2011.6359%2018.7164%2010.1487%2018.7164%208.36212C18.7164%206.5798%2017.2622%205.12569%2015.4675%205.12569C13.683%205.12569%2012.2082%206.5798%2012.2082%208.36212Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "allergens-fill": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.8081%2023.9299%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2223.9299%22%20opacity%3D%220%22%20width%3D%2223.8081%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M7.90046%2020.2198C10.2461%2020.2198%2012.1331%2018.3143%2012.1331%2015.9562C12.1331%2013.6333%2010.2337%2011.7464%207.90046%2011.7464C5.56514%2011.7464%203.65962%2013.6333%203.65962%2015.9562C3.65962%2018.3122%205.56514%2020.2198%207.90046%2020.2198ZM15.4675%2013.2592C18.1475%2013.2592%2020.3521%2011.0546%2020.3521%208.36212C20.3521%205.68422%2018.1475%203.4921%2015.4675%203.4921C12.7875%203.4921%2010.5829%205.68422%2010.5829%208.36212C10.5829%2011.0546%2012.7875%2013.2592%2015.4675%2013.2592ZM11.1474%203.21416C11.7137%203.21416%2012.1617%202.76406%2012.1617%202.19779C12.1617%201.64398%2011.7137%201.19387%2011.1474%201.19387C10.5936%201.19387%2010.1435%201.64398%2010.1435%202.19779C10.1435%202.76406%2010.5936%203.21416%2011.1474%203.21416ZM16.6676%202.06038C17.2235%202.06038%2017.6715%201.61028%2017.6715%201.04612C17.6715%200.479846%2017.2235%200.0318534%2016.6676%200.0318534C16.1034%200.0318534%2015.6533%200.479846%2015.6533%201.04612C15.6533%201.61028%2016.1034%202.06038%2016.6676%202.06038ZM21.6422%205.06686C22.196%205.06686%2022.6461%204.61676%2022.6461%204.0526C22.6461%203.48632%2022.196%203.03833%2021.6422%203.03833C21.0759%203.03833%2020.6279%203.48632%2020.6279%204.0526C20.6279%204.61676%2021.0759%205.06686%2021.6422%205.06686ZM22.7917%2010.6056C23.358%2010.6056%2023.8081%2010.1555%2023.8081%209.59138C23.8081%209.02511%2023.358%208.57501%2022.7917%208.57501C22.2276%208.57501%2021.7774%209.02511%2021.7774%209.59138C21.7774%2010.1555%2022.2276%2010.6056%2022.7917%2010.6056ZM19.7833%2015.5173C20.3475%2015.5173%2020.7976%2015.0672%2020.7976%2014.503C20.7976%2013.9368%2020.3475%2013.4888%2019.7833%2013.4888C19.2171%2013.4888%2018.7691%2013.9368%2018.7691%2014.503C18.7691%2015.0672%2019.2171%2015.5173%2019.7833%2015.5173ZM14.9966%2018.0234C15.5629%2018.0234%2016.0109%2017.5733%2016.0109%2017.0092C16.0109%2016.4429%2015.5629%2015.9949%2014.9966%2015.9949C14.4324%2015.9949%2013.9823%2016.4429%2013.9823%2017.0092C13.9823%2017.5733%2014.4324%2018.0234%2014.9966%2018.0234ZM12.1046%2022.4979C12.6687%2022.4979%2013.1188%2022.0499%2013.1188%2021.4837C13.1188%2020.9195%2012.6687%2020.4694%2012.1046%2020.4694C11.5383%2020.4694%2011.0882%2020.9195%2011.0882%2021.4837C11.0882%2022.0499%2011.5383%2022.4979%2012.1046%2022.4979ZM6.84746%2023.9299C7.41373%2023.9299%207.86383%2023.4798%207.86383%2022.9156C7.86383%2022.3493%207.41373%2021.9013%206.84746%2021.9013C6.29364%2021.9013%205.84354%2022.3493%205.84354%2022.9156C5.84354%2023.4798%206.29364%2023.9299%206.84746%2023.9299ZM2.39365%2021.1663C2.95992%2021.1663%203.40791%2020.7162%203.40791%2020.152C3.40791%2019.5858%202.95992%2019.1378%202.39365%2019.1378C1.82949%2019.1378%201.37939%2019.5858%201.37939%2020.152C1.37939%2020.7162%201.82949%2021.1663%202.39365%2021.1663ZM1.01637%2015.898C1.58265%2015.898%202.03064%2015.45%202.03064%2014.8838C2.03064%2014.3196%201.58265%2013.8695%201.01637%2013.8695C0.452213%2013.8695%200.00211021%2014.3196%200.00211021%2014.8838C0.00211021%2015.45%200.452213%2015.898%201.01637%2015.898ZM3.93231%2011.2311C4.49858%2011.2311%204.94658%2010.7831%204.94658%2010.2168C4.94658%209.65265%204.49858%209.20254%203.93231%209.20254C3.36815%209.20254%202.91805%209.65265%202.91805%2010.2168C2.91805%2010.7831%203.36815%2011.2311%203.93231%2011.2311ZM8.33356%208.17626C8.89983%208.17626%209.34783%207.72827%209.34783%207.17235C9.34783%206.60608%208.89983%206.15808%208.33356%206.15808C7.77975%206.15808%207.3193%206.60608%207.3193%207.17235C7.3193%207.72827%207.77975%208.17626%208.33356%208.17626Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "apple-watch": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2015.078%2020.8958%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.8958%22%20opacity%3D%220%22%20width%3D%2215.078%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.35131%2014.186L2.35131%206.71404C2.35131%205.25471%203.20368%204.37953%204.62161%204.37953L10.4065%204.37953C11.8348%204.37953%2012.6747%205.25471%2012.6747%206.71404L12.6747%2014.186C12.6747%2015.6432%2011.8348%2016.5184%2010.4065%2016.5184L4.62161%2016.5184C3.20368%2016.5184%202.35131%2015.6432%202.35131%2014.186Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M0.925529%2014.3951C0.925529%2015.909%201.5129%2017.0196%202.62384%2017.628C3.16348%2017.9165%203.47038%2018.2792%203.67588%2018.9247L3.97957%2019.9768C4.16628%2020.6012%204.5999%2020.8958%205.25742%2020.8958L9.76859%2020.8958C10.4489%2020.8958%2010.8515%2020.6115%2011.0464%2019.9768L11.3626%2018.9247C11.5556%2018.2792%2011.8729%2017.9165%2012.4022%2017.628C13.5131%2017.0196%2014.1005%2015.909%2014.1005%2014.3951L14.1005%206.50281C14.1005%204.9889%2013.5131%203.87837%2012.4022%203.26989C11.8729%202.98138%2011.5556%202.61871%2011.3626%201.97325L11.0464%200.921108C10.8722%200.307103%2010.4386%200.00211021%209.76859%200.00211021L5.25742%200.00211021C4.5999%200.00211021%204.16628%200.296752%203.97957%200.921108L3.67588%201.97325C3.48073%202.60836%203.17383%202.99173%202.62384%203.26989C1.52325%203.84732%200.925529%204.9682%200.925529%206.50281ZM2.35131%2014.186L2.35131%206.71404C2.35131%205.25471%203.20368%204.37953%204.62161%204.37953L10.4065%204.37953C11.8348%204.37953%2012.6747%205.25471%2012.6747%206.71404L12.6747%2014.186C12.6747%2015.6432%2011.8348%2016.5184%2010.4065%2016.5184L4.62161%2016.5184C3.20368%2016.5184%202.35131%2015.6432%202.35131%2014.186ZM13.8904%209.76095L14.2437%209.76095C14.7438%209.76095%2015.078%209.41224%2015.078%208.86647L15.078%207.54119C15.078%206.98507%2014.7438%206.63636%2014.2437%206.63636L13.8904%206.63636Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "assist": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2022.7138%2020.4559%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.4559%22%20opacity%3D%220%22%20width%3D%2222.7138%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M11.3476%2019.0089C17.9091%2019.0089%2022.7138%2015.0057%2022.7138%209.49303C22.7138%203.97826%2017.8987%200%2011.3476%200C4.79435%200%204.44089e-16%203.97826%204.44089e-16%209.49303C4.44089e-16%2011.3305%200.53773%2013.0227%201.4721%2014.3972C1.9416%2015.0891%202.10168%2015.5609%202.10168%2015.9579C2.10168%2016.4819%201.93929%2016.8952%201.50084%2017.2921C0.723335%2017.9534%201.13163%2019.0089%202.14339%2019.0089C3.36647%2019.0089%204.72471%2018.5848%205.71928%2017.8912C7.37025%2018.6266%209.29135%2019.0089%2011.3476%2019.0089ZM11.3476%2017.4382C9.48821%2017.4382%207.82417%2017.0808%206.40534%2016.4574C5.77947%2016.1796%205.32344%2016.2481%204.72863%2016.6067C4.31601%2016.8715%203.82572%2017.0945%203.32759%2017.2022C3.53641%2016.8569%203.67237%2016.466%203.67237%2015.9579C3.67237%2015.2439%203.40456%2014.4468%202.79207%2013.5166C2.0007%2012.3803%201.57069%2011.0031%201.57069%209.49303C1.57069%204.91696%205.61075%201.56858%2011.3476%201.56858C17.0927%201.56858%2021.1327%204.91696%2021.1327%209.49303C21.1327%2014.0795%2017.0927%2017.4382%2011.3476%2017.4382Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%20%3Cpath%20d%3D%22M15.8995%2010.9105C16.6881%2010.9105%2017.3211%2010.2775%2017.3211%209.48881C17.3211%208.7105%2016.6881%208.07962%2015.8995%208.07962C15.1233%208.07962%2014.4903%208.7105%2014.4903%209.48881C14.4903%2010.2775%2015.1233%2010.9105%2015.8995%2010.9105Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%20%3Cpath%20d%3D%22M11.3476%2010.9105C12.1238%2010.9105%2012.7671%2010.2775%2012.7671%209.48881C12.7671%208.7105%2012.1238%208.07962%2011.3476%208.07962C10.5693%208.07962%209.9363%208.7105%209.9363%209.48881C9.9363%2010.2775%2010.5693%2010.9105%2011.3476%2010.9105Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%20%3Cpath%20d%3D%22M6.79363%2010.9105C7.57194%2010.9105%208.21317%2010.2775%208.21317%209.48881C8.21317%208.7105%207.56159%208.07962%206.79363%208.07962C6.01532%208.07962%205.38232%208.7105%205.38232%209.48881C5.38232%2010.2775%206.01532%2010.9105%206.79363%2010.9105Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "assist-fill": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2022.5859%2020.3397%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.3397%22%20opacity%3D%220%22%20width%3D%2222.5859%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M22.5859%209.39907C22.5859%2014.8347%2017.8437%2018.7878%2011.2826%2018.7878C9.1393%2018.7878%207.17681%2018.3827%205.48654%2017.612C4.48795%2018.3513%203.1069%2018.7878%201.75961%2018.7878C1.11917%2018.7878%200.883017%2018.3066%201.31011%2017.919C1.90592%2017.3731%202.15343%2016.8685%202.15343%2016.1103C2.15343%2014.3677%204.44089e-16%2013.3068%204.44089e-16%209.39907C4.44089e-16%203.94067%204.74219%200%2011.2826%200C17.8333%200%2022.5859%203.94067%2022.5859%209.39907ZM14.5834%209.43073C14.5834%2010.2401%2015.235%2010.902%2016.0444%2010.902C16.8434%2010.902%2017.5053%2010.2401%2017.5053%209.43073C17.5053%208.62348%2016.8434%207.96978%2016.0444%207.96978C15.235%207.96978%2014.5834%208.62348%2014.5834%209.43073ZM9.87419%209.43073C9.87419%2010.2401%2010.5279%2010.902%2011.3372%2010.902C12.1445%2010.902%2012.8085%2010.2401%2012.8085%209.43073C12.8085%208.62348%2012.1445%207.96978%2011.3372%207.96978C10.5279%207.96978%209.87419%208.62348%209.87419%209.43073ZM5.17742%209.43073C5.17742%2010.2401%205.84147%2010.902%206.63837%2010.902C7.44773%2010.902%208.09932%2010.2401%208.09932%209.43073C8.09932%208.62348%207.43738%207.96978%206.63837%207.96978C5.84147%207.96978%205.17742%208.62348%205.17742%209.43073Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "bell": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2018.4229%2020.5437%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.5437%22%20opacity%3D%220%22%20width%3D%2218.4229%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M1.47543%2016.6424L16.9475%2016.6424C17.8737%2016.6424%2018.4229%2016.1635%2018.4229%2015.4526C18.4229%2014.4764%2017.4285%2013.594%2016.5856%2012.7342C15.9341%2012.0595%2015.7647%2010.6748%2015.687%209.54722C15.6176%205.80108%2014.6249%203.21563%2012.03%202.27402C11.6589%201.00683%2010.6561%200%209.21145%200C7.76889%200%206.76398%201.00683%206.39286%202.27402C3.79797%203.21563%202.80531%205.80108%202.72553%209.54722C2.6582%2010.6748%202.48053%2012.0595%201.8394%2012.7342C0.986124%2013.594%202.22045e-15%2014.4764%202.22045e-15%2015.4526C2.22045e-15%2016.1635%200.54919%2016.6424%201.47543%2016.6424ZM9.21145%2020.5416C10.8722%2020.5416%2012.0697%2019.3398%2012.2051%2017.9655L6.21781%2017.9655C6.34282%2019.3398%207.55284%2020.5416%209.21145%2020.5416Z%22%20fill%3D%22white%22%20fill-opacity%3D%221%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "bell-badge": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2019.042%2023.3761%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2223.3761%22%20opacity%3D%220%22%20width%3D%2219.042%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cdefs%3E%3Cmask%20id%3D%22hemma-bell-notch%22%20maskUnits%3D%22userSpaceOnUse%22%20x%3D%22-4%22%20y%3D%22-4%22%20width%3D%2228%22%20height%3D%2232%22%3E%3Crect%20x%3D%22-4%22%20y%3D%22-4%22%20width%3D%2228%22%20height%3D%2232%22%20fill%3D%22white%22/%3E%3Ccircle%20cx%3D%2214.322%22%20cy%3D%224.731%22%20r%3D%225.700%22%20fill%3D%22black%22/%3E%3C/mask%3E%3C/defs%3E%3Cpath%20mask%3D%22url%28%23hemma-bell-notch%29%22%20d%3D%22M9.52099%2021.9578C7.86237%2021.9578%206.65235%2020.756%206.52734%2019.3817L12.5146%2019.3817C12.3793%2020.756%2011.1817%2021.9578%209.52099%2021.9578ZM10.727%201.68277C10.0267%202.50564%209.60359%203.5696%209.60359%204.72542C9.60359%207.30705%2011.7349%209.43838%2014.3269%209.43838C14.8692%209.43838%2015.3916%209.34449%2015.8763%209.16748C15.9467%209.72937%2015.9848%2010.3298%2015.9966%2010.9634C16.0742%2012.0911%2016.2437%2013.4757%2016.8951%2014.1504C17.7381%2015.0102%2018.7324%2015.8926%2018.7324%2016.8688C18.7324%2017.5798%2018.1832%2018.0586%2017.257%2018.0586L1.78496%2018.0586C0.858724%2018.0586%200.309534%2017.5798%200.309534%2016.8688C0.309534%2015.8926%201.29566%2015.0102%202.14893%2014.1504C2.79006%2013.4757%202.96773%2012.0911%203.03506%2010.9634C3.11485%207.21731%204.1075%204.63186%206.7024%203.69025C7.07351%202.42306%208.07843%201.41623%209.52099%201.41623C9.96708%201.41623%2010.371%201.51223%2010.727%201.68277Z%22%20fill%3D%22white%22%20fill-opacity%3D%221%22/%3E%0A%20%20%3Ccircle%20cx%3D%2214.322%22%20cy%3D%224.731%22%20r%3D%224.400%22%20fill%3D%22%23ff4245%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "chair": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2019.3742%2017.1664%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2217.1664%22%20opacity%3D%220%22%20width%3D%2219.3742%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M5.6215%209.31979L13.7527%209.31979L13.7527%207.08064C13.7527%205.37088%2014.9025%204.09282%2016.5379%204.09282L16.6464%204.09282L16.6464%202.12158C16.6464%200.849053%2015.8183%200%2014.5916%200L4.78049%200C3.5559%200%202.72774%200.849053%202.72774%202.12158L2.72774%204.09282L2.83627%204.09282C4.47167%204.09282%205.6215%205.37088%205.6215%207.08064ZM0%2013.0222C0%2014.238%200.81549%2015.0575%201.99828%2015.0575L17.3759%2015.0575C18.5587%2015.0575%2019.3742%2014.238%2019.3742%2013.0222L19.3742%207.08064C19.3742%205.8649%2018.5587%205.05785%2017.3759%205.05785L16.8898%205.05785C15.7049%205.05785%2014.8916%205.8649%2014.8916%207.08064L14.8916%2010.4587L4.48263%2010.4587L4.48263%207.08064C4.48263%205.8649%203.66925%205.05785%202.48435%205.05785L1.99828%205.05785C0.81549%205.05785%200%205.8649%200%207.08064ZM3.44465%2017.1457L4.06077%2017.1457C4.57951%2017.1457%204.93414%2016.8117%204.93414%2016.2805L4.93414%2014.2142L2.59198%2014.2142L2.59198%2016.2805C2.59198%2016.8117%202.9217%2017.1457%203.44465%2017.1457ZM15.3134%2017.1457L15.9295%2017.1457C16.4525%2017.1457%2016.7822%2016.8117%2016.7822%2016.2805L16.7822%2014.2142L14.4504%2014.2142L14.4504%2016.2805C14.4504%2016.8117%2014.7947%2017.1457%2015.3134%2017.1457Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "co2": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.4645%2018.4611%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2218.4611%22%20opacity%3D%220%22%20width%3D%2223.4645%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M4.92067%2018.4404L17.6378%2018.4404C20.9186%2018.4404%2023.4645%2015.9528%2023.4645%2012.7719C23.4645%209.56387%2020.8707%207.13459%2017.3222%207.1367C16.0201%204.55497%2013.6325%202.99062%2010.7469%202.99062C6.96124%202.99062%203.75325%205.92548%203.41068%209.82133C1.45853%2010.3715%200.13898%2012.0158%200.13898%2014.0948C0.13898%2016.4929%201.88311%2018.4404%204.92067%2018.4404ZM4.89997%2016.8615C2.9025%2016.8615%201.71178%2015.7861%201.71178%2014.1362C1.71178%2012.7291%202.60997%2011.731%204.18929%2011.2989C4.73466%2011.1702%204.93575%2010.9132%204.97926%2010.3473C5.22004%207.03823%207.69102%204.55921%2010.7469%204.55921C13.0915%204.55921%2014.9095%205.87092%2016.0103%208.10796C16.2384%208.58911%2016.5143%208.75914%2017.1156%208.75914C20.1702%208.75914%2021.8916%2010.6042%2021.8916%2012.8071C21.8916%2015.0762%2020.0752%2016.8615%2017.7392%2016.8615ZM1.37261%208.88616C2.1264%208.88616%202.7203%208.2819%202.7203%207.51565C2.7203%206.76187%202.1264%206.15972%201.37261%206.15972C0.606366%206.15972%200%206.76187%200%207.51565C0%208.2819%200.606366%208.88616%201.37261%208.88616ZM15.6755%202.56866C16.3794%202.56866%2016.9608%201.98722%2016.9608%201.28328C16.9608%200.581444%2016.3794%200%2015.6755%200C14.9715%200%2014.4025%200.581444%2014.4025%201.28328C14.4025%201.98722%2014.9715%202.56866%2015.6755%202.56866ZM19.7787%205.94307C20.8398%205.94307%2021.6933%205.0917%2021.6933%204.02639C21.6933%202.96319%2020.8398%202.11183%2019.7787%202.11183C18.7134%202.11183%2017.8621%202.96319%2017.8621%204.02639C17.8621%205.0917%2018.7134%205.94307%2019.7787%205.94307Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.425%22/%3E%0A%20%20%3Cpath%20d%3D%22M8.58398%2015.0771C9.86113%2015.0771%2010.6352%2014.1569%2010.6751%2013.1639C10.6814%2012.8133%2010.4823%2012.5873%2010.1671%2012.5873C9.8769%2012.5873%209.72757%2012.7573%209.64879%2013.087C9.53433%2013.5767%209.25345%2014.1047%208.58398%2014.1047C7.61696%2014.1047%207.3175%2013.0751%207.3175%2011.9507C7.3175%2010.8883%207.63153%209.82174%208.57363%209.82174C9.2431%209.82174%209.50116%2010.3518%209.61773%2010.8519C9.69652%2011.1816%209.84585%2011.3495%2010.1464%2011.3495C10.4512%2011.3495%2010.6504%2011.1132%2010.6441%2010.775C10.6042%209.76948%209.83008%208.85963%208.56328%208.85963C6.95582%208.85963%206.24153%2010.2559%206.24153%2011.9507C6.24153%2013.6205%206.90598%2015.0771%208.58398%2015.0771ZM13.3172%2015.0771C14.7336%2015.0771%2015.6286%2013.864%2015.6286%2011.9632C15.6286%2010.0603%2014.7336%208.85963%2013.313%208.85963C11.8863%208.85963%2010.9809%2010.0603%2010.9809%2011.9632C10.9809%2013.864%2011.8863%2015.0771%2013.3172%2015.0771ZM13.3172%2014.1047C12.5394%2014.1047%2012.059%2013.3083%2012.059%2011.9632C12.059%2010.6202%2012.5373%209.82174%2013.313%209.82174C14.0701%209.82174%2014.5484%2010.6202%2014.5484%2011.9632C14.5484%2013.3083%2014.0722%2014.1047%2013.3172%2014.1047ZM16.2808%2015.4611L17.8551%2015.4611C18.0439%2015.4611%2018.2078%2015.2869%2018.2078%2015.098C18.2078%2014.9092%2018.0336%2014.7371%2017.8551%2014.7371L17.1001%2014.7371L17.4226%2014.4081C17.8108%2014.03%2018.0809%2013.6727%2018.0809%2013.2843C18.0809%2012.7299%2017.6325%2012.3353%2017.0076%2012.3353C16.3473%2012.3353%2015.9321%2012.8357%2015.9321%2013.2452C15.9321%2013.4961%2016.1167%2013.6393%2016.3055%2013.6393C16.5461%2013.6393%2016.6519%2013.4775%2016.6976%2013.3322C16.7599%2013.151%2016.8598%2013.0594%2017.0097%2013.0594C17.1617%2013.0594%2017.2616%2013.1635%2017.2616%2013.305C17.2616%2013.5191%2017.0477%2013.7745%2016.8397%2013.993L16.0939%2014.7601C16.0048%2014.841%2015.9384%2014.9943%2015.9384%2015.1105C15.9384%2015.3118%2016.0899%2015.4611%2016.2808%2015.4611Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "desktop": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.2701%2020.3431%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.3431%22%20opacity%3D%220%22%20width%3D%2223.2701%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M1.99477%2012.5793C1.70585%2012.5793%201.57069%2012.467%201.57069%2012.1656L1.57069%202.95306C1.57069%202.51712%201.84061%202.2472%202.27866%202.2472L20.9915%202.2472C21.4295%202.2472%2021.6994%202.51712%2021.6994%202.95306L21.6994%2012.1656C21.6994%2012.467%2021.5746%2012.5793%2021.2753%2012.5793Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.25162%2016.8844L21.0185%2016.8844C22.4221%2016.8844%2023.2701%2016.0363%2023.2701%2014.6328L23.2701%202.92813C23.2701%201.52667%2022.4221%200.67651%2021.0185%200.67651L2.25162%200.67651C0.848052%200.67651%200%201.52667%200%202.92813L0%2014.6328C0%2016.0363%200.848052%2016.8844%202.25162%2016.8844ZM1.99477%2012.5793C1.70585%2012.5793%201.57069%2012.467%201.57069%2012.1656L1.57069%202.95306C1.57069%202.51712%201.84061%202.2472%202.27866%202.2472L20.9915%202.2472C21.4295%202.2472%2021.6994%202.51712%2021.6994%202.95306L21.6994%2012.1656C21.6994%2012.467%2021.5746%2012.5793%2021.2753%2012.5793ZM8.55293%2019.2097L14.7275%2019.2097L14.7275%2016.7598L8.55293%2016.7598ZM8.50038%2020.3431L14.7801%2020.3431C15.2091%2020.3431%2015.5675%2019.9971%2015.5675%2019.5578C15.5675%2019.1205%2015.2091%2018.7642%2014.7801%2018.7642L8.50038%2018.7642C8.06102%2018.7642%207.70257%2019.1205%207.70257%2019.5578C7.70257%2019.9971%208.06102%2020.3431%208.50038%2020.3431Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "ipad": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2016.3074%2022.0052%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2222.0052%22%20opacity%3D%220%22%20width%3D%2216.3074%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M1.57069%2019.1508L1.57069%202.84009C1.57069%202.04079%202.06149%201.56858%202.9022%201.56858L13.4052%201.56858C14.2459%201.56858%2014.7388%202.04079%2014.7388%202.84009L14.7388%2019.1508C14.7388%2019.9501%2014.2459%2020.4223%2013.4052%2020.4223L2.9022%2020.4223C2.06149%2020.4223%201.57069%2019.9501%201.57069%2019.1508Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M5.3982%2019.6746L10.9299%2019.6746C11.1911%2019.6746%2011.3861%2019.49%2011.3861%2019.2184C11.3861%2018.9489%2011.1911%2018.7643%2010.9299%2018.7643L5.3982%2018.7643C5.12657%2018.7643%204.94197%2018.9489%204.94197%2019.2184C4.94197%2019.49%205.12657%2019.6746%205.3982%2019.6746ZM0%2019.4138C0%2020.9551%201.08963%2021.993%202.70342%2021.993L13.606%2021.993C15.2302%2021.993%2016.3074%2020.9551%2016.3074%2019.4138L16.3074%202.58745C16.3074%201.03577%2015.2302%200%2013.606%200L2.70342%200C1.08963%200%200%201.03577%200%202.58745ZM1.57069%2019.1508L1.57069%202.84009C1.57069%202.04079%202.06149%201.56858%202.9022%201.56858L13.4052%201.56858C14.2459%201.56858%2014.7388%202.04079%2014.7388%202.84009L14.7388%2019.1508C14.7388%2019.9501%2014.2459%2020.4223%2013.4052%2020.4223L2.9022%2020.4223C2.06149%2020.4223%201.57069%2019.9501%201.57069%2019.1508Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "ipad-landscape": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.018%2017.999%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2217.999%22%20opacity%3D%220%22%20width%3D%2223.018%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M3.08851%2016.418C2.11324%2016.418%201.57069%2015.9065%201.57069%2014.8898L1.57069%203.12589C1.57069%202.11958%202.11324%201.59773%203.08851%201.59773L19.9295%201.59773C20.8963%201.59773%2021.4473%202.11958%2021.4473%203.12589L21.4473%2014.8898C21.4473%2015.9065%2020.8963%2016.418%2019.9295%2016.418Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M7.73926%2015.6703L15.2891%2015.6703C15.5503%2015.6703%2015.7349%2015.4982%2015.7349%2015.2266C15.7349%2014.9446%2015.5503%2014.7703%2015.2891%2014.7703L7.73926%2014.7703C7.47798%2014.7703%207.28302%2014.9446%207.28302%2015.2266C7.28302%2015.4982%207.47798%2015.6703%207.73926%2015.6703ZM3.06359%2017.999L19.9544%2017.999C22.0008%2017.999%2023.018%2016.9776%2023.018%2014.9665L23.018%203.04922C23.018%201.03808%2022.0008%200.0166814%2019.9544%200.0166814L3.06359%200.0166814C1.02753%200.0166814%200%201.03386%200%203.04922L0%2014.9665C0%2016.9819%201.02753%2017.999%203.06359%2017.999ZM3.08851%2016.418C2.11324%2016.418%201.57069%2015.9065%201.57069%2014.8898L1.57069%203.12589C1.57069%202.11958%202.11324%201.59773%203.08851%201.59773L19.9295%201.59773C20.8963%201.59773%2021.4473%202.11958%2021.4473%203.12589L21.4473%2014.8898C21.4473%2015.9065%2020.8963%2016.418%2019.9295%2016.418Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "iphone": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2012.5542%2020.6878%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.6878%22%20opacity%3D%220%22%20width%3D%2212.5542%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.85597%2019.0985C2.03828%2019.0985%201.57069%2018.662%201.57069%2017.8753L1.57069%202.79176C1.57069%202.00512%202.03828%201.57069%202.85597%201.57069L9.68789%201.57069C10.5159%201.57069%2010.9732%202.00512%2010.9732%202.79176L10.9732%2017.8753C10.9732%2018.662%2010.5159%2019.0985%209.68789%2019.0985Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.65509%2020.6671L9.88878%2020.6671C11.4815%2020.6671%2012.5542%2019.6564%2012.5542%2018.1341L12.5542%202.53299C12.5542%201.01064%2011.4815%200%209.88878%200L2.65509%200C1.06029%200%200%201.01064%200%202.53299L0%2018.1341C0%2019.6564%201.06029%2020.6671%202.65509%2020.6671ZM2.85597%2019.0985C2.03828%2019.0985%201.57069%2018.662%201.57069%2017.8753L1.57069%202.79176C1.57069%202.00512%202.03828%201.57069%202.85597%201.57069L9.68789%201.57069C10.5159%201.57069%2010.9732%202.00512%2010.9732%202.79176L10.9732%2017.8753C10.9732%2018.662%2010.5159%2019.0985%209.68789%2019.0985ZM4.2111%2018.3823L8.35346%2018.3823C8.61263%2018.3823%208.80759%2018.1977%208.80759%2017.9261C8.80759%2017.6544%208.61263%2017.4719%208.35346%2017.4719L4.2111%2017.4719C3.93947%2017.4719%203.75698%2017.6544%203.75698%2017.9261C3.75698%2018.1977%203.93947%2018.3823%204.2111%2018.3823ZM5.09372%203.64062L7.4605%203.64062C7.83794%203.64062%208.14274%203.33583%208.14274%202.94592C8.14274%202.56848%207.83794%202.26368%207.4605%202.26368L5.09372%202.26368C4.70592%202.26368%204.40113%202.56848%204.40113%202.94592C4.40113%203.33583%204.70592%203.64062%205.09372%203.64062Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "laptop": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2028.1539%2015.8994%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2215.8994%22%20opacity%3D%220%22%20width%3D%2228.1539%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M4.81717%2013.6763L4.81717%202.53159C4.81717%201.8993%205.12297%201.58315%205.75737%201.58315L22.3965%201.58315C23.0309%201.58315%2023.3471%201.8993%2023.3471%202.53159L23.3471%2013.6763Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M0%2014.7919C0%2015.4017%200.495526%2015.8994%201.09496%2015.8994L27.0589%2015.8994C27.6666%2015.8994%2028.1539%2015.4017%2028.1539%2014.7919C28.1539%2014.1739%2027.6666%2013.6763%2027.0589%2013.6763L24.9178%2013.6763L24.9178%202.0844C24.9178%200.718314%2024.1912%200.0145711%2022.8272%200.0145711L5.32666%200.0145711C4.03514%200.0145711%203.23613%200.718314%203.23613%202.0844L3.23613%2013.6763L1.09496%2013.6763C0.495526%2013.6763%200%2014.1739%200%2014.7919ZM4.81717%2013.6763L4.81717%202.53159C4.81717%201.8993%205.12297%201.58315%205.75737%201.58315L22.3965%201.58315C23.0309%201.58315%2023.3471%201.8993%2023.3471%202.53159L23.3471%2013.6763Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "mesh": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2020.731%2018.2917%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2218.2917%22%20opacity%3D%220%22%20width%3D%2220.731%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.22045e-15%206.93996C2.22045e-15%209.47526%200.909849%2011.8173%202.53379%2013.5758C2.91295%2013.986%203.46003%2013.986%203.77497%2013.6276C4.07956%2013.2691%203.99043%2012.8091%203.63197%2012.4092C2.32297%2010.9553%201.59139%209.04224%201.59139%206.93996C1.59139%204.84592%202.32297%202.93287%203.63197%201.47896C3.99043%201.07086%204.07956%200.619045%203.77497%200.2627C3.46003-0.0957562%202.91295-0.0957562%202.53379%200.314453C0.909849%202.07084%202.22045e-15%204.4129%202.22045e-15%206.93996ZM16.9539%2013.6276C17.271%2013.986%2017.8159%2013.986%2018.1972%2013.5758C19.8108%2011.8173%2020.731%209.47526%2020.731%206.93996C20.731%204.4129%2019.8108%202.07084%2018.1972%200.314453C17.8159-0.0957562%2017.271-0.0957562%2016.9539%200.2627C16.6411%200.619045%2016.7406%201.07086%2017.0969%201.47896C18.408%202.93287%2019.1396%204.84592%2019.1396%206.93996C19.1396%209.04224%2018.408%2010.9553%2017.0969%2012.4092C16.7406%2012.8091%2016.6411%2013.2691%2016.9539%2013.6276Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.425%22/%3E%0A%20%20%3Cpath%20d%3D%22M4.10669%206.93996C4.10669%208.3789%204.59688%209.71393%205.44232%2010.7767C5.79253%2011.218%206.37891%2011.2076%206.7042%2010.8388C7.00879%2010.4907%206.88036%2010.0514%206.57366%209.63292C5.99332%208.90597%205.69808%207.96447%205.69808%206.93996C5.69808%205.92369%206.01021%205.01153%206.57366%204.25735C6.87825%203.83679%207.00879%203.39743%206.7042%203.05144C6.37891%202.68052%205.79253%202.67017%205.44232%203.11354C4.59688%204.17423%204.10669%205.51137%204.10669%206.93996ZM14.0247%2010.8388C14.3521%2011.2076%2014.9385%2011.218%2015.2762%2010.7767C16.132%209.71393%2016.6243%208.3789%2016.6243%206.93996C16.6243%205.51137%2016.132%204.17423%2015.2762%203.11354C14.9385%202.67017%2014.3521%202.68052%2014.0247%203.05144C13.7119%203.39743%2013.8528%203.83679%2014.1573%204.25735C14.7187%205.01153%2015.0329%205.92369%2015.0329%206.93996C15.0329%207.96447%2014.7377%208.90597%2014.1573%209.63292C13.8485%2010.0514%2013.7119%2010.4907%2014.0247%2010.8388Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.425%22/%3E%0A%20%20%3Cpath%20d%3D%22M8.61464%206.93996C8.61464%207.65385%209.01127%208.24947%209.61533%208.52723L9.61533%2017.304C9.61533%2017.7973%209.92203%2018.1454%2010.3593%2018.1454C10.8297%2018.1454%2011.1136%2017.8076%2011.1136%2017.304L11.1136%208.52723C11.699%208.24947%2012.1164%207.6435%2012.1164%206.93996C12.1164%205.96288%2011.3488%205.18286%2010.3593%205.18286C9.38219%205.18286%208.61464%205.96288%208.61464%206.93996Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "network": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2019.9197%2019.9218%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.9218%22%20opacity%3D%220%22%20width%3D%2219.9197%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M1.5721%205.81233C3.98479%208.38401%207.38512%209.87219%2010.9954%209.8534C13.8399%209.84707%2016.5535%208.90104%2018.7445%207.16273L18.2037%206.06817C16.1846%207.74226%2013.6637%208.66548%2010.9933%208.67392C7.53023%208.68869%204.30606%207.18594%202.12128%204.59778ZM0.528889%2011.3846C5.60451%2015.7246%2012.8703%2016.5303%2018.7308%2013.4683L18.6959%2012.1249C13.0072%2015.4214%205.73063%2014.6053%200.814489%2010.0638ZM5.36866%2018.0987L6.77414%2018.4267C6.10899%2016.8495%205.76068%2015.1895%205.72712%2013.4838C5.45801%208.62697%207.54321%204.00418%2011.2683%200.942718L10.0346%200.451813C6.33248%203.73104%204.2912%208.5091%204.55186%2013.5007C4.57909%2015.0589%204.85072%2016.6068%205.36866%2018.0987ZM11.8069%2019.063L12.9057%2018.574C11.0849%2016.001%2010.084%2012.9419%2010.084%209.75169C10.084%206.7271%2010.9607%203.83366%2012.6077%201.37232L11.4594%200.96382C9.79581%203.58062%208.90455%206.62129%208.90455%209.75169C8.90455%2013.1138%209.91368%2016.3366%2011.8069%2019.063ZM17.5582%2015.4323L18.3414%2014.5346C15.0627%2012.6576%2013.0125%209.20863%2012.9642%205.38101C12.9494%204.01182%2013.1883%202.6572%2013.6724%201.40035L12.5385%201.0831C12.0213%202.44365%2011.77%203.88952%2011.7847%205.38735C11.8331%209.54046%2014.0285%2013.3253%2017.5582%2015.4323ZM5.71526%209.73743C6.54954%209.73743%207.24273%209.05459%207.24273%208.20784C7.24273%207.37145%206.54954%206.68037%205.71526%206.68037C4.8664%206.68037%204.18356%207.37145%204.18356%208.20784C4.18356%209.05459%204.8664%209.73743%205.71526%209.73743ZM13.1937%2010.552C14.0196%2010.552%2014.694%209.87972%2014.694%209.04142C14.694%208.21769%2014.0196%207.54329%2013.1937%207.54329C12.3575%207.54329%2011.6831%208.21769%2011.6831%209.04142C11.6831%209.87972%2012.3575%2010.552%2013.1937%2010.552ZM10.2892%2016.1945C11.1277%2016.1945%2011.8042%2015.518%2011.8042%2014.6691C11.8042%2013.8306%2011.1277%2013.1541%2010.2892%2013.1541C9.44037%2013.1541%208.75351%2013.8306%208.75351%2014.6691C8.75351%2015.518%209.44037%2016.1945%2010.2892%2016.1945ZM9.95469%2019.9094C15.4553%2019.9094%2019.9197%2015.4553%2019.9197%209.95469C19.9197%204.45408%2015.4553%200%209.95469%200C4.46443%200%204.44089e-16%204.45408%204.44089e-16%209.95469C4.44089e-16%2015.4553%204.46443%2019.9094%209.95469%2019.9094ZM9.95469%2018.5871C5.1919%2018.5871%201.33263%2014.7175%201.33263%209.95469C1.33263%205.1919%205.1919%201.32228%209.95469%201.32228C14.7175%201.32228%2018.5871%205.1919%2018.5871%209.95469C18.5871%2014.7175%2014.7175%2018.5871%209.95469%2018.5871Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "pc": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2018.9228%2019.6913%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.6913%22%20opacity%3D%220%22%20width%3D%2218.9228%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M1.57069%2012.6416L1.57069%202.53772C1.57069%201.84332%201.86614%201.56858%202.53159%201.56858L16.3809%201.56858C17.0567%201.56858%2017.3522%201.84332%2017.3522%202.53772L17.3522%2012.6416C17.3522%2013.3278%2017.0567%2013.6004%2016.3809%2013.6004L2.53159%2013.6004C1.86614%2013.6004%201.57069%2013.3278%201.57069%2012.6416Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M3.98218%2010.9757L8.55535%2010.9757C8.74628%2010.9757%208.89772%2010.8449%208.89772%2010.6208C8.89772%2010.4134%208.74628%2010.2827%208.55535%2010.2827L3.98218%2010.2827C3.76844%2010.2827%203.617%2010.4134%203.617%2010.6208C3.617%2010.8449%203.76844%2010.9757%203.98218%2010.9757ZM3.98218%209.33084L10.3996%209.33084C10.6009%209.33084%2010.7419%209.2001%2010.7419%208.976C10.7419%208.76859%2010.6009%208.63785%2010.3996%208.63785L3.98218%208.63785C3.76844%208.63785%203.617%208.76859%203.617%208.976C3.617%209.2001%203.76844%209.33084%203.98218%209.33084ZM4.09433%205.37861C4.34757%205.37861%204.56132%205.16487%204.56132%204.91163C4.56132%204.64804%204.34757%204.42605%204.09433%204.42605C3.83074%204.42605%203.617%204.64804%203.617%204.91163C3.617%205.16487%203.83074%205.37861%204.09433%205.37861ZM4.09433%207.1356C4.34757%207.1356%204.56132%206.92186%204.56132%206.65827C4.56132%206.40503%204.34757%206.18304%204.09433%206.18304C3.83074%206.18304%203.617%206.40503%203.617%206.65827C3.617%206.92186%203.83074%207.1356%204.09433%207.1356ZM5.24938%205.73616C5.24938%206.34654%205.58352%206.94045%205.87645%207.19178C5.95121%207.25408%206.04246%207.28935%206.13793%207.28935C6.29148%207.28935%206.42011%207.17108%206.42011%207.00717C6.42011%206.88065%206.35167%206.81433%206.27289%206.73343C5.99453%206.43839%205.86359%206.09371%205.86359%205.73616C5.86359%205.37037%206.00488%205.04639%206.27289%204.75134C6.35167%204.64975%206.42011%204.59166%206.42011%204.46514C6.42011%204.30124%206.29148%204.17472%206.13793%204.17472C6.05281%204.17472%205.95121%204.22034%205.87645%204.28265C5.49036%204.60432%205.24938%205.13612%205.24938%205.73616Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%20%3Cpath%20d%3D%22M14.9764%2015.73C14.6318%2015.73%2014.3162%2015.4166%2014.3162%2015.0595C14.3162%2014.7044%2014.6318%2014.3889%2014.9764%2014.3889C15.3543%2014.3889%2015.6595%2014.7044%2015.6595%2015.0595C15.6595%2015.4166%2015.3543%2015.73%2014.9764%2015.73Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.2125%22/%3E%0A%20%20%3Cpath%20d%3D%22M0%2014.248C0%2015.9432%200.830061%2016.7525%202.4942%2016.7525L16.4286%2016.7525C18.0928%2016.7525%2018.9228%2015.9432%2018.9228%2014.248L18.9228%202.5128C18.9228%200.796899%2018.0824%200%2016.4079%200L2.50456%200C0.840412%200%200%200.796899%200%202.5128ZM1.57069%2012.6416L1.57069%202.53772C1.57069%201.84332%201.86614%201.56858%202.53159%201.56858L16.3809%201.56858C17.0567%201.56858%2017.3522%201.84332%2017.3522%202.53772L17.3522%2012.6416C17.3522%2013.3278%2017.0567%2013.6004%2016.3809%2013.6004L2.53159%2013.6004C1.86614%2013.6004%201.57069%2013.3278%201.57069%2012.6416ZM14.9764%2015.73C14.6318%2015.73%2014.3162%2015.4166%2014.3162%2015.0595C14.3162%2014.7044%2014.6318%2014.3889%2014.9764%2014.3889C15.3543%2014.3889%2015.6595%2014.7044%2015.6595%2015.0595C15.6595%2015.4166%2015.3543%2015.73%2014.9764%2015.73ZM9.45625%2017.9173C12.235%2017.9173%2014.4107%2017.2926%2015.0595%2016.3061L3.85305%2016.3061C4.51006%2017.2926%206.67746%2017.9173%209.45625%2017.9173ZM4.77656%2019.3992L14.1463%2019.3992C15.0229%2019.3992%2015.0892%2018.4271%2014.5047%2018.1701L12.1312%2017.0771L6.79161%2017.0771L4.41599%2018.1701C3.83364%2018.4271%203.89997%2019.3992%204.77656%2019.3992Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "sync": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.8176%2019.9218%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.9218%22%20opacity%3D%220%22%20width%3D%2223.8176%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M23.1259%208.32631L18.6431%208.32631C17.9507%208.32631%2017.7743%208.80726%2018.1517%209.34439L20.336%2012.4609C20.6429%2012.9068%2021.1156%2012.9172%2021.435%2012.4609L23.6172%209.35474C24.005%208.80726%2023.8183%208.32631%2023.1259%208.32631ZM11.9047%201.6535C16.4936%201.6535%2020.2059%205.36575%2020.2059%209.95469C20.2059%2010.4002%2020.5872%2010.7814%2021.043%2010.7814C21.4885%2010.7814%2021.8594%2010.4105%2021.8697%209.96504C21.8594%204.44373%2017.4053%200%2011.9047%200C8.97889%200%206.32069%201.26469%204.5016%203.29793C4.0935%203.75165%204.24052%204.3131%204.59897%204.58664C4.91814%204.81054%205.34503%204.83526%205.74277%204.39189C7.27185%202.70675%209.46789%201.6535%2011.9047%201.6535ZM0.693878%2011.5831L5.16424%2011.5831C5.85663%2011.5831%206.04335%2011.1021%205.6659%2010.565L3.48373%207.44844C3.17471%207.00255%202.70411%206.9922%202.38475%207.44844L0.200462%2010.5546C-0.185226%2011.1021-0.0109732%2011.5831%200.693878%2011.5831ZM11.9047%2018.2559C7.31576%2018.2559%203.61175%2014.5436%203.61175%209.95469C3.61175%209.5092%203.2326%209.12794%202.77676%209.12794C2.32917%209.12794%201.96037%209.49885%201.95001%209.94434C1.96037%2015.4656%206.41234%2019.9094%2011.9047%2019.9094C14.8388%2019.9094%2017.4866%2018.6447%2019.316%2016.6114C19.7159%2016.1577%2019.5792%2015.5963%2019.2083%2015.3227C18.9016%2015.0988%2018.4726%2015.0741%2018.0749%2015.5175C16.5479%2017.2026%2014.3394%2018.2559%2011.9047%2018.2559Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "co2-fill": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.4645%2018.4611%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2218.4611%22%20opacity%3D%220%22%20width%3D%2223.4645%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M17.3222%207.1367C20.8707%207.13459%2023.4645%209.56387%2023.4645%2012.7719C23.4645%2015.9528%2020.9186%2018.4404%2017.6378%2018.4404L4.92067%2018.4404C1.88311%2018.4404%200.13898%2016.4929%200.13898%2014.0948C0.13898%2012.0158%201.45853%2010.3715%203.41068%209.82133C3.75325%205.92548%206.96124%202.99062%2010.7469%202.99062C13.6325%202.99062%2016.0201%204.55497%2017.3222%207.1367ZM16.1495%2013.2659C16.1495%2013.5168%2016.3237%2013.6807%2016.5312%2013.6807C16.7717%2013.6807%2016.8775%2013.5086%2016.9439%2013.3633C17.0062%2013.1717%2017.0957%2013.0801%2017.256%2013.0801C17.4205%2013.0801%2017.5204%2013.1842%2017.5204%2013.3257C17.5204%2013.5502%2017.2961%2013.8159%2017.0881%2014.0344L16.3009%2014.8222C16.2221%2014.9113%2016.1558%2015.0771%2016.1558%2015.183C16.1558%2015.3946%2016.3073%2015.5543%2016.4982%2015.5543L18.1242%2015.5543C18.3317%2015.5543%2018.4956%2015.38%2018.4956%2015.1705C18.4956%2014.992%2018.3213%2014.8074%2018.1242%2014.8074L17.3589%2014.8074L17.6793%2014.4702C18.0778%2014.0818%2018.3583%2013.7037%2018.3583%2013.305C18.3583%2012.7402%2017.8995%2012.325%2017.2539%2012.325C16.5751%2012.325%2016.1495%2012.846%2016.1495%2013.2659ZM5.95382%2011.9507C5.95382%2013.6723%206.63897%2015.1703%208.37697%2015.1703C9.68517%2015.1703%2010.4903%2014.2294%2010.5302%2013.2053C10.5365%2012.8443%2010.3167%2012.608%2010.0036%2012.608C9.70094%2012.608%209.55161%2012.7676%209.46247%2013.1181C9.34801%2013.6284%209.0589%2014.1668%208.37697%2014.1668C7.39135%2014.1668%207.06908%2013.1062%207.06908%2011.9507C7.06908%2010.8572%207.40592%209.76999%208.36662%209.76999C9.04855%209.76999%209.31485%2010.3104%209.43142%2010.8105C9.52056%2011.1609%209.66989%2011.3288%209.97257%2011.3288C10.296%2011.3288%2010.5055%2011.0821%2010.4991%2010.7336C10.4593%209.70738%209.65411%208.76648%208.34592%208.76648C6.69916%208.76648%205.95382%2010.2041%205.95382%2011.9507ZM10.9395%2011.9632C10.9395%2013.9261%2011.876%2015.1703%2013.3483%2015.1703C14.806%2015.1703%2015.7321%2013.9261%2015.7321%2011.9632C15.7321%2010.0086%2014.806%208.76648%2013.3337%208.76648C11.876%208.76648%2010.9395%2010.0086%2010.9395%2011.9632ZM14.6209%2011.9632C14.6209%2013.3497%2014.1343%2014.1668%2013.3483%2014.1668C12.5498%2014.1668%2012.059%2013.3497%2012.059%2011.9632C12.059%2010.5788%2012.5477%209.76999%2013.3337%209.76999C14.1322%209.76999%2014.6209%2010.5788%2014.6209%2011.9632ZM2.7203%207.51565C2.7203%208.2819%202.1264%208.88616%201.37261%208.88616C0.606366%208.88616%200%208.2819%200%207.51565C0%206.76187%200.606366%206.15972%201.37261%206.15972C2.1264%206.15972%202.7203%206.76187%202.7203%207.51565ZM21.6933%204.02639C21.6933%205.0917%2020.8398%205.94307%2019.7787%205.94307C18.7134%205.94307%2017.8621%205.0917%2017.8621%204.02639C17.8621%202.96319%2018.7134%202.11183%2019.7787%202.11183C20.8398%202.11183%2021.6933%202.96319%2021.6933%204.02639ZM16.9608%201.28328C16.9608%201.98722%2016.3794%202.56866%2015.6755%202.56866C14.9715%202.56866%2014.4025%201.98722%2014.4025%201.28328C14.4025%200.581444%2014.9715%200%2015.6755%200C16.3794%200%2016.9608%200.581444%2016.9608%201.28328Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
   "access_point": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2275%22%20height%3D%2250%22%20fill%3D%22none%22%20viewBox%3D%220%200%2075%2050%22%3E%0A%20%20%3Cpath%20fill%3D%22%23fff%22%20d%3D%22M37.5%2050c-1.12%200-2.093-.41-2.919-1.232-.825-.822-1.238-1.79-1.238-2.905%200-1.115.413-2.084%201.238-2.905.826-.822%201.799-1.233%202.919-1.233s2.093.411%202.919%201.233c.825.821%201.238%201.79%201.238%202.905%200%201.115-.413%202.083-1.238%202.905C39.593%2049.589%2038.62%2050%2037.5%2050ZM16.893%2032.658l-1.858-1.848c3.125-3.17%206.565-5.575%2010.32-7.218%203.753-1.644%207.806-2.465%2012.16-2.465%204.353%200%208.402.821%2012.146%202.465%203.744%201.643%207.179%204.02%2010.304%207.13l-1.858%201.936c-2.889-2.875-6.087-5.061-9.596-6.558A27.78%2027.78%200%200%200%2037.5%2023.856%2027.78%2027.78%200%200%200%2026.489%2026.1c-3.509%201.497-6.707%203.683-9.596%206.558ZM1.946%2017.694%200%2015.757c4.835-4.812%2010.436-8.641%2016.804-11.488C23.172%201.423%2030.071%200%2037.5%200c7.43%200%2014.328%201.423%2020.696%204.27C64.564%207.115%2070.166%2010.944%2075%2015.756l-1.946%201.937a53.94%2053.94%200%200%200-16.14-10.96C50.87%204.064%2044.398%202.73%2037.5%202.73c-6.899%200-13.37%201.335-19.413%204.005a53.94%2053.94%200%200%200-16.141%2010.96Z%22/%3E%0A%3C/svg%3E%0A",
   "apple": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22utf-8%22%3F%3E%0A%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20height%3D%2248px%22%20viewBox%3D%220%20-960%20960%20960%22%20width%3D%2248px%22%20fill%3D%22%23FFFFFF%22%3E%0A%20%20%3Cg%20id%3D%22Layer_2%22%20transform%3D%22matrix%2818.386274%2C%20-0.004319%2C%200.004132%2C%2017.590906%2C%20-436.051978%2C%208.103295%29%22%20style%3D%22transform-origin%3A%20916.048px%20-488.096px%3B%22%3E%0A%20%20%20%20%3Cg%20id%3D%22Layer_1-2%22%20data-name%3D%22Layer%201%22%20transform%3D%22matrix%281%2C%200%2C%200%2C%201%2C%20895.148193%2C%20-513.098267%29%22%3E%0A%20%20%20%20%20%20%3Cpath%20class%3D%22cls-1%22%20d%3D%22M40.9%2C38.97c-.75%2C1.75-1.64%2C3.35-2.67%2C4.83-1.4%2C2.02-2.55%2C3.41-3.43%2C4.19-1.37%2C1.27-2.84%2C1.92-4.41%2C1.96-1.13%2C0-2.49-.32-4.08-.98-1.59-.65-3.05-.98-4.39-.98s-2.91.32-4.51.98c-1.61.66-2.91%2C1-3.9%2C1.03-1.51.06-3.01-.6-4.51-2.01-.96-.84-2.16-2.29-3.59-4.33-1.54-2.19-2.81-4.72-3.8-7.61-1.06-3.12-1.6-6.14-1.6-9.07%2C0-3.35.72-6.24%2C2.16-8.66%2C1.13-1.95%2C2.63-3.48%2C4.52-4.61%2C1.88-1.13%2C3.92-1.7%2C6.11-1.74%2C1.2%2C0%2C2.77.37%2C4.72%2C1.11%2C1.95.74%2C3.2%2C1.11%2C3.75%2C1.11.41%2C0%2C1.8-.44%2C4.15-1.31%2C2.23-.81%2C4.11-1.14%2C5.65-1.01%2C4.17.34%2C7.31%2C2%2C9.39%2C4.99-3.73%2C2.28-5.58%2C5.47-5.54%2C9.57.03%2C3.19%2C1.18%2C5.85%2C3.44%2C7.95%2C1.02.98%2C2.16%2C1.73%2C3.43%2C2.27-.28.81-.57%2C1.58-.88%2C2.32h0ZM31.33%2C1c0%2C2.5-.91%2C4.84-2.71%2C7-2.18%2C2.57-4.82%2C4.05-7.67%2C3.82-.04-.3-.06-.62-.06-.95%2C0-2.4%2C1.04-4.97%2C2.88-7.07.92-1.06%2C2.09-1.95%2C3.51-2.65%2C1.41-.69%2C2.75-1.08%2C4.01-1.15.04.33.05.67.05%2C1h0Z%22%20style%3D%22fill%3A%20rgb%28255%2C%20255%2C%20255%29%3B%22/%3E%0A%20%20%20%20%3C/g%3E%0A%20%20%3C/g%3E%0A%3C/svg%3E",
   "apple_tv": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2023.7539%2023.332%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2223.332%22%20opacity%3D%220%22%20width%3D%2223.7539%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M22.0312%201.40625C23.2266%202.60156%2023.4023%204.26562%2023.4023%206.26953L23.4023%2017.0742C23.4023%2019.0781%2023.2266%2020.7539%2022.0312%2021.9492C20.8359%2023.1445%2019.1484%2023.332%2017.1445%2023.332L6.24609%2023.332C4.25391%2023.332%202.56641%2023.1445%201.37109%2021.9492C0.175781%2020.7539%200%2019.0781%200%2017.0742L0%206.24609C0%204.27734%200.175781%202.60156%201.37109%201.40625C2.56641%200.210938%204.25391%200.0234375%206.22266%200.0234375L17.1445%200.0234375C19.1484%200.0234375%2020.8359%200.210938%2022.0312%201.40625ZM6.31641%209.62109C6%209.62109%205.64844%209.24609%205.0625%209.24609C4.41797%209.24609%203.90234%209.50391%203.5625%209.94922C3.15234%2010.4531%202.98828%2011.0625%202.98828%2011.707C2.98828%2012.7617%203.44531%2013.9922%204.13672%2014.7656C4.51172%2015.1641%204.78125%2015.375%205.10938%2015.375C5.60156%2015.375%205.87109%2015.0117%206.46875%2015.0117C6.72656%2015.0117%206.94922%2015.1172%207.10156%2015.1641C7.34766%2015.2461%207.51172%2015.3516%207.79297%2015.3516C8.09766%2015.3516%208.33203%2015.2344%208.49609%2015.0938C9.01172%2014.5664%209.43359%2013.8398%209.60938%2013.2188C9.14062%2013.0078%208.84766%2012.7148%208.67188%2012.2812C8.49609%2011.8008%208.51953%2011.3203%208.67188%2010.9102C8.76562%2010.6289%208.94141%2010.2891%209.41016%2010.0195C9.05859%209.49219%208.50781%209.23438%207.85156%209.23438C7.11328%209.23438%206.69141%209.62109%206.31641%209.62109ZM11.6602%207.80469L11.6602%209.23438L10.793%209.23438L10.793%2010.1953L11.6602%2010.1953L11.6602%2013.6992C11.6602%2014.918%2012.1406%2015.3516%2013.3711%2015.3516C13.6406%2015.3516%2013.9453%2015.3164%2014.0508%2015.3047L14.0508%2014.2852C13.9922%2014.3203%2013.7695%2014.3203%2013.6406%2014.3203C13.1484%2014.3203%2012.9141%2014.1094%2012.9141%2013.5586L12.9141%2010.1953L14.0742%2010.1953L14.0742%209.23438L12.9141%209.23438L12.9141%207.80469ZM14.6367%209.23438L16.8633%2015.3047L18.1758%2015.3047L20.3672%209.23438L19.0078%209.23438L17.5312%2014.1094L15.9609%209.23438ZM6.26953%209.03516C7.25391%209.14062%208.01562%208.07422%207.94531%207.20703C6.97266%207.25391%206.24609%208.12109%206.26953%209.03516Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
@@ -1743,15 +1876,15 @@ const ICON_DATA = {
   "tile": null,
   "window-shade-closed": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2016.7049%2020.7354%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.7354%22%20opacity%3D%220%22%20width%3D%2216.7049%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M0%2018.7286C0%2019.9165%200.81891%2020.723%202.04421%2020.723L14.6607%2020.723C15.8964%2020.723%2016.7049%2019.9165%2016.7049%2018.7286L16.7049%201.99436C16.7049%200.806449%2015.8964%200%2014.6607%200L2.04421%200C0.81891%200%200%200.806449%200%201.99436ZM1.5728%2018.631L1.5728%202.09194C1.5728%201.78042%201.77218%201.57069%202.06913%201.57069L14.6358%201.57069C14.9327%201.57069%2015.1321%201.78042%2015.1321%202.09194L15.1321%2018.631C15.1321%2018.9425%2014.9327%2019.1523%2014.6358%2019.1523L2.06913%2019.1523C1.77218%2019.1523%201.5728%2018.9425%201.5728%2018.631Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.425%22/%3E%0A%20%20%3Cpath%20d%3D%22M3.04119%2018.0134L13.6616%2018.0134C13.8502%2018.0134%2013.9932%2017.86%2013.9932%2017.6818L13.9932%203.04119C13.9932%202.86292%2013.8502%202.70957%2013.6616%202.70957L3.04119%202.70957C2.86503%202.70957%202.71168%202.86292%202.71168%203.04119L2.71168%2017.6818C2.71168%2017.86%202.86503%2018.0134%203.04119%2018.0134ZM6.78891%2016.819C6.50462%2016.819%206.31158%2016.626%206.31158%2016.3417C6.31158%2016.0574%206.50462%2015.8747%206.78891%2015.8747L9.75411%2015.8747C10.0384%2015.8747%2010.2314%2016.0574%2010.2314%2016.3417C10.2314%2016.626%2010.0384%2016.819%209.75411%2016.819Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
   "window-shade-open": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2016.7049%2020.7354%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220.7354%22%20opacity%3D%220%22%20width%3D%2216.7049%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M0%2018.7286C0%2019.9165%200.81891%2020.723%202.04421%2020.723L14.6607%2020.723C15.8964%2020.723%2016.7049%2019.9165%2016.7049%2018.7286L16.7049%201.99436C16.7049%200.806449%2015.8964%200%2014.6607%200L2.04421%200C0.81891%200%200%200.806449%200%201.99436ZM1.5728%2018.631L1.5728%202.09194C1.5728%201.78042%201.77218%201.57069%202.06913%201.57069L14.6358%201.57069C14.9327%201.57069%2015.1321%201.78042%2015.1321%202.09194L15.1321%2018.631C15.1321%2018.9425%2014.9327%2019.1523%2014.6358%2019.1523L2.06913%2019.1523C1.77218%2019.1523%201.5728%2018.9425%201.5728%2018.631Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.425%22/%3E%0A%20%20%3Cpath%20d%3D%22M3.04119%206.05503L13.6616%206.05503C13.8502%206.05503%2013.9932%205.90168%2013.9932%205.7234L13.9932%203.04119C13.9932%202.86292%2013.8502%202.70957%2013.6616%202.70957L3.04119%202.70957C2.86503%202.70957%202.71168%202.86292%202.71168%203.04119L2.71168%205.7234C2.71168%205.90168%202.86503%206.05503%203.04119%206.05503ZM6.86468%204.84823C6.59074%204.84823%206.3977%204.66553%206.3977%204.38124C6.3977%204.09695%206.59074%203.90391%206.86468%203.90391L9.84023%203.90391C10.1245%203.90391%2010.3072%204.09695%2010.3072%204.38124C10.3072%204.66553%2010.1245%204.84823%209.84023%204.84823Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "settings": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2022.451%2022.4466%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2222.4466%22%20opacity%3D%220%22%20width%3D%2222.451%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M11.2255%2022.4466C11.487%2022.4466%2011.686%2022.3074%2011.7523%2021.8429L11.856%2021.0372C11.9141%2020.7149%2012.1052%2020.5278%2012.4651%2020.4883C12.8%2020.4342%2013.0266%2020.5736%2013.1512%2020.875L13.4564%2021.6123C13.6471%2022.0622%2013.8856%2022.1351%2014.1243%2022.0645C14.3733%2021.9919%2014.5349%2021.8092%2014.4665%2021.324L14.3604%2020.5535C14.3146%2020.2105%2014.4766%2020.0068%2014.8177%2019.8488C15.1152%2019.7219%2015.3853%2019.7635%2015.5849%2020.0359L16.0749%2020.6735C16.3755%2021.0695%2016.6078%2021.074%2016.834%2020.9329C17.0706%2020.8021%2017.1741%2020.607%2016.9813%2020.1571L16.6862%2019.4158C16.5511%2019.0895%2016.6404%2018.8255%2016.9213%2018.6278C17.204%2018.4261%2017.4473%2018.397%2017.7341%2018.6132L18.3654%2019.1034C18.7448%2019.3875%2018.9813%2019.3442%2019.1702%2019.1657C19.3507%2018.9748%2019.3919%2018.73%2019.0975%2018.3589L18.6094%2017.7401C18.4035%2017.4636%2018.4409%2017.1891%2018.6447%2016.894C18.8402%2016.6465%2019.0979%2016.5405%2019.4202%2016.6881L20.1594%2016.9832C20.6114%2017.176%2020.8169%2017.0725%2020.9477%2016.8256C21.0784%2016.6097%2021.074%2016.3795%2020.6779%2016.0768L20.0507%2015.5868C19.7825%2015.379%2019.7409%2015.1068%2019.8739%2014.801C19.9884%2014.4889%2020.1964%2014.3393%2020.5558%2014.3727L21.3512%2014.4787C21.8136%2014.5368%2022.0087%2014.3856%2022.0689%2014.1262C22.1291%2013.8751%2022.0666%2013.6491%2021.6146%2013.4687L20.8794%2013.1656C20.5717%2013.0471%2020.449%2012.8102%2020.4927%2012.4359C20.5322%2012.1033%2020.7088%2011.9056%2021.052%2011.8579L21.837%2011.7563C22.3118%2011.69%2022.451%2011.4889%2022.451%2011.2274C22.451%2010.9659%2022.3118%2010.7648%2021.837%2010.6985L21.052%2010.5969C20.6984%2010.5388%2020.5426%2010.3412%2020.4927%209.9982C20.449%209.66537%2020.5717%209.42842%2020.8794%209.29959L21.625%208.9965C22.0666%208.80577%2022.1395%208.56941%2022.0689%208.32863C21.9984%208.07962%2021.8136%207.91802%2021.3409%207.98646L20.5662%208.09248C20.2171%208.13619%2019.9677%207.95561%2019.8635%207.65383C19.7305%207.30664%2019.7618%207.07581%2020.0507%206.86799L20.6779%206.378C21.074%206.07531%2021.0784%205.84298%2020.958%205.61888C20.8066%205.37197%2020.5907%205.28917%2020.1594%205.46131L19.4202%205.77705C19.0979%205.91432%2018.8402%205.79796%2018.6343%205.5401C18.4409%205.26575%2018.4035%205.01191%2018.6198%204.72511L19.1079%204.09594C19.3919%203.72482%2019.3611%203.48002%2019.1702%203.28909C18.9813%203.11061%2018.7448%203.0673%2018.3758%203.36174L17.7445%203.85194C17.468%204.07855%2017.1833%204.0287%2016.9213%203.81667C16.6404%203.58795%2016.5511%203.36325%2016.6862%203.03907L16.9813%202.29774C17.1741%201.84784%2017.0706%201.64233%2016.834%201.52194C16.5871%201.3705%2016.3465%201.42668%2016.0749%201.78131L15.5849%202.40858C15.375%202.68101%2015.1152%202.72261%2014.7866%202.59569C14.487%202.46877%2014.325%202.25463%2014.3708%201.9013L14.4872%201.12048C14.5349%200.645658%2014.4147%200.462965%2014.1243%200.390309C13.8546%200.319764%2013.6264%200.434023%2013.4668%200.842522L13.1719%201.57983C13.0473%201.89155%2012.7897%202.03093%2012.4444%201.97687C12.0845%201.91667%2011.9037%201.75026%2011.8663%201.40728L11.7523%200.622246C11.686%200.147421%2011.487%200.00824052%2011.2359%200.00824052C10.964%200.00824052%2010.7629%200.147421%2010.6966%200.611895L10.5929%201.41764C10.5452%201.73991%2010.354%201.93738%209.99629%201.96652C9.66135%201.99988%209.42229%201.8812%209.29768%201.57983L8.99459%200.842522C8.82456%200.444373%208.6068%200.309413%208.32672%200.390309C8.02384%200.473315%207.91611%200.697412%207.98244%201.12048L8.09057%201.9013C8.13639%202.25463%207.96405%202.47913%207.64157%202.60605C7.30473%202.72261%207.07601%202.68101%206.86608%202.40858L6.37609%201.78131C6.09411%201.41633%205.86177%201.38085%205.62521%201.52194C5.38041%201.65268%205.27691%201.84784%205.46975%202.29774L5.76479%203.03907C5.89995%203.34466%205.81062%203.619%205.54834%203.81667C5.27591%204.0287%205.00367%204.05784%204.71687%203.84159L4.08559%203.35139C3.73517%203.088%203.48826%203.08991%203.28085%203.28909C3.06921%203.51107%203.09011%203.74552%203.3535%204.09594L3.84159%204.71476C4.0682%204.99121%204.02046%205.28646%203.80632%205.55045C3.57971%205.80831%203.36134%205.90397%203.03083%205.7667L2.2895%205.47166C1.881%205.29952%201.64444%205.36162%201.5137%205.61888C1.35191%205.87403%201.42879%206.11672%201.77307%206.378L2.40034%206.86799C2.66855%207.07581%202.7205%207.35839%202.58745%207.65383C2.44194%207.96596%202.24217%208.11549%201.89306%208.08213L1.09767%207.97611C0.637418%207.91802%200.442263%208.06927%200.382069%208.32863C0.321874%208.56941%200.384379%208.80577%200.836392%208.98615L1.57159%209.28924C1.88964%209.42842%202.02269%209.66537%201.95828%2010.0086C1.89808%2010.3515%201.76292%2010.5388%201.39904%2010.5969L0.614005%2010.6985C0.139181%2010.7648%202.22045e-15%2010.9659%202.22045e-15%2011.2274C2.22045e-15%2011.4889%200.139181%2011.69%200.614005%2011.7563L1.39904%2011.8579C1.76292%2011.9056%201.90843%2012.1033%201.95828%2012.4463C2.00199%2012.7687%201.88964%2013.0264%201.57159%2013.1552L0.826041%2013.4583C0.384379%2013.6491%200.311523%2013.8751%200.382069%2014.1262C0.452614%2014.3752%200.637418%2014.5368%201.10802%2014.4684L1.88271%2014.3623C2.23393%2014.3186%202.44194%2014.4785%202.59781%2014.8113C2.7205%2015.1068%202.66855%2015.3894%202.40034%2015.5868L1.77307%2016.0768C1.37703%2016.3795%201.37261%2016.6097%201.5137%2016.8359C1.63409%2017.0725%201.8396%2017.176%202.2895%2016.9935L3.03083%2016.6778C3.34064%2016.5405%203.619%2016.6672%203.81667%2016.9147C4.02046%2017.1684%204.04749%2017.4429%203.83124%2017.7297L3.34315%2018.3485C3.05906%2018.73%203.08991%2018.9748%203.28085%2019.1657C3.46967%2019.3442%203.70412%2019.3875%204.07523%2019.0931L4.70652%2018.6029C4.98297%2018.397%205.24485%2018.4261%205.54834%2018.6382C5.81062%2018.8358%205.89995%2019.0998%205.76479%2019.4158L5.46975%2020.1571C5.27691%2020.607%205.38041%2020.8021%205.62521%2020.9329C5.84107%2021.074%206.07341%2021.0695%206.37609%2020.6735L6.86608%2020.0462C7.08636%2019.7635%207.33578%2019.7219%207.63122%2019.8488C7.94335%2019.9757%208.12604%2020.2002%208.08022%2020.5535L7.96174%2021.3343C7.91611%2021.8092%208.06525%2022.0022%208.32672%2022.0645C8.57574%2022.1247%208.80386%2022.0622%208.98424%2021.6123L9.27908%2020.875C9.40369%2020.5736%209.64065%2020.4446%2010.017%2020.478C10.3644%2020.5174%2010.5452%2020.7149%2010.5826%2021.0475L10.6966%2021.8326C10.7629%2022.3074%2010.964%2022.4466%2011.2255%2022.4466ZM5.562%2016.9333C4.07332%2015.4752%203.16036%2013.4635%203.16036%2011.2253C3.16036%208.97671%204.07332%206.96508%205.55989%205.5173C6.15741%204.91384%206.81262%205.05051%207.24182%205.79275L9.87388%2010.3521C10.2306%2010.9723%2010.2306%2011.4973%209.86544%2012.1299L7.24604%2016.6536C6.81473%2017.4043%206.16163%2017.5346%205.562%2016.9333ZM11.1737%2019.2387C10.4414%2019.2387%209.72166%2019.1365%209.04776%2018.9426C8.20755%2018.7162%208.0126%2018.0944%208.44602%2017.3458L11.0675%2012.8097C11.4203%2012.1872%2011.8746%2011.9217%2012.6092%2011.9217L17.8376%2011.9217C18.7004%2011.9217%2019.1333%2012.4174%2018.9032%2013.2389C18.0176%2016.6947%2014.9033%2019.2387%2011.1737%2019.2387ZM11.1427%2011.8015C10.8318%2011.8015%2010.5872%2011.5569%2010.5872%2011.246C10.5872%2010.9351%2010.8318%2010.6905%2011.1427%2010.6905C11.4536%2010.6905%2011.7086%2010.9351%2011.7086%2011.246C11.7086%2011.5569%2011.4536%2011.8015%2011.1427%2011.8015ZM12.6092%2010.5331C11.8892%2010.5331%2011.4203%2010.2634%2011.076%209.65783L8.44391%205.09845C8.01471%204.3541%208.21177%203.73015%209.04565%203.50796C9.71955%203.31412%2010.4414%203.20157%2011.1737%203.20157C14.9033%203.20157%2018.0301%205.7456%2018.9032%209.21808C19.1333%2010.0395%2018.7047%2010.5331%2017.8397%2010.5331Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
 };
 
-// Drawn by the preview but not offered in any picker: the climate group badge
-// renders mdi:fan, which has no Hemma svg to write a name for.
 const PREVIEW_ONLY_ICONS = ["mdi-fan", "tile", "badge", "room", "smartsort"];
 ICON_DATA.smartsort = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2248%22%20height%3D%2248%22%20fill%3D%22none%22%20viewBox%3D%220%200%2048%2048%22%3E%0A%20%20%3Cg%20stroke%3D%22%23fff%22%20stroke-width%3D%222.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%0A%20%20%20%20%3Cpath%20d%3D%22M16%2037V10%22/%3E%3Cpath%20d%3D%22M8%2018%2016%2010l8%208%22/%3E%0A%20%20%20%20%3Cpath%20d%3D%22M33%2010v27%22/%3E%3Cpath%20d%3D%22M25%2029l8%208%208-8%22/%3E%0A%20%20%3C/g%3E%0A%3C/svg%3E%0A";
 ICON_DATA.room = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2248%22%20height%3D%2248%22%20fill%3D%22none%22%20viewBox%3D%220%200%2048%2048%22%3E%0A%20%20%3Crect%20x%3D%223.5%22%20y%3D%225.5%22%20width%3D%2241%22%20height%3D%2237%22%20rx%3D%229.5%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223%22/%3E%0A%20%20%3Crect%20x%3D%2210.5%22%20y%3D%2213%22%20width%3D%2217%22%20height%3D%223.4%22%20rx%3D%221.7%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2210.5%22%20y%3D%2219.4%22%20width%3D%2210%22%20height%3D%223%22%20rx%3D%221.5%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2210.5%22%20y%3D%2228.5%22%20width%3D%2212%22%20height%3D%229%22%20rx%3D%223%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2225.5%22%20y%3D%2228.5%22%20width%3D%2212%22%20height%3D%229%22%20rx%3D%223%22%20fill%3D%22%23fff%22/%3E%0A%3C/svg%3E%0A";
 ICON_DATA.badge = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2248%22%20height%3D%2248%22%20fill%3D%22none%22%20viewBox%3D%220%200%2048%2048%22%3E%0A%20%20%3Crect%20x%3D%223.5%22%20y%3D%226.25%22%20width%3D%2241%22%20height%3D%2214.5%22%20rx%3D%227.25%22%20stroke%3D%22%23fff%22%20stroke-width%3D%222.8%22/%3E%0A%20%20%3Ccircle%20cx%3D%2213.6%22%20cy%3D%2213.5%22%20r%3D%223.2%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2219.6%22%20y%3D%2212%22%20width%3D%2214%22%20height%3D%223%22%20rx%3D%221.5%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%223.5%22%20y%3D%2227.25%22%20width%3D%2233%22%20height%3D%2214.5%22%20rx%3D%227.25%22%20stroke%3D%22%23fff%22%20stroke-width%3D%222.8%22/%3E%0A%20%20%3Ccircle%20cx%3D%2213.6%22%20cy%3D%2234.5%22%20r%3D%223.2%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2219.6%22%20y%3D%2233%22%20width%3D%228.5%22%20height%3D%223%22%20rx%3D%221.5%22%20fill%3D%22%23fff%22/%3E%0A%3C/svg%3E%0A";
 ICON_DATA.tile = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2248%22%20height%3D%2248%22%20fill%3D%22none%22%20viewBox%3D%220%200%2048%2048%22%3E%0A%20%20%3Crect%20x%3D%223.5%22%20y%3D%223.5%22%20width%3D%2241%22%20height%3D%2241%22%20rx%3D%2211.5%22%20stroke%3D%22%23fff%22%20stroke-width%3D%223%22/%3E%0A%20%20%3Ccircle%20cx%3D%2216.6%22%20cy%3D%2216.6%22%20r%3D%225.1%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2211.5%22%20y%3D%2228%22%20width%3D%2221%22%20height%3D%223.6%22%20rx%3D%221.8%22%20fill%3D%22%23fff%22/%3E%0A%20%20%3Crect%20x%3D%2211.5%22%20y%3D%2234.2%22%20width%3D%2213.5%22%20height%3D%223.6%22%20rx%3D%221.8%22%20fill%3D%22%23fff%22/%3E%0A%3C/svg%3E%0A";
+ICON_DATA.bell = "data:image/svg+xml,%3C?xml%20version=%221.0%22%20encoding=%22UTF-8%22?%3E%0A%3C!--Generator:%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C!DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version=%221.1%22%20xmlns=%22http://www.w3.org/2000/svg%22%20xmlns:xlink=%22http://www.w3.org/1999/xlink%22%20viewBox=%220%200%2018.4229%2020.5437%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height=%2220.5437%22%20opacity=%220%22%20width=%2218.4229%22%20x=%220%22%20y=%220%22/%3E%0A%20%20%3Cpath%20d=%22M1.47543%2016.6424L16.9475%2016.6424C17.8737%2016.6424%2018.4229%2016.1635%2018.4229%2015.4526C18.4229%2014.4764%2017.4285%2013.594%2016.5856%2012.7342C15.9341%2012.0595%2015.7647%2010.6748%2015.687%209.54722C15.6176%205.80108%2014.6249%203.21563%2012.03%202.27402C11.6589%201.00683%2010.6561%200%209.21145%200C7.76889%200%206.76398%201.00683%206.39286%202.27402C3.79797%203.21563%202.80531%205.80108%202.72553%209.54722C2.6582%2010.6748%202.48053%2012.0595%201.8394%2012.7342C0.986124%2013.594%202.22045e-15%2014.4764%202.22045e-15%2015.4526C2.22045e-15%2016.1635%200.54919%2016.6424%201.47543%2016.6424ZM9.21145%2020.5416C10.8722%2020.5416%2012.0697%2019.3398%2012.2051%2017.9655L6.21781%2017.9655C6.34282%2019.3398%207.55284%2020.5416%209.21145%2020.5416Z%22%20fill=%22white%22%20fill-opacity=%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A";
 const HEMMA_ICONS = Object.keys(ICON_DATA)
   .filter((k) => ICON_DATA[k] && !PREVIEW_ONLY_ICONS.includes(k));
 
@@ -1766,9 +1899,6 @@ const TILE_COLOR = {
   plant: "var(--hemma-color-green, #30D158)",
   entity_actions: "var(--hemma-color-teal, #00C3D0)",
 };
-// hemma_weather.yaml's own condition -> file map. The preview showed a fixed
-// sun-and-cloud whatever the sky was doing, which is fine as a stand-in but
-// wrong once there is a real entity to read.
 const WEATHER_SVG = {
   "sunny": "clear-day",
   "clear-night": "clear-night",
@@ -1794,6 +1924,7 @@ const TILE_TINT = "var(--hemma-color-teal, #00C3D0)";
 // Fallback glyph per tile kind, for tiles that set no icon of their own.
 const TILE_ICON = {
   light: "light", thermostat: "thermostat", media: "speaker", fan: "fan",
+  game: "play",
   cover: "curtain-open", vacuum: "vacuum", air_purifier: "purifier",
   humidifier: "humidifier", updates: "updates", plant: "plant",
   energy_tile: "energy", battery: "battery", network: "wifi", plex: "plex",
@@ -1802,10 +1933,6 @@ const TILE_ICON = {
   entity_actions: "plug",
 };
 
-// A tile is a group because it holds more than one entity, not because anyone
-// picked "group" - a second entity switches the template, removing it switches
-// back. The group templates stay listed but hidden so existing tiles are still
-// recognized.
 const MEMBER_ID = /^[a-z_]+\.[a-z0-9_]+$/i;
 
 const TILE_GROUP = {
@@ -1823,9 +1950,6 @@ const TILE_GROUP = {
     single: "hemma_cover", group: ["hemma_cover", "hemma_popup_cover"],
     perMember: [],
   },
-  // Entityless: every sensor lives in `batteries`, so rows start at slot 0 and
-  // there is no template to switch. The two overrides are what the popup has
-  // always read.
   battery: {
     list: "batteries", domains: ["sensor"], classes: ["battery"],
     add: "Add sensor", noun: "Sensor", entityless: true,
@@ -1840,15 +1964,37 @@ const TILE_GROUP = {
 TILE_GROUP.lock_group = TILE_GROUP.lock;
 TILE_GROUP.cover_group = TILE_GROUP.cover;
 
-// Offered only on domains that turn on and off. boolDefault is what the TEMPLATE
-// does when the key is absent, so the switch sits at the real resting position
-// rather than offering a third "Default" nobody can resolve.
 const TOGGLE_FIELD = { key: "show_toggle", label: "Toggle button", type: "bool",
   boolDefault: false };
 const TOGGLE_FIELD_ON = { ...TOGGLE_FIELD, boolDefault: true };
 
-// Offered on the types whose states are in progress_active_states. The ring
-// takes the toggle's corner, which is why show_progress suppresses it.
+const MEDIA_ACTIVE_STATES = {
+  "": [],
+  paused: ["paused", "buffering"],
+  idle: ["idle", "paused", "buffering", "on"],
+};
+const MEDIA_ACTIVE_FIELD = {
+  key: "active_states", label: "Active when", type: "states",
+  options: ["", "paused", "idle"],
+  optionLabels: { "": "Playing", paused: "Playing or paused", idle: "Powered on" },
+  values: MEDIA_ACTIVE_STATES,
+  hint: "A console that is on with nothing running reports idle, not playing.",
+};
+
+const listOption = (values, cur) => {
+  const set = (Array.isArray(cur) ? cur : []).map((x) => String(x).toLowerCase());
+  if (!set.length) return "";
+  let best = "";
+  let bestLen = Infinity;
+  Object.keys(values).forEach((id) => {
+    const opt = values[id] || [];
+    if (!opt.length) return;
+    if (!set.every((x) => opt.indexOf(x) >= 0)) return;
+    if (opt.length < bestLen) { best = id; bestLen = opt.length; }
+  });
+  return best;
+};
+
 const PROGRESS_FIELDS = [
   { key: "show_progress", label: "Progress ring", type: "bool", boolDefault: false },
   // Almost never set, so Advanced.
@@ -1858,15 +2004,14 @@ const PROGRESS_FIELDS = [
     when: (vars) => !!vars.show_progress },
 ];
 
-// Control Center's rule: Always Show, or Show When Active. Two answers that both
-// need naming, which is what a menu is for and a switch is not. Not showing it
-// at all is the switch at the top of the tile.
+const BATTERY_FIELD = { key: "battery_entity", label: "Battery sensor",
+  domains: ["sensor"], classes: ["battery"], placeholder: "None",
+  hint: "Appears on the tile at 20% or lower." };
+
 const WHEN_FIELD = (activeLabel) => ({ key: "show_when", label: "Show",
   type: "select", options: ["", "always"],
   optionLabels: { "": activeLabel, always: "Always" } });
 
-// A different glyph either side of the state, so a pair rather than one Icon.
-// The template swaps them automatically, so the pair is an override: Advanced.
 const ICON_OPEN_FIELD = { key: "icon_open", label: "Open icon", type: "icon",
   iconDefault: "curtain-open", advanced: true };
 const ICON_CLOSED_FIELD = { key: "icon_closed", label: "Closed icon", type: "icon",
@@ -1876,9 +2021,6 @@ const ICON_LOCKED_FIELD = { key: "icon_locked", label: "Locked icon", type: "ico
 const ICON_UNLOCKED_FIELD = { key: "icon_unlocked", label: "Unlocked icon", type: "icon",
   iconDefault: "lock-open-fill", advanced: true };
 
-// The popup reads ONE flat `sensors` list and infers each entry's type from its
-// entity_id. Shown here as the six named slots it draws, so a sensor can be
-// swapped without counting array positions. `battery` is last: it is not graded.
 const PLANT_SLOTS = [
   { type: "moisture", label: "Moisture", match: (id) => id.includes("moisture") },
   { type: "illuminance", label: "Light", match: (id) => id.includes("illumin") || id.includes("lux") },
@@ -1887,17 +2029,12 @@ const PLANT_SLOTS = [
   { type: "humidity", label: "Air humidity", match: (id) => id.includes("humid") },
   { type: "battery", label: "Battery", match: (id) => id.includes("battery") },
 ];
-// Same first-match ladder hemma_popup_plant uses, so a sensor lands in the
-// panel slot it will actually be read as.
 const plantSlotOf = (id) => {
   const low = String(id || "").toLowerCase();
   const hit = PLANT_SLOTS.find((s) => s.match(low));
   return hit ? hit.type : null;
 };
 
-// Anything a button can act on, plus the read-only domains, because
-// more-info is a legitimate action on a sensor. Not every domain in Home
-// Assistant: a list you scroll past is not a list you choose from.
 const ACTION_DOMAINS = [
   "automation", "binary_sensor", "button", "climate", "cover", "fan",
   "humidifier", "input_boolean", "input_button", "light", "lock",
@@ -1905,8 +2042,6 @@ const ACTION_DOMAINS = [
   "siren", "switch", "vacuum", "valve", "water_heater",
 ];
 
-// The template hardcodes both buttons, so this is a helper rather than the
-// repeat machinery. Everything past the entity stays hidden until there is one.
 const actionFields = (n) => {
   const set = (v) => !!(v && String(v).trim());
   const has = (vars) => set(vars["action_" + n + "_entity"]);
@@ -1914,9 +2049,6 @@ const actionFields = (n) => {
   return [
     { key: "action_" + n + "_entity", label: "Button " + n,
       domains: ACTION_DOMAINS, reveals: true,
-      // Button 2 is offered once button 1 is set, the way only the next free
-      // slot of a repeat is offered - unless it is already set, in which case
-      // hiding it would hide live config.
       when: n === 1 ? null
         : (vars) => set(vars.action_1_entity) || set(vars.action_2_entity),
       placeholder: n === 1 ? "The entity this button acts on" : "A second button" },
@@ -1934,39 +2066,17 @@ const actionFields = (n) => {
     { key: "action_" + n + "_navigation_path", label: "Button " + n + " opens",
       type: "text", placeholder: "/hemma/kitchen",
       when: (vars) => has(vars) && does(vars) === "navigate" },
+    { key: "action_" + n + "_label", label: "Button " + n + " name",
+      type: "text", when: has,
+      placeholder: "Its own name, without the tile's" },
     { key: "action_" + n + "_icon", label: "Button " + n + " icon",
       type: "icon", advanced: true, when: has,
-      // Its default is the button entity's own icon, which is an mdi name the
-      // glyph picker cannot draw. Naming it beats ghosting something else.
       iconNoGhost: true, iconText: "The entity's own icon" },
-    { key: "action_" + n + "_active_color", label: "Button " + n + " color",
-      type: "color", advanced: true, when: has },
     { key: "action_" + n + "_enabled", label: "Button " + n + " shown",
       type: "bool", boolDefault: true, advanced: true, when: has },
   ];
 };
 
-// Live, on, and what color - all three copied verbatim from the card so the
-// preview reaches the same answer. actioncheck holds the two together.
-const ACTION_ACTIVE = ["on", "open", "opening", "unlocked", "unlocking",
-  "playing", "buffering", "home", "connected", "online",
-  "cooling", "heating", "cleaning", "running", "active"];
-const ACTION_DEAD = ["unknown", "unavailable", "none", ""];
-const ACTION_TEAL = "var(--hemma-color-teal, #00c3d0)";
-const ACTION_ACCENT = {
-  light: "var(--hemma-color-yellow, #FFCC00)",
-  fan: "var(--hemma-color-teal, #00C3D0)",
-  humidifier: "var(--hemma-color-teal, #00C3D0)",
-  climate: "var(--hemma-color-teal, #00C3D0)",
-  vacuum: "var(--hemma-color-teal, #00C3D0)",
-  cover: ACTION_TEAL, media_player: ACTION_TEAL, lock: ACTION_TEAL,
-  switch: ACTION_TEAL, input_boolean: ACTION_TEAL, script: ACTION_TEAL,
-  automation: ACTION_TEAL,
-};
-
-// The accents the theme defines, stored as the var() rather than the hex so a
-// button follows the theme the way everything else in Hemma does. The hex is
-// the fallback inside the var, and what the swatch paints.
 const HEMMA_ACCENTS = [
   ["Yellow", "yellow", "#FFCC00"], ["Amber", "amber", "#ffb254"],
   ["Orange", "orange", "#FF9230"], ["Red", "red", "#FF4245"],
@@ -1978,8 +2088,6 @@ const HEMMA_ACCENTS = [
 ].map(([label, key, hex]) => ({
   label, hex, id: "var(--hemma-color-" + key + ", " + hex + ")",
 }));
-// What to paint a swatch for a value that may be a var(), a hex, or anything
-// else CSS accepts. A var() cannot be resolved here, so its own fallback is.
 const swatchOf = (v) => {
   const raw = String(v || "").trim();
   if (!raw) return null;
@@ -1995,8 +2103,6 @@ const colorLabel = (v) => {
   return known ? known.label : raw;
 };
 
-// The one tile that takes any domain, so it cannot name a glyph up front.
-// Copied from the card's map; actioncheck holds the two against each other.
 const ACTION_GLYPH = {
   light: "light", switch: "plug", input_boolean: "plug",
   fan: "fan", climate: "thermostat", humidifier: "humidifier",
@@ -2010,8 +2116,6 @@ const ACTION_GLYPH = {
 const TILE_TYPES = [
   { id: "light", label: "Light", template: "hemma_light",
     domains: ["light"], fields: [ICON_FIELD, TOGGLE_FIELD] },
-  // No Icon: the thermostat draws its reading in the circle instead of a
-  // glyph, so there is nothing for one to replace.
   { id: "thermostat", label: "Thermostat", template: "hemma_thermostat",
     domains: ["climate"], fields: [
       { key: "temp_sensor", label: "Temperature sensor", domains: ["sensor"], classes: ["temperature"] },
@@ -2020,8 +2124,16 @@ const TILE_TYPES = [
   { id: "media", label: "Media player", template: "hemma_media",
     domains: ["media_player"], fields: [
       ICON_FIELD,
+      MEDIA_ACTIVE_FIELD,
       ...PROGRESS_FIELDS,
       TOGGLE_FIELD,
+    ] },
+  { id: "game", label: "Game activity", template: "hemma_game",
+    domains: ["sensor"], entityLabel: "Account sensor",
+    entityPlaceholder: "Your Steam, Discord or PlayStation sensor",
+    fields: [
+      ICON_FIELD,
+      WHEN_FIELD("While a game is running"),
     ] },
   { id: "fan", label: "Fan", template: "hemma_fan",
     domains: ["fan"], fields: [ICON_FIELD, TOGGLE_FIELD] },
@@ -2033,22 +2145,18 @@ const TILE_TYPES = [
   { id: "vacuum", label: "Vacuum", template: "hemma_vacuum",
     domains: ["vacuum"], fields: [
       { ...ICON_FIELD },
+      BATTERY_FIELD,
       ...PROGRESS_FIELDS,
     ] },
   { id: "air_purifier", label: "Air purifier", template: "hemma_air_purifier",
     domains: ["fan"], fields: [ICON_FIELD, TOGGLE_FIELD] },
   { id: "humidifier", label: "Humidifier", template: "hemma_humidifier",
     domains: ["humidifier"], fields: [ICON_FIELD, TOGGLE_FIELD] },
-  // A tile reading "Up to date" is chrome reporting that it has nothing to
-  // report, so it ships conditional: whenDefault mirrors the `show_when` the
-  // card template declares, and statecheck holds the two together.
   { id: "updates", label: "Updates", template: "hemma_updates",
     domains: ["sensor"], whenDefault: "active", fields: [
       ICON_FIELD,
       WHEN_FIELD("When updates are available"),
     ] },
-  // The entity is a plant.*, and its device carries every reading the popup
-  // wants - so picking one fills the slots below in. They stay editable.
   { id: "plant", label: "Plant", template: "hemma_plant",
     domains: ["plant"], fields: [
       ICON_FIELD,
@@ -2056,8 +2164,6 @@ const TILE_TYPES = [
       { key: "room_name", label: "Popup title", type: "text",
         advanced: true, group: "Popup" },
     ] },
-  // The tile IS the power reading: the tier word and the glow both come off the
-  // card's own entity. Everything else here feeds the popup and says so.
   { id: "energy_tile", label: "Energy", template: "hemma_energy",
     domains: ["sensor"], classes: ["power"], entityLabel: "Power sensor",
     multiEntity: true, fields: [
@@ -2070,36 +2176,24 @@ const TILE_TYPES = [
         classes: ["monetary"], advanced: true },
       { key: "entity_cost_month", label: "Cost this month", domains: ["sensor"],
         classes: ["monetary"], advanced: true },
-      // A chips LIST, not member rows: these carry no per-entity settings, so a
-      // row would hold nothing. Named for what you add, not what it produces.
+      { key: "usage_shows", label: "Usage rows show", type: "select",
+        options: ["", "cost", "energy"], advanced: true,
+        optionLabels: { "": "Energy and cost", cost: "Cost only",
+          energy: "Energy only" } },
       { ...LIST("power_entities", "Power sensors", ["sensor"]),
         classes: ["power"], unitLabel: "Power sensors", advanced: true,
         placeholder: "add power sensor." },
-      // Optional per-sensor glyph. Everything defaults to the socket it is
-      // plugged into: guessing from the name put a gamepad on a home lab.
       { ...MAP("power_icons", "Icon", "power_entities", []), kind: "icon",
         iconDefault: "plug", unitLabel: "Consumer icons", advanced: true,
         needs: "power_entities",
         emptyHint: "Add power sensors above first." },
     ] },
-  // The reading is the LIST, not the card's entity - hemma_battery scores every
-  // sensor in `batteries`. Nothing opens the entity now that the tile has no
-  // hold action, so it is never asked for: noEntity hides the row and the list
-  // backfills tile.entity, which hemma_entity still wants for its icon color.
   { id: "battery", label: "Batteries", template: "hemma_battery",
     domains: ["sensor"], classes: ["battery"], noEntity: true,
     multiEntity: true, fields: [ICON_FIELD] },
-  // Two WAN speed sensors make the tile - hemma_network's tier word and its glow
-  // read the higher of download and upload, and nothing else on this card
-  // touches either. The rest is popup detail, so it sits in Advanced under the
-  // heading that says so rather than as eleven required-looking rows.
   { id: "network", label: "Network", template: "hemma_network",
     domains: ["sensor"], classes: ["data_rate"], entityLabel: "Download speed",
-    // Every advanced field here is popup detail, so the drawer says so and its
-    // groups name the parts rather than repeating the word.
     advancedLabel: "Popup",
-    // Routers publish the pair under one name: picking the download sensor
-    // fills the upload one in. See _twinOf for why it is a swap, not a search.
     twin: { from: "download", to: "upload", key: "entity_upload" },
     multiEntity: true, fields: [
       { key: "entity_upload", label: "Upload speed", domains: ["sensor"], classes: ["data_rate"] },
@@ -2107,9 +2201,6 @@ const TILE_TYPES = [
       { key: "entity_status", label: "Internet status", domains: ["binary_sensor"],
         advanced: true, group: "Detail" },
       { key: "entity_ping", label: "Ping", domains: ["sensor"], classes: ["duration"], advanced: true },
-      // Not four interchangeable slots: hemma_popup_network lays them out as a
-      // 2x2 grid with a scale ceiling each (1000 / 200 / 500 / 200 Mbps), so
-      // the position IS the meaning and the labels have to say so.
       { key: "entity_stat_1", label: "Wired download", domains: ["sensor"],
         classes: ["data_rate"], advanced: true },
       { key: "entity_stat_2", label: "Wired upload", domains: ["sensor"],
@@ -2130,9 +2221,6 @@ const TILE_TYPES = [
       { key: "show_watched", label: "Watched marker", type: "bool", boolDefault: true },
       WHEN_FIELD("When something has been added"),
     ] },
-  // hemma_cameras already declares its filter category and takes the same list
-  // the Security badge stores - it was simply never offered here, so a camera
-  // could be configured on the badge and unreachable on a phone.
   { id: "cameras", label: "Cameras", template: "hemma_cameras",
     domains: ["camera"], fields: [
       { ...LIST("cameras", "Cameras", ["camera"]), always: true },
@@ -2148,37 +2236,24 @@ const TILE_TYPES = [
   { id: "cover_group", label: "Cover group", hidden: true, multiEntity: true,
     template: ["hemma_cover", "hemma_popup_cover"],
     domains: ["cover"], fields: [
-      // First in the drawer: a switch reads as a heading for what follows.
-      // Sections the popup's rows by device_class; off is one plain list. Either
-      // way a single kind draws no heading.
       { key: "group_by_type", label: "Group by type", type: "bool",
         boolDefault: true, advanced: true },
       ICON_OPEN_FIELD, ICON_CLOSED_FIELD,
       { key: "room_name", label: "Popup title", type: "text", advanced: true },
     ] },
-  // Its entity is what the tile READS; the buttons act on their own entities,
-  // which is the whole point of it - a fridge status sensor with mode and
-  // super-cool beside it.
   { id: "entity_actions",
     label: "Entity with buttons", template: "hemma_entity_actions",
     domains: ACTION_DOMAINS,
     entityPlaceholder: "The entity this tile shows",
-    // It takes any domain, so it cannot name a glyph up front. Declared here
-    // rather than tested by id, so the preview and the icon field both read
-    // the same thing off the type.
     glyphFromEntity: ACTION_GLYPH,
     fields: [
       ICON_FIELD,
-      // The washer case: its status sensor reads "washing" or "spinning", both
-      // of which progress_active_states already names.
       ...PROGRESS_FIELDS,
       ...actionFields(1),
       ...actionFields(2),
-      // hemma_entity reads the tile's own entity for the lit state, and a
-      // status sensor never reads as on. This hands that job to the buttons.
-      { key: "active_entities", type: "list", label: "Lit when these are on",
+      { key: "active_entities", type: "list", label: "Active when these are on",
         domains: ACTION_DOMAINS, advanced: true },
-      { key: "active_entities_mode", label: "Lit when", type: "select",
+      { key: "active_entities_mode", label: "Active when", type: "select",
         advanced: true, options: ["", "all"],
         optionLabels: { "": "Any of them is on", all: "All of them are on" },
         when: (vars) => Array.isArray(vars.active_entities)
@@ -2186,23 +2261,24 @@ const TILE_TYPES = [
     ] },
 ];
 
-// Every block the hints switch collapses. The CSS rule above lists the same
-// five, and hintcheck holds the two against each other: a block the CSS hides
-// but this misses would disappear instantly while the rest squeezed.
 const HINT_BLOCKS = ".grouphead p, .band.detail .card > .chead .blurb, .hint,"
   + " .sortstrip .sortnote,"
-  + " .band:not(.detail) .grouphead";
+  + " .band .grouphead";
 
-// Belongs to the SURFACE, not to any tile type - every type can be either - so
-// it is offered on all of them at once. The templates test `size === 'large'`
-// and nothing else, so absent is small.
 const SIZE_FIELD = {
   key: "size", label: "Size", type: "select",
   options: ["", "large"],
   optionLabels: { "": "Small", large: "Large" },
 };
 
-const MOBILE_TILE_FIELDS = [SIZE_FIELD];
+const SURFACE_FIELD = {
+  key: "surfaces", label: "Show on", type: "select",
+  options: ["", "phone", "desktop"],
+  optionLabels: { "": "Desktop and phone", phone: "Phone only",
+    desktop: "Desktop only" },
+};
+
+const MOBILE_TILE_FIELDS = [SURFACE_FIELD, SIZE_FIELD];
 
 // "desktop" is a truthy string, so test the two affirmative values, not truth.
 const tileFieldsFor = (type, phone) => (type && type.fields ? type.fields : [])
@@ -2225,18 +2301,10 @@ const tileLabel = (tile) => {
 };
 
 function newTile(type) {
-  // No eager variables map: every setter creates it on demand, and an empty one
-  // is only noise in the saved YAML.
   return { type: "custom:button-card", template: type.template, entity: "", name: type.label };
 }
 
-// ── what a tile is doing, as its own template decides it ─────────────────────
-// Each arm mirrors ONE template. Change a card's state_display or state: block
-// and change the matching arm here; statecheck holds the two together.
 
-// hemma_entity's own active list. A card is lit when its state is IN this list,
-// never by not being off - which is the whole reason a power sensor reading
-// 459.6 used to glow.
 const ENTITY_ACTIVE_STATES = ["on", "open", "opening", "unlocked", "unlocking",
   "playing", "cleaning", "returning", "cool", "heat", "washing", "rinsing",
   "spinning", "drying", "running", "active", "problem"];
@@ -2266,8 +2334,6 @@ const lightWord = (states, eid) => {
   return lit === 0 ? "All Off" : lit === all.length ? "All On" : lit + " On";
 };
 
-// hemma_battery scores the LIST, not the card's entity. No list at all means
-// every battery sensor in the house, which is the template's own fallback.
 const batteryPack = (V, states) => {
   const list = V.batteries || V.entity_filter;
   const pool = Array.isArray(list)
@@ -2292,8 +2358,6 @@ const plexAdded = (states) => {
     .filter((i) => i.airdate && new Date(i.airdate).getTime() >= cutoff).length;
 };
 
-// hemma_network: the tier and the direction both come off the two WAN speeds.
-// The LAN stat sensors are popup tiles and deliberately do not count.
 const networkWan = (V, ent, states) => {
   const dl = numOf(states, V.entity_download || (ent && ent.entity_id));
   const ul = numOf(states, V.entity_upload || V.upload_sensor);
@@ -2341,8 +2405,6 @@ const plantActive = (ent, V, states) => {
   return Number.isFinite(attr) && attr <= threshold;
 };
 
-// hemma_plant's state_display in full, scored breakdown included: a `sensors`
-// list turns "Needs Attention" into Needs care / Struggling / Poor / Critical.
 const plantWord = (ent, V, states) => {
   const state = String(ent.state || "");
   if (!state || state === "unavailable") return "— %";
@@ -2378,8 +2440,6 @@ const plantWord = (ent, V, states) => {
   return "— %";
 };
 
-// hemma_media's playing label: artist and title for music, otherwise whatever
-// names the thing - title, then app, then source.
 const mediaWord = (ent) => {
   const cap = (x) => (x ? x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g, " ") : "");
   const state = String(ent.state || "").toLowerCase();
@@ -2397,9 +2457,6 @@ const mediaWord = (ent) => {
   return title || app || source || cap(state);
 };
 
-// hemma_cameras' state_display, and the alert rule it calls. A camera tile does
-// not say "Idle" - it counts what is offline, and otherwise reports whatever
-// event fired in the last few minutes, or No Alerts.
 const cameraAlert = (hass, states, cams, windowMinutes) => {
   const reg = (hass && hass.entities) || {};
   const devs = {};
@@ -2432,15 +2489,16 @@ const cameraWord = (V, states, hass) => {
   return cameraAlert(hass, states, cams, V.alert_window_minutes) || "No Alerts";
 };
 
-// The default lives on the type because the card template declares it: both
-// conditional tiles ship `show_when: active`, so an untouched config writes
-// nothing.
 const tileShowWhen = (type, V) =>
   String((V || {}).show_when || (type && type.whenDefault) || "always");
 
-// Whether the dashboard is drawing this tile at this moment. The card decides
-// it from its own `idle` test; statecheck holds that test against tileActive,
-// so asking it here in terms of tileActive cannot drift from the card.
+const tileOnSurface = (t, phone) => {
+  const s = ((t || {}).variables || {}).surfaces;
+  if (s === "phone") return !!phone;
+  if (s === "desktop") return !phone;
+  return true;
+};
+
 const tileHidesNow = (type, kind, ent, V, states) =>
   tileShowWhen(type, V) === "active" && !tileActive(kind, ent, V || {}, states);
 
@@ -2451,8 +2509,6 @@ const tileActive = (kind, ent, V, states) => {
     // Templates that override hemma_entity's state: block with their own rule.
     case "plant": return plantActive(ent, V, states);
     case "energy_tile": {
-      // The real card holds its glow down to release_threshold once it is on.
-      // The preview has no previous frame, so it uses the switch-on point.
       const w = numOf(states, ent.entity_id);
       return w != null && w >= Number(V.high_threshold ?? 500);
     }
@@ -2462,6 +2518,7 @@ const tileActive = (kind, ent, V, states) => {
       const n = Number(ent.state);
       return Number.isFinite(n) && n > 0;
     }
+    case "game": return gameActivity(ent).active;
     case "plex": return plexAdded(states) > 0;
     case "battery": return batteryPack(V, states).low;
     default: break;
@@ -2471,9 +2528,27 @@ const tileActive = (kind, ent, V, states) => {
   return ENTITY_ACTIVE_STATES.includes(state) || extra.includes(state);
 };
 
-// hemma_media's own `has_artwork` + `art_url`, not "does the entity carry a
-// picture": a paused Sonos keeps the last cover or a brand image, and the card
-// ignores both. Returns "" when the card would draw its icon.
+const GAME_NOT_A_TITLE = ["playing", "paused", "idle", "on", "off", "home", "away",
+  "online", "offline", "standby", "unavailable", "unknown", "none", "null", ""];
+const GAME_DEAD_STATES = ["offline", "off", "none", "unavailable", "unknown", ""];
+
+const gameActivity = (ent) => {
+  const a = (ent && ent.attributes) || {};
+  const named = String(a.game == null ? "" : a.game).trim();
+  const st = String((ent && ent.state) || "").trim();
+  let game = "";
+  if (named && ["none", "unknown", "unavailable"].indexOf(named.toLowerCase()) < 0) {
+    game = named;
+  } else if (GAME_NOT_A_TITLE.indexOf(st.toLowerCase()) < 0) {
+    game = st;
+  }
+  const active = !!game && GAME_DEAD_STATES.indexOf(st.toLowerCase()) < 0;
+  const art = [a.game_image_main, a.game_image_header, a.game_icon]
+    .map((x) => String(x == null ? "" : x).trim())
+    .find(Boolean) || "";
+  return { game: game, active: active, art: active ? art : "" };
+};
+
 const mediaArtUrl = (ent, states) => {
   if (!ent) return "";
   if (String(ent.state || "").toLowerCase() !== "playing") return "";
@@ -2533,8 +2608,6 @@ const npStarted = (s) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-// Mirrors window._hemmaPlexHidden in hemma-core. The preview has no resource
-// loaded, so it cannot call it.
 const npPlexHidden = (V, user) => {
   const raw = String((V || {}).plex_hide_users || "");
   const u = String(user == null ? "" : user).trim().toLowerCase();
@@ -2554,8 +2627,6 @@ const npSource = (kind, id, states) => {
   if (kind === "plex") {
     const full = norm(a.full_title || a.title);
     if (!full) return null;
-    // The stream sensor keeps reporting a title after the session ends; its
-    // Tautulli twin is what says whether it is still running.
     const tau = String(id).replace(/^(sensor\.)plex_stream_(\d+)$/,
       "$1plex_session_$2_tautulli");
     const pst = low((states[tau] || {}).state || s.state);
@@ -2572,11 +2643,7 @@ const npSource = (kind, id, states) => {
 
   if (kind === "psn") {
     if (["unavailable", "unknown", "off", "standby", "none", ""].includes(st)) return null;
-    // The integration's sensor keeps the game in its state and its cover on a
-    // sibling image.X; a hand-built template sensor carries both as attributes.
     const attrTitle = norm(a.full_title || a.media_title || a.title);
-    // Naming a game in its STATE is the playing signal: st can never equal
-    // "playing" for such a sensor.
     const stateIsTitle = !attrTitle && !PSN_NOT_A_TITLE.has(st);
     const title = attrTitle || (stateIsTitle ? norm(s.state) : "");
     if (!title) return null;
@@ -2602,9 +2669,6 @@ const npSource = (kind, id, states) => {
   const rawTitle = norm(a.media_title);
   let artist = norm(a.media_artist || a.artist || a.media_album_artist);
   const hasContent = !!(rawTitle || artist);
-  // The card holds a paused player for pause_timeout_minutes; the preview has
-  // no clock to expire it on, so it keeps one only while it still has content
-  // and something to press - which is the card's own condition, minus the wait.
   if (st !== "playing" && st !== "buffering") {
     if (st !== "paused" || !hasContent
       || !(controls.toggle || controls.next || controls.prev)) return null;
@@ -2641,43 +2705,119 @@ const npSource = (kind, id, states) => {
   };
 };
 
-// --np-art. HA rotates an image entity's ?token=, so an unchanged picture
-// arrives as a new URL and refetching it paints a blank frame - compare paths,
-// keep the URL already loaded. Holding also covers a poll that reports no
-// picture, but only within one track.
+// HA rotates an image entity's ?token= every 5 minutes and 403s the old one.
 const npArtHold = {};
 const npArtWarm = new Map();
-const npArtPath = (u) => String(u || "").split("?")[0];
+
+// The cover's identity is in the query, never the path.
+const npArtKey = (u, id) => {
+  const t = String(u || "");
+  const q = t.indexOf("?");
+  if (q < 0) return t + "|" + id;
+  const rest = t.slice(q + 1).split("&")
+    .filter((p) => p.slice(0, 6) !== "token=" && p.slice(0, 8) !== "authSig=")
+    .sort().join("&");
+  return t.slice(0, q) + (rest ? "?" + rest : "") + "|" + id;
+};
+
+// An external cover (Plex art, Steam, Discord) has no param that rotates.
+const npArtRotates = (u) => {
+  try {
+    const p = new URL(u, location.origin);
+    return p.origin === location.origin
+      && (p.searchParams.has("token") || p.searchParams.has("authSig"));
+  } catch (e) { return false; }
+};
+
+const npArtTouch = (p) => {
+  const rec = npArtWarm.get(p);
+  if (rec) { npArtWarm.delete(p); npArtWarm.set(p, rec); }
+  return rec;
+};
+
+// LRU rather than insertion order, so the cover on screen is never the one evicted.
+const npArtTrim = () => {
+  while (npArtWarm.size > 24) {
+    const p = npArtWarm.keys().next().value;
+    const rec = npArtWarm.get(p);
+    npArtWarm.delete(p);
+    if (rec && rec.obj) { try { URL.revokeObjectURL(rec.obj); } catch (e) { /* already gone */ } }
+  }
+};
+
+const npArtClaim = (u, id) => {
+  const p = npArtKey(u, id);
+  let rec = npArtTouch(p);
+  if (!rec) { rec = {}; npArtWarm.set(p, rec); npArtTrim(); }
+  if (rec.obj || rec.busy || rec.tried === u) return rec;
+  rec.tried = u;
+  if (!npArtRotates(u)) {
+    try {
+      const im = new Image();
+      im.decoding = "async";
+      im.src = u;
+      rec.img = im;
+      if (im.decode) im.decode().catch(() => {});
+    } catch (e) { /* no decode support, the img still loads */ }
+    return rec;
+  }
+  rec.busy = true;
+  fetch(u, { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.blob() : Promise.reject(r.status)))
+    .then((b) => {
+      const obj = URL.createObjectURL(b);
+      // A token rotation is not a repaint, so swap what is already on screen.
+      const publish = () => {
+        rec.busy = false;
+        rec.obj = obj;
+        (rec.els || []).forEach((el) => {
+          el.style.backgroundImage = "url('" + obj + "')";
+        });
+        rec.els = null;
+      };
+      // Decoded first, or the swap off the token URL is a repaint with nothing to show.
+      try {
+        const im = new Image();
+        im.decoding = "async";
+        im.src = obj;
+        rec.img = im;
+        if (im.decode) im.decode().then(publish, publish); else publish();
+      } catch (e) { publish(); }
+    })
+    .catch(() => { rec.busy = false; });
+  return rec;
+};
 
 const npArt = (src) => {
   if (!src) return "";
   const k = src.key || src.kind || "";
   const id = (src.title || "") + "|" + (src.subtitle || "");
   const cur = src.art || "";
-  let u = cur;
+  if (cur) {
+    const rec = npArtClaim(cur, id);
+    // Until the blob lands, paint the CURRENT url - it is the only one HA serves.
+    const u = rec.obj || cur;
+    if (k) npArtHold[k] = { id: id, url: u };
+    return u;
+  }
   if (k) {
     const prev = npArtHold[k];
-    const sameTrack = !!(prev && prev.id === id);
-    if (cur && sameTrack && npArtPath(prev.url) === npArtPath(cur)
-      && npArtWarm.has(npArtPath(cur))) u = prev.url;
-    else if (cur) npArtHold[k] = { id: id, url: cur };
-    else u = sameTrack ? prev.url : "";
+    // Transient null between polls - hold the last good art, but only within one track.
+    if (prev && prev.id === id) return prev.url;
   }
-  if (u && !npArtWarm.has(npArtPath(u))) {
-    try {
-      const im = new Image();
-      im.decoding = "async";
-      im.src = u;
-      npArtWarm.set(npArtPath(u), im);
-      if (npArtWarm.size > 24) npArtWarm.delete(npArtWarm.keys().next().value);
-      if (im.decode) im.decode().catch(() => {});
-    } catch (e) { /* no decode support, the img still loads */ }
-  }
+  return "";
+};
+
+const npPaintArt = (el, src) => {
+  const u = npArt(src);
+  if (!el || !u) return u;
+  el.style.backgroundImage = "url('" + u + "')";
+  const id = ((src && src.title) || "") + "|" + ((src && src.subtitle) || "");
+  const rec = npArtWarm.get(npArtKey((src && src.art) || u, id));
+  if (rec && rec.busy && !rec.obj) (rec.els || (rec.els = [])).push(el);
   return u;
 };
 
-// A whole-token prefix is the same game, but only when the remainder carries no
-// digit: "Portal" and "Portal 2" stay apart, "... Definitive Edition" folds in.
 const npSameGame = (x, y) => {
   const flat = (v) => String(v || "").toLowerCase()
     .replace(/[\u2122\u00ae\u00a9]/g, " ")
@@ -2764,8 +2904,6 @@ const npActivitySources = (V, states) => {
   return out;
 };
 
-// hemma_now_playing_primary's --np-accent.
-// hemma_now_playing stacks seven.
 const NP_STACK_SLOTS = 7;
 
 const NP_ACCENT = {
@@ -2787,6 +2925,11 @@ const tileStateWord = (kind, tile, ent, states, hass) => {
     }
     case "cameras": return cameraWord(V, states, hass);
     case "media": return mediaWord(ent);
+    case "game": {
+      const g = gameActivity(ent);
+      if (g.active && g.game) return g.game;
+      break;
+    }
     case "light": return lightWord(states, ent.entity_id);
     case "plant": return plantWord(ent, V, states);
     case "energy_tile": return energyWord(V, ent, states);
@@ -2807,18 +2950,12 @@ const tileStateWord = (kind, tile, ent, states, hass) => {
     }
     default: break;
   }
-  // hemma_entity's state_display is hass.formatEntityState - the localized word,
-  // not the raw state. The capitalize is only for a stub with no hass.
   if (ent.state === "ok") return "Healthy";
   const formatted = hass && typeof hass.formatEntityState === "function"
     ? hass.formatEntityState(ent) : null;
   return formatted || cap(String(ent.state || "")) || "—";
 };
 
-// An absent show_toggle is not "no toggle" - the schema's boolDefault says what
-// the template does, and the preview and the form read it from there.
-// Badges are keyed by the section label _renderForm writes to data-k; tiles by
-// the tile key. Anything else is not selectable.
 const selKeyOf = (mk) => {
   const s = String(mk || "");
   if (s.indexOf("b:") === 0) {
@@ -2830,11 +2967,13 @@ const selKeyOf = (mk) => {
     return sec ? { group: "badges", key: sec.label, label: sec.label } : null;
   }
   if (s.indexOf("t:") === 0) return { group: "tiles", key: s.slice(2) };
+  if (s.indexOf("sec:") === 0) {
+    const sec = SECTIONS.find((x) => x.group === "rooms" && x.label === s.slice(4));
+    return sec ? { group: "rooms", key: sec.label, label: sec.label } : null;
+  }
   return null;
 };
 
-// hemma_now_playing_button.yaml's SF Symbols, viewBoxes left whole so play.fill
-// keeps sitting right of center.
 const NP_GLYPH_REF = 19.3945;
 const NP_GLYPHS = {
   pause: { w: 14.6484, h: 19.3945, d: "M1.55859 19.3828L4.23047 19.3828C5.25 19.3828 5.78906 18.8438 5.78906 17.8125L5.78906 1.55859C5.78906 0.480469 5.25 0 4.23047 0L1.55859 0C0.539062 0 0 0.527344 0 1.55859L0 17.8125C0 18.8438 0.539062 19.3828 1.55859 19.3828ZM10.0781 19.3828L12.7383 19.3828C13.7695 19.3828 14.2969 18.8438 14.2969 17.8125L14.2969 1.55859C14.2969 0.480469 13.7695 0 12.7383 0L10.0781 0C9.04688 0 8.50781 0.527344 8.50781 1.55859L8.50781 17.8125C8.50781 18.8438 9.04688 19.3828 10.0781 19.3828Z" },
@@ -2843,8 +2982,6 @@ const NP_GLYPHS = {
   prev: { w: 22.0312, h: 17.918, d: "M21.6797 16.2773L21.6797 1.61719C21.6797 0.515625 21.0352 0 20.2852 0C19.9453 0 19.6055 0.09375 19.2656 0.292969L6.94922 7.46484C6.07031 7.98047 5.73047 8.36719 5.73047 8.95312C5.73047 9.53906 6.07031 9.92578 6.94922 10.4414L19.2656 17.6133C19.6055 17.8008 19.9453 17.9062 20.2852 17.9062C21.0352 17.9062 21.6797 17.3789 21.6797 16.2773ZM4.23047 17.8359C5.25 17.8359 5.78906 17.2969 5.78906 16.2656L5.78906 1.62891C5.78906 0.597656 5.25 0.0585938 4.23047 0.0585938L1.55859 0.0585938C0.539062 0.0585938 0 0.550781 0 1.62891L0 16.2656C0 17.2969 0.539062 17.8359 1.55859 17.8359Z" },
 };
 
-// Height only, width auto (feedback_svg_icon_sizing). A number is phone points;
-// a string is a CSS length, so the wide tiers can pass their per-tier var.
 const npGlyphSvg = (shape, h) => {
   const g = NP_GLYPHS[shape] || NP_GLYPHS.play;
   const ratio = g.h / NP_GLYPH_REF;
@@ -2861,15 +2998,18 @@ const npGlyphSvg = (shape, h) => {
 const npSubLine = (s) => (s.kind === "player" ? [s.subtitle] : [s.source, s.subtitle])
   .map((x) => String(x || "").trim()).filter(Boolean).join(" \u00b7 ");
 
-const tileToggleOn = (tile, type) => {
+const tileToggleOn = (tile, type, ent) => {
   const v = (tile.variables || {}).show_toggle;
-  if (v !== undefined) return !!v;
   const f = type && (type.fields || []).find((x) => x.key === "show_toggle");
-  return !!(f && f.boolDefault);
+  const on = v !== undefined ? !!v : !!(f && f.boolDefault);
+  if (!on) return false;
+  if (String(tile.entity || "").indexOf("media_player.") === 0) {
+    const feats = ent && ent.attributes && ent.attributes.supported_features;
+    if (typeof feats === "number" && !(feats & 384)) return false;
+  }
+  return true;
 };
 
-// hemma_entity's progress_active_states default, verbatim. The switch arms the
-// ring; the state decides, so a paused player draws none.
 const PROGRESS_STATES = ["playing", "cleaning", "returning", "washing",
   "rinsing", "spinning", "drying", "running", "active"];
 
@@ -2881,8 +3021,6 @@ const tileProgressOn = (tile, ent) => {
   return on.includes(String((ent && ent.state) || "").toLowerCase());
 };
 
-// --hemma-progress-pct, in the order it tries them. Clamped: a stale
-// media_position outruns its duration.
 const tileProgressPct = (tile, ent, states) => {
   const tv = tile.variables || {};
   let v = tv.progress_value;
@@ -2915,8 +3053,6 @@ const tileProgressGlyph = (tile, ent) => {
   return "";
 };
 
-// A rail when wide, a strip when narrow. Read off the pills rather than a flag,
-// so the drag axis cannot fall out of step with the layout.
 const tabAxis = (rects) => {
   const vertical = rects.length > 1
     && Math.abs(rects[1].top - rects[0].top) > Math.abs(rects[1].left - rects[0].left);
@@ -2925,9 +3061,6 @@ const tabAxis = (rects) => {
     : { pos: "left", size: "width", client: "clientX", cross: "top", move: "translateX" };
 };
 
-// Where every pill lands once the dragged one is dropped into slot `to`. Pills
-// are different sizes, so a slot has no fixed position: the track is
-// accumulated from the sizes in the new order.
 const tabSlots = (rects, from, to, ax, gap) => {
   const order = rects.map((_, k) => k).filter((k) => k !== from);
   order.splice(to, 0, from);
@@ -2938,6 +3071,36 @@ const tabSlots = (rects, from, to, ax, gap) => {
 };
 
 // ─── panel ────────────────────────────────────────────────────────────────────
+
+const FLOW_SVG = (d, w) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="${w || 2}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+// The house is the app icon's own mark, redrawn at 24.
+const FLOW_GLYPH = {
+  home: FLOW_SVG('<path d="M4.7 17.3v-5.6L12 6.75l7.3 4.95v5.6"/>', 2.1),
+  import: FLOW_SVG('<path d="M12 3.8v10.4m0 0-4-4m4 4 4-4"/><path d="M4.6 14.6v2.9a2 2 0 0 0 2 2h10.8a2 2 0 0 0 2-2v-2.9"/>'),
+  rooms: FLOW_SVG('<rect x="4" y="4" width="7" height="7" rx="1.8"/><rect x="13" y="4" width="7" height="7" rx="1.8"/><rect x="4" y="13" width="7" height="7" rx="1.8"/><rect x="13" y="13" width="7" height="7" rx="1.8"/>', 1.8),
+  plus: FLOW_SVG('<path d="M12 5.5v13M5.5 12h13"/>', 2.4),
+  check: FLOW_SVG('<path d="m5.5 12.5 4 4 9-9"/>', 2.6),
+  alert: FLOW_SVG('<path d="M10.3 4.3 3.1 17a2 2 0 0 0 1.7 3h14.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9.6v3.8M12 16.8h.01"/>', 1.9),
+  get: FLOW_SVG('<circle cx="12" cy="12" r="8.4"/><path d="M12 8v7.6m0 0-3-3m3 3 3-3"/>', 1.9),
+  info: FLOW_SVG('<circle cx="12" cy="12" r="8.4"/><path d="M12 11v5M12 8h.01"/>', 1.9),
+  dashboard: FLOW_SVG('<rect x="3.5" y="5" width="17" height="11.5" rx="2"/><path d="M9 19.5h6"/>', 1.9),
+  phone: FLOW_SVG('<rect x="7" y="3" width="10" height="18" rx="2.4"/><path d="M11 18h2"/>', 1.9),
+  doc: FLOW_SVG('<path d="M7 3.6h6.4L18 8.2v12.2H7z"/><path d="M13.4 3.6v4.6H18"/>', 1.8),
+  chevron: FLOW_SVG('<path d="m9.5 6 6 6-6 6"/>', 2.2),
+};
+// mdi paths, filled, so the controls are the ones Hemma's popups draw.
+const FLOW_NAV = {
+  close: "M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z",
+  back: "M15.41,16.58L10.83,12L15.41,7.41L14,6L8,12L14,18L15.41,16.58Z",
+};
+const FLOW_TINT = {
+  teal: "linear-gradient(to bottom, #2fd6e0, #00a8b4)",
+  gray: "linear-gradient(to bottom, #9c9ca3, #6f6f76)",
+  orange: "linear-gradient(to bottom, #ffb340, #ff8a00)",
+};
+
+const STUDIO_GROUND = "#15171C";
 
 class HemmaPanel extends HTMLElement {
   constructor() {
@@ -2953,8 +3116,6 @@ class HemmaPanel extends HTMLElement {
     this._bundle = null;
     this._revealed = new Set();
     this._advOpen = new Set();
-    // Tile keys with an unfilled member row on screen. Never the config: an
-    // empty slot pushed into the list saved as a member with no entity.
     this._pendingMember = new Set();
     this._miniOpen = null;
     // Which group the inspector is on, and what inside it is selected.
@@ -2967,13 +3128,20 @@ class HemmaPanel extends HTMLElement {
     this._tileSeq = 0;
   }
 
-  // Bound once, on the column rather than on the cards: _renderForm rebuilds
-  // those on every keystroke, and a listener per card would go with them.
+  // Not the constructor: an element may not gain an attribute there.
+  connectedCallback() {
+    if (!this._built) this.style.backgroundColor = STUDIO_GROUND;
+  }
+
   _wireInspector() {
     if (this._inspectorWired) return;
     const pane = this.$("pane");
     if (!pane) return;
     this._inspectorWired = true;
+    const insp = pane.parentNode;
+    pane.addEventListener("scroll", () => {
+      if (insp) insp.classList.toggle("scrolled", pane.scrollTop > 2);
+    }, { passive: true });
     pane.addEventListener("mouseover", (ev) => {
       const card = ev.target.closest("[data-k]");
       const key = card && card.dataset.k;
@@ -2998,24 +3166,18 @@ class HemmaPanel extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const dark = !(hass.themes && hass.themes.darkMode === false);
-    this.classList.toggle("is-light", !dark);
+    this._lightTheme = !dark;
+    this.classList.toggle("is-light", false);
     if (!this._built) { this._built = true; this._build(); }
     else this._liveRefresh();
   }
 
-  // hass is REPLACED on every update, not mutated, so this fires constantly -
-  // hence the coalesce. _swapMap carries the decoded photo across and animates
-  // only what is new, so a refresh is invisible unless something changed.
   _liveRefresh() {
     if (this._liveTimer) return;
     this._liveTimer = setTimeout(() => {
       this._liveTimer = null;
-      // Never mid-gesture: a swap under a drag drops the tile being dragged,
-      // and under an open menu it takes the anchor out from under it.
       if (this._tileDragged || this._openCombo) return;
       const mount = this.$("mapmount");
-      // Not while the pointer is on it: a rebuild under the cursor drops hover
-      // state and can move the thing about to be clicked.
       if (mount && mount.matches(":hover")) return this._liveRefresh();
       if (!mount || !mount.firstChild) return;
       const room = this._state && this._state.compact.rooms[this._room];
@@ -3026,8 +3188,6 @@ class HemmaPanel extends HTMLElement {
   set narrow(v) { this._narrow = v; }
   set route(v) { this._route = v; }
 
-  // /hemma/<room-path>, or ?room=<room-path>. Unknown or absent lands on the
-  // first room, which is what it always did.
   _roomFromRoute() {
     if (this._routeUsed) return 0;
     const rooms = (this._state && this._state.compact.rooms) || [];
@@ -3041,6 +3201,11 @@ class HemmaPanel extends HTMLElement {
     const i = rooms.findIndex((r) => r.path === want);
     return i < 0 ? 0 : i;
   }
+  _dashFromRoute() {
+    try { return new URLSearchParams(window.location.search).get("dash") || ""; }
+    catch (e) { return ""; }
+  }
+
   set panel(v) { this._panel = v; }
 
   $(id) { return this.shadowRoot.getElementById(id); }
@@ -3060,16 +3225,21 @@ class HemmaPanel extends HTMLElement {
     const el = this.$("status");
     el.textContent = msg || "";
     el.className = "status " + (kind || "");
+    if (this._statusTimer) { clearTimeout(this._statusTimer); this._statusTimer = 0; }
+    if (!msg || kind === "err") return;
+    // Errors stay until something replaces them; a confirmation does not.
+    this._statusTimer = setTimeout(() => {
+      this._statusTimer = 0;
+      if (el.textContent !== msg) return;
+      el.textContent = "";
+      el.className = "status";
+    }, 2600);
   }
 
   async _bundleOnce(fresh) {
-    // A save must never write a bundle the panel read before the templates
-    // changed - that is silent, and it looks like the save did nothing.
+    // A save must never write a bundle read before the templates changed under it.
     if (fresh) this._bundle = null;
     if (this._bundle) return this._bundle;
-    // Heuristic freshness: the static handler sets no Cache-Control, so a bundle
-    // that has sat unchanged for hours gets reused without asking the server.
-    // That silently feeds refreshTemplates yesterday's templates.
     let res = null;
     try {
       res = this._hass && this._hass.fetchWithAuth
@@ -3079,8 +3249,6 @@ class HemmaPanel extends HTMLElement {
       res = null;
     }
     if (!res || !res.ok) {
-      // Heuristic freshness only: this copy is whatever the last integration
-      // reload built, which is what the view exists to stop mattering.
       res = await fetch(TEMPLATES_URL_STATIC, { cache: "no-cache" });
       if (!res.ok) throw new Error(`templates ${res.status}`);
       this._log("template bundle read from the static copy - reload the Hemma "
@@ -3091,15 +3259,14 @@ class HemmaPanel extends HTMLElement {
   }
 
   async _build() {
+    this.style.backgroundColor = "";
     this.shadowRoot.innerHTML = `
       <style>
         :host {
-          /* The form column is the only scroller. Without clamping the root,
-             a wheel over the preview column falls through to the document,
-             which drags the fixed header off screen and clips the columns. */
           display:block; overflow:hidden; overscroll-behavior:none;
           width:var(--vpw, 100vw); height:var(--vph, 100dvh);
           position:relative; isolation:isolate;
+          background-color:var(--hemma-studio-ground, #15171C);
           --g-blur: var(--hemma-glass-backdrop, blur(24px) saturate(180%));
           --g-rim: var(--hemma-glass-rim,
             inset 0 1px .5px -0.5px rgba(255,255,255,0.55),
@@ -3108,22 +3275,26 @@ class HemmaPanel extends HTMLElement {
             inset 0 -3px 6px -3px rgba(255,255,255,0.12),
             0 2px 8px rgba(0,0,0,0.18));
           --ease:cubic-bezier(.32,.72,0,1);
+          --sw-ease:cubic-bezier(.34,1.12,.64,1);
           --up:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 16V4m0 0L7 9m5-5 5 5'/%3E%3Cpath d='M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2'/%3E%3C/svg%3E");
 
-          /* One material in both modes: a neutral gray glass carrying light
-             text. Light and dark change how deep it sits, not what it is. */
           --ink:#ffffff;
           --ink-2:rgba(255,255,255,0.70);
           --ink-3:rgba(255,255,255,0.46);
           --hair:rgba(255,255,255,0.12);
-          --accent:#0a84ff;
+          --accent:var(--hemma-popup-ui-action, var(--hemma-color-teal, #00C3D0));
+          --on-accent:rgba(0,0,0,0.86);
+          accent-color:var(--accent);
+          --sw-on:#30d158;
+          --updown:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 18'%3E%3Cpath d='M2.5 6.5 6.5 2.5l4 4M2.5 11.5l4 4 4-4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+          --fill:rgba(255,255,255,0.92);
+          --on-fill:#1d1d1f;
 
           --pane:linear-gradient(to bottom, rgba(142,142,152,0.30), rgba(122,122,132,0.24) 46%, rgba(112,112,122,0.22));
           --nested:rgba(255,255,255,0.09);
           --chip:rgba(255,255,255,0.15);
           --chip-hi:rgba(255,255,255,0.24);
           --chip-rim:rgba(255,255,255,0.18);
-          /* Fields read as pressed into the glass, controls as lifted off it. */
           --field:rgba(0,0,0,0.20);
           --field-hi:rgba(0,0,0,0.26);
           --field-rim:rgba(255,255,255,0.14);
@@ -3137,52 +3308,21 @@ class HemmaPanel extends HTMLElement {
           --photo:.46;
 
           --r-xl:30px; --r-lg:22px; --r-md:15px; --r-sm:11px;
-          /* Measured off iOS Settings at 3x: ~11pt against a 52pt row. Its own
-             number, so the genuinely big radii are not dragged down with it. */
-          --r-group:16px;
-          /* iOS puts the icon 10pt in from the group's edge. Cards and tiles
-             share it; they were 24 and 20. */
+          --r-group:26px;
           --card-pad-h:16px;
-          /* The control row a heading sits in: the icon slot, which is also
-             what the +, the caret and the switch fit inside. */
           --head-row:26px;
           --shut-h:52px;
           --card-pad-v:calc((var(--shut-h) - var(--head-row)) / 2);
-          /* Where a hairline between rows starts - under the label, never under
-             the icon, the way a grouped table divides itself. */
-          --rule-inset:calc(var(--card-pad-h) + var(--sicon) + 12px);
+          --rule-inset:var(--card-pad-h);
           --gap:18px;
-          /* The space between bands - Room, Badges, Tiles. The gap under the
-             header is derived from it, so the first section sits the same
-             distance below the bar as the sections sit from each other. */
           --band-gap:30px;
-          /* The form's heading row and the preview's control row share this, so
-             the first card in each column starts level. --ctl-h derives from it
-             so the two cannot drift. */
-          /* The pills were wide and thin. 39 gives the labels room without
-             making the row a band; the icon options derive their square from
-             the same number, so Day/Night stay circles. */
           --headrow:39px;
-          /* What the cards' drop shadow needs to the left of the scrolling
-             column, which clips at its padding box. */
-          /* The icon chip. Radius and glyph inset derive from it, so the
-             proportions hold at any size. The .chead grid gives it 34px. */
           --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='discrete' tableValues='1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
           --sicon:30px;
           --shadow-room:12px;
-          /* _syncTop measures the real bar and overwrites this ON THE HOST: the
-             inspector is a sibling of .body and would never see it there. */
           --top-h:68px;
-          /* macOS gives a source list about 220pt and holds it there. It is
-             chrome, so it does not grow with the window. */
           --rail-w:220px;
-          /* Fixed, the way a macOS inspector is. The form's rows are a
-             110px label track plus a field, so this cannot go fluid without
-             the field collapsing at the narrow end. */
           --insp-w:386px;
-          /* What it stands off the window's trailing edge. The gutter between
-             the panel and the preview is NOT this: that one is the plinth's
-             own 14px, so it matches the rail's side of the preview exactly. */
           --insp-gap:26px;
           color:var(--ink);
           font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
@@ -3190,9 +3330,6 @@ class HemmaPanel extends HTMLElement {
           background:var(--primary-background-color,#0c0c0f);
         }
 
-        /* HA reports darkMode from its own theme choice, which need not match
-           how the panel reads. The palette above stands in both; only the
-           depth cues move, so the panel never becomes a second design. */
         :host(.is-light) {
           --pane:linear-gradient(to bottom, rgba(128,128,140,0.40), rgba(108,108,120,0.34) 46%, rgba(98,98,110,0.32));
           --chip:rgba(255,255,255,0.18);
@@ -3206,18 +3343,57 @@ class HemmaPanel extends HTMLElement {
           --shadow:0 10px 28px rgba(0,0,0,0.22);
           --scrim-top:rgba(8,8,12,0.26); --scrim-bot:rgba(8,8,12,0.50);
           --photo:.52;
+          --sw-on:#34c759;
         }
+        :host(.is-light:not(.phone)) {
+          --ink:#16181c;
+          --ink-2:rgba(60,60,67,0.64);
+          --ink-3:rgba(60,60,67,0.36);
+          --hair:rgba(60,60,67,0.18);
+          --accent:#00838C;
+          --on-accent:#ffffff;
+          --fill:#1d1d1f; --on-fill:#ffffff;
+          --chip:rgba(118,118,128,0.14); --chip-hi:rgba(118,118,128,0.22); --chip-rim:transparent;
+          --field:rgba(118,118,128,0.14); --field-hi:rgba(118,118,128,0.20); --field-rim:transparent;
+          --nested:rgba(255,255,255,0.70);
+          --lift:linear-gradient(#ffffff, #ffffff);
+          --pane:linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78));
+          --pane-solid:linear-gradient(#f4f4f7, #f4f4f7);
+          --card-tint:rgba(255,255,255,0.55);
+          --sw-off:rgba(120,120,128,0.20);
+          --shadow:0 10px 30px rgba(20,24,32,0.14);
+          --scrim-top:rgba(244,244,248,0.52); --scrim-bot:rgba(236,236,242,0.72);
+          --photo:.52;
+          --slab-rail:rgba(255,255,255,0.60);
+          --slab-page:rgba(255,255,255,0.72);
+          --slab-blur:blur(26px) saturate(140%) brightness(1.06);
+          --slab-card:rgba(118,118,128,0.10);
+          color-scheme:light;
+        }
+        :host(.is-light:not(.phone)) .top {
+          background:rgba(255,255,255,0.52);
+        }
+        :host(.is-light:not(.phone)) .sidelist .siderow:hover { background:rgba(0,0,0,0.05); }
+        :host(.is-light:not(.phone)) .sidelist .siderow.on { background:rgba(0,0,0,0.09); }
+        :host(.is-light:not(.phone)) .card:not(.shut):not(.off) { background-color:transparent; }
+        :host(.is-light:not(.phone)) .combo-menu { --menu-pane:rgba(255,255,255,0.84); }
+        :host(.is-light:not(.phone)) .combo-sep { background:var(--hair); }
+        :host(.is-light:not(.phone)) .combo-opt.active { background:rgba(118,118,128,0.14); }
+        :host(.is-light:not(.phone)) .combo-opt.danger { color:#d70015; }
+        :host(.is-light:not(.phone)) .seg { background:rgba(118,118,128,0.14); }
+        :host(.is-light:not(.phone)) .segthumb { background:#ffffff; box-shadow:0 1px 3px rgba(0,0,0,0.12); }
+        :host(.is-light:not(.phone)) .shot { background:rgba(118,118,128,0.12); }
+        :host(.is-light:not(.phone)) .shot:not(.empty) .shotover { background:rgba(0,0,0,0.30); }
+        :host(.is-light:not(.phone)) .status.warn { color:#c93400; }
 
-        /* Blurred room photo behind the glass. Sibling, never an ancestor, so it
-           cannot break backdrop-filter on the cards. Overhangs to keep the blur
-           from darkening at the edges. */
-        /* isolation seals the blend: the noise layers use mix-blend-mode, and
-           .top and the columns gain compositing layers during an entrance and
-           drop them after - which shifted the whole backdrop's brightness the
-           moment the animation ended. */
-        /* On the WRAPPER, under every layer inside it. On .bgtint - a later
-           absolute sibling with no z-index - an opaque stop hides the photo and
-           leaves the glass nothing to refract. */
+        /* Hiding pieces instead makes them pale, not absent: every surface
+           here is translucent. */
+        .curtain {
+          position:fixed; inset:0; z-index:9999; pointer-events:none;
+          background:linear-gradient(to bottom, #15151c, #0f0f14);
+        }
+        :host(:not(.booting)) .curtain { display:none; }
+
         .bgwrap {
           position:fixed; inset:0; z-index:0; pointer-events:none;
           isolation:isolate; overflow:hidden;
@@ -3226,41 +3402,19 @@ class HemmaPanel extends HTMLElement {
         .bg, .bgtint, .bgnoise, .bgnoise2 {
           position:absolute; inset:-160px; z-index:0; pointer-events:none;
         }
-        /* The photo is defocused far past recognition, so it reads as the room's
-           light rather than as a second copy of the picture in the preview.
-           The overhang has to clear ~4x the blur radius or the edges darken. */
         .bg { inset:-280px; }
-        /* Two alpha ramps over the viewport land as ~20px stripes in 8 bit. Raw
-           feTurbulence is colored noise with noisy alpha, so at .04 almost none
-           of it reached the screen. Flattened to opaque gray and blended as
-           overlay it modulates around the midpoint instead of veiling, which is
-           what actually breaks a band up. */
         .bgnoise, .bgnoise2 {
           background-image:var(--grain);
           background-size:180px 180px;
         }
         .bgnoise {
           mix-blend-mode:overlay;
-          /* One knob. Too low and the stripes come back, too high and it reads
-             as film grain. Somewhere around .12-.22 is the working range. */
           opacity:var(--bg-grain, .17);
         }
-        /* overlay is midpoint-relative: below 0.5 it behaves as multiply, so the
-           noise's deviation from gray is scaled by 2 x base. Measured against a
-           #1b2130 backdrop the dither fell to sd 0.71 across 7 levels, under the
-           ~1 level a dither needs to break a band - which is why the stripes are
-           dark-mode only. screen falls off the opposite way, strongest where
-           overlay is weakest, so the pair holds roughly flat:
-               overlay .17 alone   dark sd 0.71 ( 7 lv)   light sd 2.27 (17 lv)
-               + screen .06        dark sd 1.26 (12 lv)   light sd 2.43 (19 lv)
-           It costs about nine levels of lift on the black point, accepted. */
         .bgnoise2 {
           mix-blend-mode:screen;
           opacity:var(--bg-grain-dark, .06);
         }
-        /* The photograph is the subject INSIDE the preview. Out here at full
-           strength the viewport swung blue to brown and took the form's
-           hairlines with it. What is left is the room's light, not its picture. */
         .bg {
           width:calc(100% + 560px); height:calc(100% + 560px);
           object-fit:cover; filter:blur(80px) saturate(122%);
@@ -3272,32 +3426,145 @@ class HemmaPanel extends HTMLElement {
             radial-gradient(1300px 700px at 18% -14%, rgba(150,180,240,0.17), transparent 64%),
             linear-gradient(to bottom, var(--scrim-top), var(--scrim-bot));
         }
+        :host(.phone) {
+          --pane:linear-gradient(rgba(12,14,19,0.62), rgba(12,14,19,0.62));
+          --pane-solid:linear-gradient(#1d1f25, #1d1f25);
+          --g-blur:blur(24px) saturate(180%);
+          --g-rim:none;
+          --field:rgba(255,255,255,0.08);
+          --field-hi:rgba(255,255,255,0.12);
+          --field-rim:rgba(255,255,255,0.06);
+          --hair:rgba(255,255,255,0.10);
+          --card-tint:transparent;
+          --photo:1;
+          --wp-dim:.22;
+          --wp-blur:22px;
+          --wp-over:calc(var(--wp-blur) * 3);
+          --wp-safe:env(safe-area-inset-top, 0px);
+        }
+        :host(.phone) .bgwrap { background:var(--hemma-mobile-hero-floor, #2b2c2e); }
+        :host(.phone.is-light) {
+          --ink:#000000;
+          --ink-2:rgba(60,60,67,0.62);
+          --ink-3:rgba(60,60,67,0.34);
+          --hair:rgba(60,60,67,0.20);
+          --accent:#00838C;
+          --on-accent:#ffffff;
+          --fill:#1d1d1f;
+          --on-fill:#ffffff;
+          --pane:linear-gradient(rgba(242,242,246,0.80), rgba(242,242,246,0.80));
+          --pane-solid:linear-gradient(#f2f2f6, #f2f2f6);
+          --nested:rgba(255,255,255,0.70);
+          --chip:#ffffff;
+          --chip-hi:rgba(255,255,255,0.72);
+          --chip-rim:transparent;
+          --field:#ffffff;
+          --field-hi:rgba(255,255,255,0.80);
+          --field-rim:transparent;
+          --lift:linear-gradient(#ffffff, #ffffff);
+          --sw-off:rgba(120,120,128,0.16);
+          --sw-on:#34c759;
+          --shadow:0 6px 18px rgba(0,0,0,0.08);
+          color-scheme:light;
+        }
+        :host(.phone.is-light) .bg { opacity:1; }
+        :host(.phone.is-light) .bgwrap::after {
+          content:""; position:absolute; inset:0; z-index:1; pointer-events:none;
+          background:linear-gradient(to bottom, rgba(242,242,247,0.14) 0%,
+            rgba(242,242,247,0.20) calc(30% + var(--wp-safe)),
+            rgba(242,242,247,0.12) calc(60% + var(--wp-safe)),
+            rgba(242,242,247,0.10) 100%);
+        }
+        :host(.phone.is-light) .top {
+          --ink:#ffffff; --ink-2:rgba(255,255,255,0.78); --ink-3:rgba(255,255,255,0.5);
+        }
+        :host(.phone.is-light) .bigtitle { color:#ffffff; }
+        :host(.phone.is-light) .toprow > button.ghost:disabled,
+        :host(.phone.is-light) .toprow > :where(.navpill) > button.ghost:disabled { color:rgba(255,255,255,0.45); }
+        :host(.phone.is-light) .detailbar .back { color:#ffffff; }
+        :host(.phone.is-light) .detailbar h3 { color:#ffffff; }
+        :host(.phone.is-light) .groupseg { background:rgba(236,236,242,0.72); }
+        :host(.phone.is-light) .groupseg .segopt { color:rgba(0,0,0,0.84); }
+        :host(.phone.is-light) .groupseg .segopt.on { color:#000000; }
+        :host(.phone.is-light) .groupseg .segthumb {
+          background:#ffffff; box-shadow:0 1px 3px rgba(0,0,0,0.12);
+        }
+        :host(.phone.is-light) .toprow > button.ghost:disabled,
+        :host(.phone.is-light) .toprow > :where(.navpill) > button.ghost:disabled { color:rgba(60,60,67,0.34); }
+        :host(.phone.is-light) .grouphead p { color:var(--ink-2); }
+        :host(.phone.is-light) .hint { color:var(--ink-2); }
+        :host(.phone.is-light) .row .combo::after { background-color:rgba(60,60,67,0.42); }
+        :host(.phone.is-light) .combo-menu { --menu-pane:rgba(255,255,255,0.82); }
+        :host(.phone.is-light) .combo-sep { background:var(--hair); }
+        :host(.phone.is-light) .status.warn { color:#c93400; }
+        :host(.phone.is-light) .col > .grouphead + .card::before,
+        :host(.phone.is-light) .col > .card + .card::before,
+        :host(.phone.is-light) .tilegrid > * + *::before,
+        :host(.phone.is-light) .inspector .band:not(.detail) .grouphead::after,
+        :host(.phone.is-light) .frow + .frow::before { background:var(--hair); }
+        :host(.phone.is-light) .card > .chead::after,
+        :host(.phone.is-light) .tile > .thead::after { background:rgba(0,0,0,0.045); }
+        :host(.phone.is-light) .band:not(.detail) .card > .chead .fold,
+        :host(.phone.is-light) .band:not(.detail) .tile > .thead .fold { color:rgba(60,60,67,0.30); }
+        :host(.phone.is-light) .shot { background:#ffffff; }
+        :host(.phone.is-light) .shot:not(.empty) .shotover { background:rgba(0,0,0,0.30); }
+        :host(.phone.is-light) .shot:hover .shotover, :host(.phone.is-light) .shot.over .shotover { color:#fff; }
+        :host(.phone.is-light) .shot.empty:hover .shotover, :host(.phone.is-light) .shot.empty.over .shotover { background:transparent; color:var(--ink); }
+        :host(.phone.is-light) .addbar .combo input,
+        :host(.phone.is-light) .addbar .plus { background-color:var(--field); }
+        :host(.phone.is-light) .addbar .plus:hover:not(:disabled) { background-color:var(--field-hi); }
+        :host(.phone.is-light) .addrowbar .editbtn.on:hover { background:#3a3a3c; }
+        :host(.phone.is-light) .combo-opt.active { background:rgba(118,118,128,0.14); }
+        :host(.phone.is-light) .combo-opt.danger { color:#d70015; }
+        :host(.phone) .bg {
+          inset:auto; top:calc(var(--wp-over) * -1); left:calc(var(--wp-over) * -1);
+          width:calc(100% + var(--wp-over) * 2);
+          height:calc(var(--hemma-mobile-hero-height, 64%) + var(--wp-safe) + var(--wp-over) * 2);
+          object-position:var(--hemma-mobile-hero-x, 50%) var(--hemma-mobile-hero-y, 0%);
+          filter:blur(var(--wp-blur))
+                 contrast(var(--hemma-mobile-hero-photo-contrast, .75))
+                 saturate(var(--hemma-mobile-hero-photo-saturate, .9))
+                 brightness(var(--hemma-mobile-hero-photo-brightness, 1));
+        }
+        :host(.phone) .bgtint {
+          inset:0;
+          background:
+            linear-gradient(rgba(0,0,0,var(--wp-dim, .12)), rgba(0,0,0,var(--wp-dim, .12))),
+            linear-gradient(to bottom,
+              var(--hemma-mobile-hero-tint-top, rgba(0,0,0,0.09)) 0%,
+              var(--hemma-mobile-hero-tint-bot, rgba(0,0,0,0.15))
+                calc(var(--hemma-mobile-hero-wash-mid, 23%) + var(--wp-safe)),
+              transparent calc(var(--hemma-mobile-hero-wash-end, 62%) + var(--wp-safe))),
+            radial-gradient(var(--hemma-mobile-hero-mesh-a-size, 91% 32%)
+                at var(--hemma-mobile-hero-mesh-a-pos, 50% 65%),
+              var(--hemma-mobile-hero-mesh-a, transparent) 0%, transparent 72%),
+            radial-gradient(var(--hemma-mobile-hero-mesh-b-size, 116% 48%)
+                at var(--hemma-mobile-hero-mesh-b-pos, 51% 90%),
+              var(--hemma-mobile-hero-mesh-b, transparent) 0%, transparent 70%),
+            linear-gradient(var(--hemma-mobile-hero-angle, 180deg),
+              transparent calc(var(--hemma-mobile-hero-fade-start, 43%) + var(--wp-safe)),
+              var(--hemma-mobile-hero-c-handoff, #595d68)
+                calc(var(--hemma-mobile-hero-p-handoff, 63%) + var(--wp-safe)),
+              var(--hemma-mobile-hero-c-upper, #4e5159)
+                calc(var(--hemma-mobile-hero-p-upper, 71%) + var(--wp-safe)),
+              var(--hemma-mobile-hero-c-mid, #42444a)
+                calc(var(--hemma-mobile-hero-p-mid, 79%) + var(--wp-safe)),
+              var(--hemma-mobile-hero-c-lower, #37383c)
+                calc(var(--hemma-mobile-hero-p-lower, 88%) + var(--wp-safe)),
+              var(--hemma-mobile-hero-c-base, #2b2c2e)
+                calc(var(--hemma-mobile-hero-p-base, 100%) + var(--wp-safe)));
+        }
         .top, .body { position:relative; z-index:1; }
 
-        /* left/right auto, not 0: the bar is fixed to the viewport but spans the
-           PANEL, and with the sidebar docked left:0 runs out under it. auto puts
-           the box at its static position - the host's own left edge. */
-        /* One row: the rail down the leading edge, everything else beside it.
-           The rail is chrome and holds its own height; .main is the window. */
         .shell {
           position:relative;
           display:flex; align-items:stretch;
           height:var(--vph, 100dvh);
         }
-        /* The preview centers in what the panel leaves, but the toolbar is
-           fixed and sets its own width, so this padding never reaches it - the
-           bar still runs to the far edge with the panel below it. */
         .main {
           flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
           padding-right:calc(var(--insp-w) + var(--insp-gap));
         }
-        /* Fixed with left:auto, so its static position - the rail's trailing
-           edge - is where it starts. That tracks HA's own sidebar docking and
-           undocking for free, which a viewport-relative left could not. */
-        /* One band across the window, like a unified toolbar: the rail and the
-           bar share a fill and a blur, so the left of it reads as the rail's own
-           top. It still starts from its STATIC position and is pulled back from
-           there, so HA docking its sidebar moves it for free. */
         .top {
           position:fixed; top:0; left:auto; right:auto; z-index:6;
           margin-left:calc(var(--rail-w) * -1);
@@ -3308,29 +3575,16 @@ class HemmaPanel extends HTMLElement {
           backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
           box-shadow:inset 0 -1px 0 var(--hair);
         }
-        /* One gutter, both sides, every row, so the bar and the columns cannot
-           drift. --pad opens up past the 1680 cap: the burger needs 44px in
-           front of the content edge and there is no centering margin left. */
         .toprow, .body {
           --pad:max(28px, calc(52px - max(0px, (100% - 1680px) / 2)));
           max-width:1680px; width:100%; margin:0 auto; box-sizing:border-box;
           padding-left:var(--pad); padding-right:var(--pad);
         }
         .toprow { display:flex; align-items:center; gap:14px; }
-        /* The bar is the window now, so its content is placed against the rail
-           rather than centered in a 1680 column: 20px past the rail's edge is
-           where Home sets the name of what you are looking at. The right gutter
-           still comes from --pad, which the wider box resolves to 28px. */
         :host(:not(.narrow)) .toprow {
           max-width:none; margin:0;
           padding-left:calc(var(--rail-w) + 20px);
         }
-        /* One bar, one scope: burger, wordmark, then the controls that act on the
-           DASHBOARD. Picking a room is picking a document, so rooms live in the
-           rail; below PANEL_NARROW they come back here as a strip that SCROLLS
-           rather than wraps. The scroller is #rooms itself, not the list inside
-           it, so + travels with the pills while the rail can still pin it. */
-        /* Where Home puts the name of what you are looking at. */
         .toprow > h1 { flex:0 0 auto; }
         .toprow #rooms {
           flex:0 1 auto; min-width:0; margin-left:6px;
@@ -3341,27 +3595,16 @@ class HemmaPanel extends HTMLElement {
         .toprow #rooms::-webkit-scrollbar { width:0; height:0; display:none; }
         .toprow #rooms .tabs { margin:0; flex-wrap:nowrap; }
         .toprow #rooms .tab, .toprow #rooms .tabadd { flex:0 0 auto; }
-        /* A circle in the strip, a named row in the rail - the same split
-           #save makes between its long and short label. */
         .toprow #rooms .addlabel { display:none; }
-        /* The strip is a row of compact pills with no room for a glyph, and no
-           pointer to reveal a menu on hover - so the caret stays parked on the
-           selected pill, which is where it has always been. */
         .toprow .tab .roomglyph { display:none; }
         .toprow .tab .caret { display:none; }
         .toprow .tab.on .caret { display:grid; }
         .top .tabs { margin:0; }
         .top h1 { font-size:21px; font-weight:600; margin:0; letter-spacing:-0.022em; }
         .ver { font-size:11px; color:var(--ink-3); font-weight:450; margin-left:7px; letter-spacing:0; }
-        /* The wordmark is the app; this is the document. A macOS titlebar names
-           the file it has open and lets you act on it from that name, which is
-           also the discoverable way to switch - the ... menu becomes a shortcut
-           rather than the only route. */
         .burger {
           background:transparent; border:0; color:var(--ink); cursor:pointer;
           width:32px; height:32px; flex:0 0 32px; border-radius:50%; padding:0;
-          /* Out into the gutter so the WORDMARK lines up with the pills, not the
-             burger. 32 + 8 is the 40 it hangs out by. */
           margin-left:-40px; margin-right:-6px;
           display:flex; align-items:center; justify-content:center;
           box-shadow:none;
@@ -3369,14 +3612,8 @@ class HemmaPanel extends HTMLElement {
         }
         .burger svg { width:20px; height:20px; display:block; }
         .spacer { flex:1 1 0; min-width:0; }
-        .toprow > button { flex:0 0 auto; }
+        .toprow > button, .toprow > :where(.navpill) > button { flex:0 0 auto; }
 
-        /* The body is the viewport, so the stage can flex into whatever the
-           room switcher above it leaves behind - no magic offsets to keep in
-           step with the header or the tab row. */
-        /* The body starts BEHIND the header; each column pads itself clear, so
-           the bar's own blur is the fade. No mask anywhere - one would kill
-           backdrop-filter on every card inside. */
         .body {
           overflow:hidden;
           height:var(--vph, 100dvh); display:flex; flex-direction:column;
@@ -3390,16 +3627,21 @@ class HemmaPanel extends HTMLElement {
           transition:border-color .16s ease, background .16s ease;
         }
         input:focus, textarea:focus {
-          outline:none; border-color:rgba(10,132,255,0.9); background-color:var(--field-hi);
+          outline:none; border-color:var(--accent); background-color:var(--field-hi);
         }
         input::placeholder, textarea::placeholder { color:var(--ink-3); }
 
         button {
-          font:inherit; font-weight:590; cursor:pointer; color:#fff;
-          background:var(--accent); border:0; border-radius:999px; padding:10px 20px;
+          font:inherit; font-weight:590; cursor:pointer; color:var(--on-fill);
+          background:var(--fill); border:0; border-radius:999px; padding:10px 20px;
           transition:filter .16s ease, transform .12s ease;
         }
         button:hover:not(:disabled) { filter:brightness(1.12); }
+        :host { -webkit-tap-highlight-color:transparent; }
+        button, [role="button"] {
+          -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+        }
+        button:focus:not(:focus-visible) { outline:none; }
         button:active:not(:disabled) { transform:scale(0.97); }
         button.ghost {
           background:var(--chip); color:var(--ink);
@@ -3407,76 +3649,82 @@ class HemmaPanel extends HTMLElement {
           backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
         }
         button.ghost:hover:not(:disabled) { background:var(--chip-hi); filter:none; }
-        /* No blur of their own: nested inside the header's glass a
-           backdrop-filter samples that composited surface, and drops out while
-           the bar animates. A stronger fill replaces it. */
-        .toprow > button.ghost {
+        .toprow > button.ghost, .toprow > :where(.navpill) > button.ghost {
           backdrop-filter:none; -webkit-backdrop-filter:none;
           background:rgba(255,255,255,0.20);
         }
-        .toprow > button.ghost:hover:not(:disabled) { background:rgba(255,255,255,0.28); }
-        /* No resting fill: one chip fewer in the corner. It appears under the
-           pointer and fades back out. */
+        .toprow > button.ghost:hover:not(:disabled), .toprow > :where(.navpill) > button.ghost:hover:not(:disabled) { background:rgba(255,255,255,0.28); }
         .burger:hover { background:rgba(255,255,255,0.20); }
         button:disabled { opacity:.35; cursor:default; transition:opacity .22s var(--ease); }
-        /* On save the button goes green AND disabled at once, so the tick drew
-           itself while fading. The dim waits for .ok to clear. */
         button:disabled.ok { opacity:1; }
-        button.ok { background:#30d158; }
+        button.ok { background:var(--fill); color:var(--on-fill); }
         button.ok svg { width:19px; height:19px; display:block; }
         #save .s-short { display:none; }
-        #brand .s-short { display:none; }
+        #diffs .s-short { display:none; }
 
         .combo > input { border-radius:13px; }
-        .toprow > select, .toprow > button:not(.burger) {
+        .toprow > select, .toprow > button:not(.burger), .toprow > :where(.navpill) > button:not(.burger) {
           height:36px; box-sizing:border-box; display:inline-flex;
           align-items:center; justify-content:center; font-size:13.5px;
         }
-        .toprow > button:not(.burger) { padding:0 18px; }
-        .toprow > button.icon {
+        .toprow > button:not(.burger), .toprow > :where(.navpill) > button:not(.burger) { padding:0 18px; }
+        .toprow > button.icon, .toprow > :where(.navpill) > button.icon {
           width:36px; padding:0; border-radius:50%;
           background:var(--chip); box-shadow:inset 0 0 0 1px var(--chip-rim); color:var(--ink-2);
           transition:background .14s ease, color .14s ease;
         }
-        .toprow > button.icon:hover { background:var(--chip-hi); color:var(--ink); filter:none; }
-        .toprow > button.icon svg { width:18px; height:18px; display:block; }
-        .toprow > button#more { color:var(--ink); }
-        .toprow > button#more svg { width:20px; height:20px; }
-        /* Blue only while an edit is pending, so the header reads as one row of
-           neutral controls until there is something to save. */
-        .toprow > button#save.dirty { background:var(--accent); color:#fff; box-shadow:none; }
-        .toprow > button#save.dirty:hover:not(:disabled) {
-          background:var(--accent); filter:brightness(1.12);
+        .toprow > button.icon:hover, .toprow > :where(.navpill) > button.icon:hover { background:var(--chip-hi); color:var(--ink); filter:none; }
+        .toprow > button.icon svg, .toprow > :where(.navpill) > button.icon svg { width:18px; height:18px; display:block; }
+        .toprow > button#more, .toprow > :where(.navpill) > button#more { color:var(--ink); }
+        .toprow > button#more svg, .toprow > :where(.navpill) > button#more svg { width:20px; height:20px; }
+        .toprow > button#save.dirty, .toprow > :where(.navpill) > button#save.dirty { background:var(--fill); color:var(--on-fill); box-shadow:none; }
+        .toprow > button#save.dirty:hover:not(:disabled), .toprow > :where(.navpill) > button#save.dirty:hover:not(:disabled) {
+          background:#fff; filter:none;
         }
-        .toprow > button#save.ok { background:#30d158; color:#fff; box-shadow:none; }
+        .toprow > button#save.ok, .toprow > :where(.navpill) > button#save.ok { background:var(--fill); color:var(--on-fill); box-shadow:none; }
+        .toprow > :where(.navpill) > button#save { transition:background-color .3s var(--ease), color .3s var(--ease), filter .16s ease; }
         .status { min-height:20px; font-size:12.5px; margin:13px 2px 22px; color:var(--ink-2); }
-        /* It is a flex child of .body, so an empty one still held 55px between
-           the header and the columns. */
         .status:empty { display:none; }
         .status.ok { color:#30d158; } .status.err { color:#ff453a; } .status.warn { color:#ffd60a; }
+        :host(.split:not(.flow)) .status:not(:empty) {
+          position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+          z-index:210; margin:0; min-height:0;
+          padding:11px 20px; border-radius:999px; max-width:min(540px, 76vw);
+          background:rgba(30,33,38,0.55);
+          backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),
+            inset 0 -1px 0 rgba(255,255,255,0.10), 0 12px 34px rgba(0,0,0,0.38);
+          color:var(--ink); font-size:13.5px; font-weight:500; letter-spacing:-0.01em;
+          text-align:center;
+        }
+        :host(.split:not(.flow)) .status.ok { color:var(--ink); }
+        :host(.split:not(.flow)) .status.err { color:#ff6961; }
+        @media (prefers-reduced-motion: no-preference) {
+          :host(.split:not(.flow)) .status:not(:empty) {
+            animation:statusin .24s var(--ease) backwards;
+          }
+        }
+        @keyframes statusin {
+          from { opacity:0; transform:translate(-50%, 10px); }
+          to { opacity:1; transform:translate(-50%, 0); }
+        }
 
         .tabs { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
         .tab {
-          display:inline-flex; align-items:center; gap:7px; touch-action:none;
+          display:inline-flex; align-items:center; touch-action:none;
           box-sizing:border-box; white-space:nowrap;
           padding:9px 16px; border-radius:999px; cursor:pointer; font-size:13.5px; font-weight:520;
           -webkit-touch-callout:none;
-          /* No backdrop-filter: animating the row's opacity and transform
-             suspends a descendant's blur until the animation ends, which is why
-             the pills popped. */
           background:rgba(255,255,255,0.20);
           box-shadow:inset 0 0 0 1px var(--chip-rim);
           transition:background .16s ease;
           user-select:none; -webkit-user-select:none;
         }
-        /* Every surface here is dragged or tapped, never read: the preview is a
-           mock-up, and both card headings are drag handles that also fold. Form
-           rows are deliberately left alone so entity ids stay copyable. */
         .card.map, .card.map *, .thead, .thead *, .card > .chead, .card > .chead * {
           user-select:none; -webkit-user-select:none;
         }
         .tab:hover { background:rgba(255,255,255,0.28); }
-        .tab.on { background:var(--accent); box-shadow:none; }
+        .tab.on { background:rgba(255,255,255,0.18); color:var(--ink); box-shadow:none; }
         .tab.dragging {
           z-index:5; opacity:1; cursor:grabbing;
           background:var(--lift);
@@ -3490,7 +3738,8 @@ class HemmaPanel extends HTMLElement {
           box-shadow:inset 0 1px 0 rgba(255,255,255,0.22), 0 10px 26px rgba(0,0,0,0.44);
         }
         .tab .caret {
-          width:15px; height:15px; flex:0 0 15px; opacity:.7; margin-right:-8px;
+          width:15px; height:15px; flex:0 0 15px; opacity:.7;
+          margin-left:7px; margin-right:-8px;
           display:grid; place-items:center; overflow:hidden;
         }
         .tab .caret svg { width:11px; height:11px; display:block; }
@@ -3504,16 +3753,8 @@ class HemmaPanel extends HTMLElement {
         .tabadd:hover { background:var(--chip-hi); filter:none; }
         .tabadd svg { width:16px; height:16px; display:block; }
 
-        /* Two columns packed in JS. Browser column balancing put tall cards in
-           unpredictable places, so sections go to whichever column is shorter. */
         #pane { display:block; }
         .band { margin:0 0 var(--band-gap, 30px); scroll-margin-top:92px; }
-        /* One group at a time, so the last one is never a scroll away. The band
-           headings went with it - the segment already names what you are
-           looking at, and a heading under it would be the same word twice. */
-        /* The column's one nav row. The switcher and the back bar are two
-           contents of the SAME slot, never two rows: opening a section used to
-           insert a bar above the group and push everything down a row. */
         .navrow {
           position:relative; width:100%; margin:0 0 14px;
           height:var(--headrow, 35px); box-sizing:border-box;
@@ -3524,103 +3765,87 @@ class HemmaPanel extends HTMLElement {
         }
         .groupseg {
           display:flex; width:100%; margin:0;
-          /* --ctl-h is declared on .segrow, so out here .seg's min-height
-             resolved to nothing and the row collapsed to its content, putting
-             the two columns out of step. Declared locally, and on this rule so
-             it beats .seg's later declaration at equal weight. */
+          /* --ctl-h is declared on .segrow, so it resolves to nothing out here. */
           --ctl-h:var(--headrow, 35px);
           min-height:var(--headrow, 35px); box-sizing:border-box;
         }
         .groupseg .segopt { flex:1 1 0; }
+        :host(.phone.narrow) .body { padding-bottom:12px; }
+        :host(.phone.narrow) .insphead .navrow { --headrow:44px; min-height:44px; margin-bottom:18px; }
+        :host(.phone) .groupseg {
+          min-height:44px; --ctl-h:44px; padding:3px;
+          background:rgba(12,14,19,0.62); box-shadow:none;
+          backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
+        }
+        :host(.phone) .groupseg .segthumb { background:rgba(255,255,255,0.24); }
+        :host(.phone) .groupseg .segthumb { top:3px; left:3px; height:calc(100% - 6px); }
+        :host(.phone) .groupseg .segopt { font-size:15px; font-weight:590; }
         .band:last-child { margin-bottom:0; }
-        /* Smart Sort, off the heading it was floating on. It sits with the list
-           it governs rather than beside a label, and reads as a setting because
-           it is on the same rail as the rows below it. */
-        /* System Settings' shape: icon left, name beside it, description under.
-           Centered it read as an onboarding splash. */
         .grouphead {
           position:relative;
           display:grid; grid-template-columns:auto minmax(0,1fr);
           align-items:center; column-gap:14px; row-gap:3px;
           padding:15px var(--card-pad-h); margin:0;
         }
-        /* Rides ON the group's glass rather than carrying its own, so the column
-           keeps ONE top edge - the one that lines up with the preview. */
-        /* .tilewrap too: the tiles caption lives there rather than in the
-           column, and was the only one of the three left floating. */
         .col > .grouphead, .tilegrid > .grouphead, .tilewrap > .grouphead {
           border-bottom-left-radius:0; border-bottom-right-radius:0;
         }
-        /* And what follows it squares its own top, so the seam closes. */
         .tilewrap > .grouphead + .tilegrid {
           border-top-left-radius:0; border-top-right-radius:0;
         }
-        /* Spanning both rows, so it centers against the title and the
-           description together rather than lining up with the title alone. */
         .grouphead .sicon {
           --sicon:46px; border-radius:calc(var(--sicon) * .27);
-          grid-column:1; grid-row:1 / span 2; align-self:center;
+          grid-column:1; grid-row:1; align-self:center;
         }
         .grouphead h3 {
-          grid-column:2; grid-row:1; align-self:end;
+          grid-column:2; grid-row:1; align-self:center;
           margin:0; font-size:19px; font-weight:640; letter-spacing:-0.015em;
           color:var(--ink);
         }
-        /* In the LIST the switcher above already names the group, so only the
-           description survives as a caption. The DETAIL view keeps all three:
-           there the back bar names the parent and the header names the thing you
-           pushed into, which are different words. */
-        :host(:not(.narrow)) .inspector .band:not(.detail) .grouphead {
-          padding:6px var(--card-pad-h) 13px; column-gap:12px;
+        .inspector .band:not(.detail) .grouphead {
+          padding:15px var(--card-pad-h); column-gap:12px;
         }
-        :host(:not(.narrow)) .inspector .band:not(.detail) .grouphead h3 {
+        .inspector .band:not(.detail) .grouphead h3 {
           display:none;
         }
-        /* A step up from the 30px chips on the rows below, not the 46px it was
-           when it headed a splash. */
-        :host(:not(.narrow)) .inspector .band:not(.detail) .grouphead .sicon {
+        .inspector .band:not(.detail) .grouphead .sicon {
           --sicon:34px; grid-row:1 / span 2; align-self:center;
         }
-        :host(:not(.narrow)) .inspector .band:not(.detail) .grouphead p {
+        .inspector .band:not(.detail) .grouphead p {
           grid-column:2; grid-row:1 / span 2; align-self:center;
         }
-        /* Hints off: the prose goes, every label and control stays. Collapsed to
-           ZERO rather than display:none, since a zero-height box can still be
-           measured and animated between. Every inset goes with it. */
         :host(.nohints) .grouphead p,
         :host(.nohints) .band.detail .card > .chead .blurb,
         :host(.nohints) .hint,
         :host(.nohints) .sortstrip .sortnote,
-        :host(.nohints) .inspector .band:not(.detail) .grouphead {
+        :host(.nohints) .inspector .band .grouphead {
           height:0; min-height:0; opacity:0; overflow:hidden;
           padding-top:0; padding-bottom:0; margin-top:0; margin-bottom:0;
           border-top:0; border-bottom:0;
+        }
+:host(.nohints.split:not(.narrow):not(.flow)) .inspector .col > .grouphead,
+        :host(.nohints.split:not(.narrow):not(.flow)) .inspector .tilewrap > .grouphead {
+          margin-bottom:0; background-color:transparent;
         }
         :host(.nohints) .grouphead,
         :host(.nohints) .band.detail .card > .chead,
         :host(.nohints) .sortstrip { row-gap:0; }
         :host(.nohints) .grouphead h3 { grid-row:1 / span 2; align-self:center; }
         :host(.nohints) .band.detail .card > .chead { align-items:center; }
-        :host(.nohints) .band.detail .card > .chead h2 { grid-row:1 / span 2; }
+        :host(.nohints) .band.detail .card > .chead h2 { grid-row:1; }
         :host(.nohints) .sortstrip .bandtog { grid-row:1 / span 2; align-self:center; }
         .grouphead p {
           grid-column:2; grid-row:2; align-self:start;
           margin:0; font-size:13px; line-height:1.4; color:var(--ink-2);
           max-width:52ch;
         }
-        /* Smart Sort and Edit were floating on the page above the list: text
-           hard left, switch hard right, and blue-on-photograph for Edit. They
-           are settings, so they sit on a surface like every other setting. */
-        /* Built like the rows above it: name over its description, control at
-           the end. */
         .sortstrip, .badgebar {
           display:grid; align-items:center;
-          /* The name and the switch, nothing between them. */
           grid-template-columns:minmax(0,1fr) auto;
           column-gap:var(--head-gap, 9px); row-gap:2px;
           padding:12px var(--card-pad-h);
-          /* No min-height: --shut-h is a shut row's WHOLE height, padding
-             included, so imposing it on top of this padding doubled up. */
+          /* --shut-h is a shut row's WHOLE height, padding included. */
+          box-sizing:border-box; min-height:var(--shut-h);
           position:relative;
         }
         .sortstrip .bandtog, .badgebar .bandtog {
@@ -3631,7 +3856,6 @@ class HemmaPanel extends HTMLElement {
           grid-column:1; grid-row:2; align-self:start; margin:0;
           font-size:12px; line-height:1.35; color:var(--ink-2);
         }
-        /* One line, always: this row's caption said its own label back. */
         .badgebar { row-gap:0; }
         .badgebar .bandtog { grid-row:1 / span 2; align-self:center; }
         .sortstrip .sw, .badgebar .badgeedit {
@@ -3644,9 +3868,6 @@ class HemmaPanel extends HTMLElement {
         }
 
 
-        /* iOS's nav-bar Edit: a glass pill that morphs into a blue tick circle.
-           ONE element, so width, fill and contents travel together - two buttons
-           swapped would pop - and the height never changes. */
         .addrowbar .editbtn {
           margin-left:auto;
           height:34px; min-width:74px; padding:0 17px; border-radius:999px;
@@ -3665,52 +3886,36 @@ class HemmaPanel extends HTMLElement {
         .addrowbar .editbtn .tick { opacity:0; width:17px; height:17px; display:block; }
         .addrowbar .editbtn.on {
           min-width:34px; width:34px; padding:0;
-          background:var(--accent); box-shadow:none; color:#fff;
+          background:var(--fill); box-shadow:none; color:var(--on-fill);
         }
-        .addrowbar .editbtn.on:hover { background:var(--accent); filter:brightness(1.1); }
+        .addrowbar .editbtn.on:hover { background:#fff; filter:none; }
         .addrowbar .editbtn.on .lbl { opacity:0; }
         .addrowbar .editbtn.on .tick { opacity:1; }
         @media (prefers-reduced-motion: reduce) {
           .addrowbar .editbtn { transition:none; }
         }
-        /* The options group is a surface like any other, and the tiles group
-           below it brings its own - .col:has(.tilewrap) strips the surface off
-           the column that holds the tile list, and this one must keep it. */
-        /* Rows of the tiles group, so they carry its insets and its dividers. */
         .tilegrid > .sortstrip { --rule-inset:var(--card-pad-h); }
-        /* A full --gap put 30px between the last tile and this, and with one
-           unheaded row below it the space read as a hole rather than as a
-           break between two groups. Enough to separate them, not enough to
-           strand it at the bottom of the panel. */
+        .tilegrid > :is(.addbar, .addrowbar) + .sortstrip::before { content:none; }
         .tilegrid.optgroup { margin-bottom:8px; }
         .tilegrid > .addrowbar {
           padding:11px var(--card-pad-h); margin:0;
+          --rule-inset:var(--card-pad-h);
+        }
+        .tilegrid > .hint {
+          padding:11px var(--card-pad-h) 13px;
           --rule-inset:var(--card-pad-h);
         }
 
         /* ── editing a list, the way iOS does it ────────────────────────────
            Edit reveals a minus; tapping it slides the row aside and brings
            Delete in. Two steps, and the confirmation is in the row. */
-        /* The row clips, so anything parked outside it is genuinely hidden and
-           has somewhere to come from. */
         .band:not(.detail) .tilegrid > .tile { overflow:hidden; }
-        /* Parked on a negative margin outside the leading edge, with the MARGIN
-           animating to nothing - so the button slides in and pushes what follows,
-           as UIKit does. Animating the row drags the caret; growing the button
-           inflates it in place. */
-        /* The gap is the row's own inset, and it has to be: the button starts
-           that far in from the edge, so parking it by button + gap is what puts
-           its trailing edge exactly on the edge. Any smaller and its leading
-           crescent stays inside the box, on every row, permanently. */
         .tile { --rm-w:22px; --rm-gap:var(--card-pad-h); --head-gap:9px; }
         .rmbtn {
           width:var(--rm-w); height:var(--rm-w); flex:0 0 var(--rm-w);
           padding:0; border-radius:50%;
           background:#ff453a; color:#fff; display:grid; place-items:center;
           box-shadow:none;
-          /* The row's flex gap already supplies part of this. Adding the whole
-             inset on top of it put the icon a gap further in than the rows
-             below, and than every section card's icon. */
           margin-right:calc(var(--rm-gap) - var(--head-gap));
           margin-left:calc((var(--rm-w) + var(--rm-gap)) * -1);
           transition:margin-left .36s cubic-bezier(.36,0,.16,1);
@@ -3720,10 +3925,6 @@ class HemmaPanel extends HTMLElement {
         .rmbtn svg { width:12px; height:12px; display:block; }
         .rmbtn:hover { background:#ff6961; filter:none; }
 
-        /* A detached rounded rectangle standing beside the row, not a slab
-           welded to its edge - that is what iOS draws, and it is why ours read
-           as a colored margin rather than a button. Inset top and bottom, its
-           own radius, and a gap between it and the row it belongs to. */
         .delbtn {
           position:absolute; top:6px; bottom:6px; right:8px;
           width:var(--del-w, 84px);
@@ -3735,9 +3936,6 @@ class HemmaPanel extends HTMLElement {
         }
         .tile:not(.armed) .delbtn { pointer-events:none; }
         .tile.armed .delbtn { transform:none; }
-        /* Nothing is parked in a row that is not armed: the button is built on
-           the arm and removed after the slide back. The clip is only on .arming,
-           where it cannot reach a combo's menu. */
         .row.arming { position:relative; overflow:hidden; }
         .row.arming > *:not(.delbtn) {
           transition:transform .36s cubic-bezier(.36,0,.16,1);
@@ -3747,34 +3945,18 @@ class HemmaPanel extends HTMLElement {
         }
         .row:not(.armed) .delbtn { pointer-events:none; }
         .row.armed .delbtn { transform:none; }
-        /* A tile row is one line so Delete can stretch to it; a field row is
-           not - stacked, it holds a label above the field. Takes the control's
-           own height instead, which the row's bottom padding levels. */
         .row > .delbtn {
           top:auto; bottom:var(--row-pad-b, 12px); height:var(--ctl-h, 38px);
           right:0;
         }
         .delbtn:hover { background:#ff6961; filter:none; }
-        /* The row moves for one reason only: to uncover Delete. Arriving in
-           edit mode is the button's own margin, so the caret at the far end
-           does not travel with it. */
         .tile > .thead {
           --armed-x:0px;
           transform:translateX(var(--armed-x));
           transition:transform .36s cubic-bezier(.36,0,.16,1);
         }
         .tile.armed > .thead { --armed-x:calc((var(--del-w, 84px) + 16px) * -1); }
-        /* Editing is not browsing: the caret fades, keeping its place so the
-           row's trailing edge holds still while the minus arrives. */
-        /* .band:not(.detail) sets the caret's .45 at the SAME specificity and
-           sits later, so match its ancestor and win on specificity, not order. */
         .band:not(.detail) .tilegrid.editing .tile > .thead .fold { opacity:0; }
-        /* The handle takes the caret's PLACE: a row either opens or moves, never
-           both. Absolute so the trailing edge does not shift, and specific
-           enough to beat the rule making every head child position:relative. */
-        /* Parked outside the trailing edge and slid in on Edit, mirroring the
-           minus arriving on the other side. Absolute, so the row's trailing
-           edge does not shift when it lands. */
         .tile > .thead .grip {
           position:absolute; right:var(--card-pad-h); top:50%; z-index:2;
           width:var(--rm-w); height:var(--rm-w); padding:0;
@@ -3798,35 +3980,28 @@ class HemmaPanel extends HTMLElement {
           .tile > .thead .grip { transition:none; }
         }
 
-        /* Selection. The inspector shows the thing you pointed at, so every
-           other card in the band steps out rather than being scrolled past. */
         .band.detail .col > .card:not(.sel),
         .band.detail .tilegrid > .tile:not(.sel),
         .band.detail .addbar,
         .band.detail .sortstrip,
         .band.detail .badgebar,
-        .band.detail .tilewrap > .hint { display:none; }
-        .detailbar { gap:11px; }
+        .band.detail .tilegrid > .hint { display:none; }
+        .band.detail .col > .card.sel::before, .band.detail .tilegrid > .tile.sel::before { content:none; }
         .detailbar .plus, .detailbar .sw { flex:0 0 auto; }
+        .detailbar .sw + .rowmenu { margin-left:-2px; }
 
-        /* Inside a section the head is a HEADER: larger chip, title, caption.
-           Repeating the title from the bar above is the pattern, not a slip. */
         .band.detail .card > .chead {
           --sicon:38px;
           grid-template-columns:var(--sicon) 1fr auto auto;
           column-gap:14px; row-gap:3px;
           align-items:start;
           margin:0 calc(var(--card-pad-h) * -1) 0;
-          /* Even inset: the same distance from the top as from the sides. */
           padding:calc(var(--card-pad-h) + 8px) var(--card-pad-h)
                   calc(var(--card-pad-h) + 4px);
           border-bottom:1px solid var(--hair);
         }
-        /* Centered against the title AND its line of description together, the
-           way System Settings sets an icon beside a two-line header - not
-           pinned to the top of the first line, which sits it high. */
         .band.detail .card > .chead .sicon {
-          grid-row:1 / span 2; align-self:center; margin:0;
+          grid-row:1; align-self:center; margin:0;
           border-radius:calc(var(--sicon) * .27);
         }
         .band.detail .card > .chead h2 {
@@ -3838,33 +4013,44 @@ class HemmaPanel extends HTMLElement {
           margin:0; font-size:13px; line-height:1.4; color:var(--ink-2);
           max-width:52ch;
         }
-        /* Only in the header. In the list the row is a name and a state. */
         .band:not(.detail) .blurb { display:none; }
-        /* One title row and one blurb row: with no blurb the chip would center
-           against a single line and sit low. */
         .band.detail .card > .chead:not(:has(.blurb)) {
           align-items:center; row-gap:0;
         }
-        .band.detail .card > .chead:not(:has(.blurb)) h2 { grid-row:1 / span 2; }
-        /* The header's own rule is the divider. The row under it drew a second
-           one - :first-of-type counts divs, and the head is a div, so the first
-           row was never "first" - with the head's margin holding them apart. */
+        .band.detail .card > .chead:not(:has(.blurb)) h2 { grid-row:1; }
         .band.detail .card > .chead + * { margin-top:0; border-top:0; }
+        .detailbar { gap:12px; }
         .detailbar .back {
-          width:30px; height:30px; flex:0 0 30px; padding:0; border-radius:50%;
-          background:var(--chip); color:var(--ink); display:grid; place-items:center;
-          box-shadow:none;
+          --back:32px;
+          width:var(--back); height:var(--back); flex:0 0 var(--back);
+          padding:0; border-radius:50%;
+          display:inline-flex; align-items:center; justify-content:center;
+          color:var(--ink);
+          background:linear-gradient(to bottom, rgba(255,255,255,0.24), rgba(255,255,255,0.11));
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.40),
+            inset 0 0 0 1px rgba(255,255,255,0.20),
+            0 1px 2px rgba(0,0,0,0.08);
+          transition:background .16s ease, transform .12s ease;
         }
-        .detailbar .back svg { width:16px; height:16px; display:block; }
-        .detailbar .back:hover { background:var(--chip-hi); filter:none; }
+        .detailbar .back svg {
+          width:17px; height:17px; flex:0 0 17px; display:block;
+          transform:translateX(-1px);
+        }
+        .detailbar .back:hover:not(:disabled) {
+          filter:none;
+          background:linear-gradient(to bottom, rgba(255,255,255,0.32), rgba(255,255,255,0.17));
+        }
+        .detailbar .back:active:not(:disabled) {
+          transform:scale(0.93);
+          background:linear-gradient(to bottom, rgba(255,255,255,0.18), rgba(255,255,255,0.08));
+        }
+        .detailbar .back:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
         .detailbar h3 {
-          margin:0; flex:1 1 auto; font-size:19px; font-weight:640;
+          margin:0; flex:1 1 auto; min-width:0; font-size:19px; font-weight:640;
           letter-spacing:-0.02em; color:var(--ink);
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         }
-        /* Hovering either side lights both. An inset pill, not a full-bleed
-           fill: the fill ran into the group's rounded corners and stopped
-           nowhere near the rule's inset. */
         .card > .chead, .tile > .thead { position:relative; }
         .card > .chead::after, .tile > .thead::after {
           content:""; position:absolute; z-index:0;
@@ -3874,30 +4060,16 @@ class HemmaPanel extends HTMLElement {
           opacity:0; transition:opacity .14s var(--ease);
           pointer-events:none;
         }
-        /* The separators stay. They only had to be hidden because a fill sat
-           under the cursor at all times; now that the fill is a momentary
-           cross-reference there is nothing for them to fight with. */
         .card > .chead > *, .tile > .thead > * { position:relative; z-index:1; }
-        /* Only when the cursor is in the OTHER column. macOS never combines a
-           persistent hover fill with separators, and a row you are already
-           pointing at needs no fill. This is for the cross-reference: point at a
-           tile in the preview and its row lights. */
         .card.linked > .chead::after, .tile.linked > .thead::after { opacity:1; }
-        /* A highlighted row is one object, so its separators step aside. The
-           transition lives on the highlighted state, so it fades in and snaps
-           back. */
         .col > .card.linked::before,
         .col > .card.linked + .card::before,
         .tilegrid > .tile.linked::before,
         .tilegrid > .tile.linked + *::before {
           opacity:0; transition:opacity .14s var(--ease);
         }
-        /* Nothing to highlight once you are inside it. */
         .band.detail .card > .chead::after,
         .band.detail .tile > .thead::after { opacity:0; }
-        /* A ring, and nothing that leaves the row. .mini-tiles scrolls
-           sideways, so its overflow-y can only compute to clip - a lift, a scale
-           or a drop shadow all get cut. An inset ring costs no geometry. */
         .mtile, .pbadge {
           transition:box-shadow .16s var(--ease), background-color .16s var(--ease);
         }
@@ -3905,13 +4077,7 @@ class HemmaPanel extends HTMLElement {
           box-shadow:inset 0 0 0 1.5px rgba(255,255,255,0.85);
         }
         .mtile.on.linked { box-shadow:inset 0 0 0 1.5px rgba(0,0,0,0.45); }
-        /* Both heading rows share a height, so the first card in each column
-           starts level: the view control makes one row taller than a bare
-           heading. */
         .bandhead {
-          /* 24px, matching a card's own padding, so a control on the heading
-             lines up with the switches on the cards below it rather than
-             sitting 22px further out. */
           margin:0 0 14px; padding:0 var(--card-pad-h) 0 0; min-height:var(--headrow, 35px);
           display:flex; align-items:center; gap:10px;
         }
@@ -3922,62 +4088,42 @@ class HemmaPanel extends HTMLElement {
           color:var(--ink);
         }
         .bandhead p { margin:3px 0 0; font-size:13px; color:var(--ink-2); }
-        /* The preview holds the left column and stays put; the form is one
-           column beside it. */
-        /* Two panes, one scrollbar. The preview used to drift as the page
-           scrolled; now the stage is the viewport and only the form moves. */
-        /* Settings lead, preview follows: the room pills, the section headings
-           and the fields all start at the same left edge. */
-        /* One thing in the stage now: the preview. The form went to the
-           inspector on the trailing edge, so the subject sits between the two
-           chrome columns rather than being pushed against one of them. */
         .stage {
           display:flex; align-items:stretch;
           flex:1 1 auto; min-height:0;
         }
-        /* Laid out but unpainted, so the empty shell never flashes before the
-           content arrives - and the fit can still measure it. */
-        :host(.booting) .top, :host(.booting) .stage,
-        :host(.booting) .rail, :host(.booting) .inspector { opacity:0; }
-        /* Top-aligned, NOT centered: centering pushed the control row down while
-           the inspector stayed at --top-h and the columns lost their level. */
+        :host(.booting) .top, :host(.booting) .rail, :host(.booting) .railscrim,
+        :host(.booting) .sidelist, :host(.booting) .bigtitle,
+        :host(.booting) .canvashead, :host(.booting) .card.map,
+        :host(.booting) #tilespane, :host(.booting) .inspector { opacity:0; }
+
         .canvas {
           flex:1 1 auto; min-width:0; display:flex; flex-direction:column;
           align-self:flex-start;
           padding:var(--top-h) 0 28px;
         }
-        /* Three tracks, not a flex row: the picker is centered over the preview
-           itself, which a space-between row cannot do once the heading and the
-           controls are different widths. */
-        /* Just the two view switches, centered. Its own box with no inherited
-           padding: .bandhead's right inset would push the pair off center. */
+        :host(.split:not(.narrow):not(.flow)) .canvas { padding-top:58px; }
+        :host(.split:not(.narrow):not(.flow).headdrop) .canvas { padding-top:calc(var(--top-h) - 9px); }
         .canvashead {
           flex:0 0 auto; display:flex; align-items:center; justify-content:center;
           box-sizing:border-box; padding:0;
         }
-        /* Both controls answer "how am I looking at this", so they travel
-           together. One height for the pair: align-self:stretch with
-           aspect-ratio is circular here - the row's height comes from its
-           items - and Chrome resolved it to a 300px circle. */
+        .toprow > .canvashead { margin:0; }
+        :host(.split:not(.narrow):not(.flow):not(.compact)) .toprow { position:relative; }
+        .toprow > .canvashead.pinned {
+          position:absolute; left:var(--headx, 0px); top:50%; transform:translateY(-50%);
+        }
+        :host(.split:not(.narrow):not(.flow)) .toprow > .spacer { flex:1.7 1 auto; min-width:0; }
+        :host(.split:not(.narrow):not(.flow)) .toprow > .spacer.tail { flex:1 1 auto; min-width:0; }
+        .toprow > .spacer.tail { flex:1 1 auto; min-width:0; }
         .segrow {
-          /* One height so the columns stay level, but NOT one control - abutted
-             they read as a single four-option switch. Centered, not pinned to
-             --preview-w: that is the PAINTED width, so every size switch moved
-             the control you were reaching for. */
           --ctl-h:var(--headrow, 35px);
           flex:0 0 auto; display:flex; align-items:center; gap:28px;
           width:auto; margin-inline:auto;
           justify-content:center;
         }
         .seg { min-height:var(--ctl-h); box-sizing:border-box; }
-        /* A glyph carries no baseline, so the icon variant sets its own box: 15px
-           is the line box a 12.5px label makes, which matches both controls
-           without either being given a number. Even padding makes it square, and
-           a radius on a square is a circle. */
         .seg.icons { cursor:pointer; }
-        /* Square, so the traveling pill is a circle. The width is derived from
-           --ctl-h like the height, not from padding: fixed padding turns the
-           thumb into an ellipse the moment --ctl-h moves. */
         .seg.icons .segopt {
           padding:0; flex:0 0 auto;
           width:calc(var(--ctl-h) - 4px);
@@ -3985,45 +4131,17 @@ class HemmaPanel extends HTMLElement {
           display:flex; align-items:center; justify-content:center;
         }
         .seg.icons .segopt svg { width:15px; height:15px; display:block; }
-        /* The canvas tile: switcher and preview on one surface. Sitting
-           straight on the page the preview was a photo on top of the same
-           photo, which is why it read as a hole rather than an object. */
-        /* Flex the whole way down rather than percentage heights: centering the
-           wrap stopped it stretching, so the slot had no definite height to
-           measure and the preview shrank to nothing. */
-        /* Only a deliberate Desktop/Tablet switch animates. Layout settling,
-           fonts loading and the header measuring all change the scale during
-           load, and transitioning those is the zoom you see on every refresh. */
-        /* No tile any more. The backdrop is defocused enough that the preview
-           reads as an object on its own, so a shadow does the separating. */
-        /* The same glass as a section group: on the backdrop the preview read as
-           a cut-out, on a panel as a screen on a table - and both columns then
-           have one shape. The panel is only the preview, not the switcher. */
-        /* A canvas is a void, not a card: a full glass surface around a preview
-           that carries its own shadow is two competing objects. The padding
-           stays - applySize subtracts it from the height budget, so dropping it
-           grows the preview and the shadow lands on the column edge. */
-        /* No preview on a phone: a 390pt mock scaled down inside a 390pt screen
-           is worse than the real dashboard, which is one tap away. The ... menu
-           offers Open dashboard instead. Tablet and desktop keep it - there it
-           sits beside the form. */
         :host(.phone) .stage { display:none; }
         .plinth {
           position:relative; isolation:isolate;
           flex:0 0 auto; display:flex; flex-direction:column;
-          /* 28px in total, the number applySize subtracts from the height
-             budget - but none of it above the screen, so the screen's top edge
-             is the column's top edge and lines up with the first card. */
-          justify-content:flex-start; padding:0 14px 28px;
+          justify-content:flex-start; padding:0 12px 28px;
         }
         .plinth > * { position:relative; z-index:1; }
         .canvas .mapwrap {
           margin:0; width:100%; flex:1 1 auto; min-height:0;
           justify-content:center;
         }
-        /* The inspector's body. It no longer sets its own width or its own
-           offset from the toolbar: the inspector is the column, and its head
-           is what it starts under. */
         .sheet {
           flex:1 1 auto; min-height:0; min-width:0; box-sizing:border-box;
           overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
@@ -4034,10 +4152,6 @@ class HemmaPanel extends HTMLElement {
         .sheet .band { scroll-margin-top:4px; }
         .sheet .band:last-child { margin-bottom:0; }
 
-        /* The inspector. The rail's mirror: same material, same full height,
-           the hairline on its LEADING edge instead. Keynote, Pages, Numbers,
-           Xcode and Final Cut all put the inspector opposite the navigator
-           with the subject between them, which is the arrangement this is. */
         .inspector {
           position:absolute; z-index:7;
           top:var(--top-h); right:var(--insp-gap); width:var(--insp-w);
@@ -4048,17 +4162,9 @@ class HemmaPanel extends HTMLElement {
           background-color:var(--card-tint); background-image:var(--pane);
           backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
           box-shadow:var(--g-rim), 0 22px 60px rgba(0,0,0,0.40);
-          /* Same backup the groups carry: a radius alone does not bound a
-             backdrop-filter and the corner reads doubled without it. */
           clip-path:inset(0 round var(--r-group));
           isolation:isolate;
         }
-        /* The panel IS the group's surface: given .col's recipe with a .col still
-           inside it, the two drew identical tiles 10px apart. The rows sit
-           straight on the panel and their own hairlines divide them. */
-        /* .tilegrid as well as .col: the tiles band strips .col's surface and
-           hands it to .tilegrid, so stripping only .col left the Tiles group
-           still painting a full glass tile inside the panel. */
         :host(:not(.narrow)) .inspector .col,
         :host(:not(.narrow)) .inspector .tilegrid {
           background:none; background-image:none;
@@ -4069,14 +4175,10 @@ class HemmaPanel extends HTMLElement {
         :host(:not(.narrow)) .inspector .col::after,
         :host(:not(.narrow)) .inspector .tilegrid::before,
         :host(:not(.narrow)) .inspector .tilegrid::after { content:none; }
-        /* No lift on an open card: on one panel surface there is nothing to
-           separate it from, and its rows already say it is open. */
-        :host(:not(.narrow)) .inspector .card:not(.shut):not(.off),
-        :host(:not(.narrow)) .inspector .tile:not(.shut) {
+        :host(:not(.narrow):not(.split)) .inspector .card:not(.shut):not(.off),
+        :host(:not(.narrow):not(.split)) .inspector .tile:not(.shut) {
           background-color:transparent;
         }
-        /* The grain the group used to lay over its own blur now belongs to the
-           panel, or the ramp bands across it. */
         .inspector::before, .inspector::after {
           content:""; position:absolute; inset:0; border-radius:inherit;
           background-image:var(--grain); background-size:180px 180px;
@@ -4084,59 +4186,41 @@ class HemmaPanel extends HTMLElement {
         }
         .inspector::before { mix-blend-mode:overlay; opacity:var(--pane-grain, .10); }
         .inspector::after { mix-blend-mode:screen; opacity:var(--pane-grain-dark, .04); }
+        :host(.narrow) .inspector::before, :host(.narrow) .inspector::after { content:none; }
         .inspector > * { position:relative; z-index:1; }
-        /* EVERY band, not just :last-child - a display:none sibling still counts
-           for :last-child, so the two hidden bands kept a bottom margin and the
-           panel grew by that much of nothing. One band is ever on screen. */
         .inspector .sheet > *:last-child { margin-bottom:0; }
         .inspector .band { margin-bottom:0; }
-        /* Its head is the third of the three: the app on the left, the
-           dashboard in the middle, this room's scope here. All one height. */
         .insphead {
           flex:0 0 auto; box-sizing:border-box;
           display:flex; align-items:center;
-          padding:10px 10px 8px;
+          padding:18px 16px 12px;
         }
-        /* --headrow is 3px more than the toolbar's controls, which put the
-           inspector's head out of step. Set locally so all three agree. */
+        /* --headrow is 3px more than the toolbar's controls, so set it locally. */
         .insphead .navrow { margin:0; --headrow:36px; }
-        /* Stacked, not side by side, once the window is too narrow to hold
-           three columns. The inspector stops being chrome and becomes the last
-           section of a scrolling page. */
+        :host(:not(.narrow)) .insphead { padding-top:18px; }
+        :host(:not(.narrow)) .inspector .sheet { padding-bottom:8px; }
+        :host(:not(.narrow)) .band.detail .col > .card.sel,
+        :host(:not(.narrow)) .band.detail .tilegrid > .tile.sel { padding-top:3px; }
         :host(.narrow) { --insp-w:0px; }
-        :host(.narrow) .shell { display:block; height:auto; }
+        :host(.narrow:not(.split)) .shell { display:block; height:auto; }
+        :host(.phone) .shell {
+          position:fixed; inset:0; z-index:1; height:auto;
+          overflow-x:hidden; overflow-y:auto; overscroll-behavior-y:contain;
+          -webkit-overflow-scrolling:touch;
+        }
         :host(.narrow) .main { padding-right:0; }
-        :host(.narrow) .inspector {
+        :host(.narrow:not(.split)) .inspector {
           position:static; width:auto; max-height:none; display:block;
           border-radius:0; clip-path:none;
           background:none; backdrop-filter:none; -webkit-backdrop-filter:none;
           box-shadow:none; padding:0;
         }
-        :host(.narrow) .insphead { padding:0 18px; display:block; }
-        /* Without a gap the switcher and the panel read as one control, and the
-           first row looked like a fourth segment. */
-        :host(.narrow) .insphead .navrow { margin-bottom:14px; }
-        :host(.narrow) .sheet { padding:0 18px 18px; }
-        /* Tiles keeps its caption out of the list group, so on a phone that
-           header stood on nothing while the other two rode their column's glass.
-           Its own surface instead. The wide inspector strips this glass, so
-           there the caption is bare like the rest. */
-        :host(.narrow) .tilewrap > .grouphead {
-          position:relative; isolation:isolate;
-          border-radius:var(--r-group);
-          background-color:var(--card-tint);
-          background-image:var(--pane);
-          backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
-          box-shadow:var(--g-rim);
-          clip-path:inset(0 round var(--r-group));
-          margin-bottom:10px;
+        :host(.narrow:not(.split)) .insphead { padding:0 18px; display:block; }
+        :host(.narrow:not(.split)) .insphead .navrow { margin-bottom:14px; }
+        :host(.narrow:not(.split)) .sheet {
+          padding:0 18px calc(18px + env(safe-area-inset-bottom, 0px));
         }
 
-        /* Chrome, not content: flush to the leading edge, full height, no
-           radius or rim, meeting the content on a single hairline. A rounded
-           floating box with a blue selected row is the geometry of an open
-           pop-up button, and read as one. Same fill as the toolbar, so the two
-           make one L of chrome. */
         .rail {
           flex:0 0 var(--rail-w); width:var(--rail-w); min-width:0;
           box-sizing:border-box; z-index:7;
@@ -4146,16 +4230,324 @@ class HemmaPanel extends HTMLElement {
           box-shadow:inset -1px 0 0 var(--hair);
           padding-bottom:env(safe-area-inset-bottom, 0px);
         }
-        /* No rail below PANEL_NARROW: the stage stacks there, and the burger,
-           the wordmark and the rooms all move back into the toolbar. */
+        :host(.compact) { --rail-w:0px; --insp-w:340px; --insp-gap:18px; }
+        :host(.split:not(.flow)) { --rail-w:0px; }
+        :host(.split:not(.flow)) .burger { margin-left:0; margin-right:0; }
         :host(.narrow) { --rail-w:0px; }
         :host(.narrow) .rail { display:none; }
+        .railscrim, .toprow > button.railbtn, .toprow > button.roomtitle { display:none; }
+        :host(.split:not(.flow)) #brand { display:none; }
+        :host(.compact:not(.phone):not(.flow)) .railbtn {
+          display:inline-grid; place-items:center; flex:0 0 auto;
+          width:36px; height:36px; padding:0; border-radius:50%;
+          background:var(--chip); box-shadow:inset 0 0 0 1px var(--chip-rim); color:var(--ink);
+        }
+        :host(.compact:not(.phone):not(.flow)) .railbtn svg { width:19px; height:19px; display:block; }
+        :host(.compact.railopen:not(.phone)) .railbtn { background:var(--fill); color:var(--on-fill); box-shadow:none; }
+        :host(.split:not(.flow)) .roomtitle {
+          display:inline-flex; align-items:center; gap:6px; flex:0 1 auto; min-width:0;
+          height:36px; padding:0 4px; margin:0; border:0; border-radius:10px;
+          background:none; box-shadow:none; color:var(--ink);
+          font-size:20px; font-weight:700; letter-spacing:-0.02em; white-space:nowrap;
+        }
+        .roomtitle .rt-label { overflow:hidden; text-overflow:ellipsis; }
+        :host(.split:not(.narrow):not(.flow)) .roomtitle { pointer-events:none; }
+        :host(.split:not(.narrow):not(.flow)) .roomtitle {
+          flex:0 0 auto; max-width:calc(var(--side-w) - 76px);
+        }
+        :host(.split:not(.narrow):not(.flow)) .roomtitle .rt-caret { display:none; }
+        .roomtitle .rt-caret { flex:0 0 auto; display:grid; place-items:center; width:16px; height:16px; opacity:.62; }
+        .roomtitle .rt-caret svg { width:14px; height:14px; display:block; }
+        :host(.compact:not(.phone):not(.flow)) .rail {
+          display:flex; position:fixed; top:0; bottom:0; left:0; z-index:40;
+          width:min(320px, 82vw); flex-basis:auto;
+          transform:translateX(-104%); visibility:hidden;
+          box-shadow:0 0 44px rgba(0,0,0,0.34);
+          transition:transform .34s var(--ease), visibility 0s linear .34s;
+        }
+        :host(.compact.railopen:not(.phone):not(.flow)) .rail {
+          transform:none; visibility:visible;
+          transition:transform .38s var(--ease), visibility 0s;
+        }
+        :host(.compact:not(.phone):not(.flow)) .railscrim {
+          display:block; position:fixed; inset:0; z-index:39;
+          background:rgba(0,0,0,0.26); opacity:0; pointer-events:none;
+          transition:opacity .3s ease;
+        }
+        :host(.compact.railopen:not(.phone):not(.flow)) .railscrim { opacity:1; pointer-events:auto; }
+        @media (prefers-reduced-motion: reduce) {
+          :host(.compact:not(.phone)) .rail, :host(.compact:not(.phone)) .railscrim { transition:none; }
+        }
+        :host(.split:not(.flow)) .toprow > button.railbtn,
+        :host(.split:not(.flow)) .shell > .rail,
+        :host(.split:not(.flow)) .railscrim { display:none; }
 
-        /* The head is the toolbar's other half, so it stands the same height:
-           the same padding around the same 36px control. */
-        /* Home's sidebar head holds window controls and nothing else. With no
-           traffic lights, our one control sits there and the wordmark moved to
-           the toolbar. */
+        .sidelist { display:none; }
+        :host(.split:not(.flow)) { --side-w:236px; }
+        .sidegrip { display:none; }
+        :host(.split:not(.flow)) .sidegrip {
+          display:block; position:absolute; top:0; bottom:0; z-index:8;
+          left:calc(var(--side-w) - 3px); width:7px; cursor:col-resize;
+          touch-action:none;
+        }
+        :host(.split:not(.narrow):not(.flow)) .sidegrip::after {
+          content:""; position:absolute; inset:0 3px; background:var(--accent);
+          opacity:0; transition:opacity .14s ease;
+        }
+        :host(.split:not(.narrow):not(.flow)) .sidegrip:hover::after,
+        :host(.resizing) .sidegrip::after { opacity:.55; }
+        :host(.resizing) { cursor:col-resize; user-select:none; }
+        :host(.split:not(.flow)) .top { margin-left:calc(var(--side-w) * -1); }
+        :host(.split.narrow:not(.flow)) .shell {
+          display:flex; align-items:stretch; position:relative;
+        }
+        :host(.split.narrow:not(.flow)) .body { padding-bottom:0; }
+        :host(.split.narrow:not(.flow)) #status:empty { display:none; }
+        :host(.split.narrow:not(.flow)) .main { order:3; flex:0 0 0; min-width:0; padding-right:0; }
+        :host(.split.narrow:not(.flow)) .inspector { order:2; flex:1 1 auto; min-width:0; }
+        :host(.split.narrow:not(.flow)) .stage { display:none; }
+        :host(.split.narrow:not(.flow)) .top {
+          position:absolute; left:0; right:0; top:0; z-index:8; margin-left:0;
+          background:transparent; box-shadow:none;
+          backdrop-filter:none; -webkit-backdrop-filter:none;
+        }
+        :host(.split.narrow:not(.flow)) .sidelist {
+          display:block; flex:0 0 var(--side-w); align-self:flex-start;
+          position:relative; z-index:5; order:1;
+          margin-top:0; height:var(--vph, 100dvh);
+          padding-top:54px;
+          background:var(--slab-rail, rgba(10,10,14,0.60));
+          box-shadow:inset -1px 0 0 var(--hair);
+        }
+        :host(.split:not(.narrow):not(.flow)) .shell { display:flex; align-items:stretch; }
+        :host(.split:not(.narrow):not(.flow)) .sidelist {
+          display:block; flex:0 0 var(--side-w); align-self:flex-start;
+          position:relative; z-index:5; order:1;
+        }
+        :host(.split:not(.flow)) .inspector {
+          order:2; position:relative; top:auto; right:auto; flex:0 0 var(--insp-w);
+          align-self:flex-start; margin:calc(var(--top-h) - 26px) 0 0;
+          height:calc(var(--vph, 100dvh) - var(--top-h) + 26px); max-height:none;
+          border-radius:0; clip-path:none;
+          box-shadow:inset -1px 0 0 var(--hair);
+        }
+        :host(.split:not(.narrow):not(.flow)) .main { order:3; padding-right:0; min-width:0; }
+        :host(.split:not(.narrow):not(.flow)) .body { --pad:36px; }
+        :host(.split:not(.narrow):not(.flow)) .main {
+          background-color:rgba(16,18,23,0.78);
+        }
+        :host(.split:not(.narrow):not(.flow)) .sidelist {
+          background:var(--slab-rail, rgba(10,10,14,0.60));
+          box-shadow:inset -1px 0 0 var(--hair);
+        }
+        :host(.split:not(.flow)) .inspector {
+          background-color:var(--slab-page, rgba(10,10,14,0.55)); background-image:none;
+          backdrop-filter:var(--slab-blur, var(--g-blur));
+          -webkit-backdrop-filter:var(--slab-blur, var(--g-blur));
+          box-shadow:none;
+        }
+        :host(.split:not(.flow)) .inspector { --card-pad-h:10px; }
+        :host(.split:not(.flow)) .inspector .sheet { padding:0 16px 16px; }
+        :host(.split:not(.flow)) .inspector .cols { gap:14px; }
+        :host(.split:not(.flow)) .inspector .col {
+          background-color:transparent; background-image:none;
+          backdrop-filter:none; -webkit-backdrop-filter:none;
+          box-shadow:none; clip-path:none;
+          border-radius:0; overflow:visible;
+        }
+        :host(.split:not(.flow)) .inspector .col::before,
+        :host(.split:not(.flow)) .inspector .col::after { display:none; }
+        :host(.split:not(.flow)) .inspector .col > .grouphead,
+        :host(.split:not(.flow)) .inspector .tilewrap > .grouphead,
+        :host(.split:not(.flow)) .inspector .tilegrid > .sortstrip {
+          background-color:var(--slab-card, rgba(255,255,255,0.075));
+          border-radius:var(--r-group); margin-bottom:12px;
+        }
+        :host(.split:not(.flow)) .inspector .col > .card,
+        :host(.split:not(.flow)) .inspector .col > .badgebar,
+        :host(.split:not(.flow)) .inspector .tilegrid > .addrowbar,
+        :host(.split:not(.flow)) .inspector .tilegrid > .tile {
+          background-color:var(--slab-card, rgba(255,255,255,0.085));
+        }
+        :host(.split:not(.flow)) .inspector .col > .card:not(:has(.row.armed)),
+        :host(.split:not(.flow)) .inspector .tilegrid > .tile:not(.armed) {
+          overflow:hidden;
+        }
+        :host(.split:not(.flow)) .inspector .col > .card:first-child,
+        :host(.split:not(.flow)) .inspector .col > .grouphead + .card,
+        :host(.split:not(.flow)) .inspector .col > .badgebar,
+        :host(.split:not(.flow)) .inspector .tilegrid > .addrowbar {
+          border-top-left-radius:var(--r-group); border-top-right-radius:var(--r-group);
+        }
+        :host(.split:not(.flow)) .inspector .tilegrid > .addrowbar:last-child,
+        :host(.split:not(.flow)) .inspector .tilegrid > .addrowbar:has(+ .hint) {
+          border-bottom-left-radius:var(--r-group); border-bottom-right-radius:var(--r-group);
+        }
+        :host(.split:not(.flow)) .inspector .tilegrid > .hint { background-color:transparent; }
+        .tilegrid > :is(.addrowbar, .addbar) + .hint::before { content:none; }
+        :host(.split:not(.flow)) .inspector .tilegrid > .sortstrip + .addrowbar::before { content:none; }
+        :host(.split:not(.flow)) .inspector .col > .card:last-child,
+        :host(.split:not(.flow)) .inspector .tilegrid > .tile:last-child {
+          border-bottom-left-radius:var(--r-group); border-bottom-right-radius:var(--r-group);
+        }
+        :host(.split:not(.flow)) .inspector .band.detail .col > .card.sel,
+        :host(.split:not(.flow)) .inspector .band.detail .tilegrid > .tile.sel {
+          border-radius:var(--r-group);
+        }
+        :host(.split:not(.flow)) .inspector .col > .grouphead,
+        :host(.split:not(.flow)) .inspector .tilewrap > .grouphead {
+          border-bottom-left-radius:var(--r-group); border-bottom-right-radius:var(--r-group);
+        }
+        :host(.split:not(.narrow):not(.flow)) .top {
+          margin-left:calc((var(--side-w) + var(--insp-w)) * -1);
+        }
+        :host(.split:not(.narrow):not(.flow)) .top {
+          background:transparent; box-shadow:none;
+          backdrop-filter:none; -webkit-backdrop-filter:none;
+        }
+        :host(.split:not(.narrow):not(.flow)) .sidelist {
+          margin-top:0; height:var(--vph, 100dvh);
+          padding-top:calc(var(--top-h) - 8px);
+        }
+        :host(.split:not(.flow)) .inspector {
+          margin:0; height:var(--vph, 100dvh); --r-group:14px;
+        }
+        :host(.split:not(.narrow):not(.flow)) .insphead {
+          height:calc(var(--top-h) - 9px); min-height:calc(var(--top-h) - 9px);
+          padding:calc(15px + env(safe-area-inset-top, 0px)) 16px 0;
+          padding-left:calc(16px + var(--card-pad-h));
+          align-items:flex-start;
+        }
+        :host(.split:not(.narrow):not(.flow)) .insphead .detailbar .back { margin-left:calc(var(--card-pad-h) * -1); }
+        :host(.split:not(.narrow):not(.flow)) .insphead .navrow { width:100%; }
+        :host(.split:not(.narrow):not(.flow)) .insphead .detailbar h3 { font-size:19px; }
+        :host(.split.narrow:not(.flow)) .insphead {
+          height:calc(var(--top-h) - 26px); min-height:calc(var(--top-h) - 26px);
+          padding:calc(15px + env(safe-area-inset-top, 0px)) 16px 0;
+          padding-left:calc(16px + var(--card-pad-h));
+          align-items:flex-start;
+        }
+        :host(.split.narrow:not(.flow)) .insphead .detailbar .back { margin-left:calc(var(--card-pad-h) * -1); }
+        :host(.split.narrow:not(.flow)) .insphead .navrow { width:100%; }
+        :host(.split.narrow:not(.flow)) .insphead .detailbar h3 { font-size:19px; }
+        :host(.split.narrow:not(.flow)) .inspector { padding-top:64px; }
+        :host(.split.narrow:not(.flow)) .sidelist {
+          background:rgba(6,7,11,0.78);
+        }
+        :host(.split:not(.narrow):not(.flow)) .top::before {
+          content:""; position:absolute; left:0; top:0; bottom:0;
+          width:var(--side-w); pointer-events:none; z-index:-1;
+          background:rgba(22,22,28,0.50);
+          backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+          box-shadow:inset 0 -1px 0 var(--hair);
+          opacity:0; transition:opacity .18s var(--ease);
+        }
+        :host(.split:not(.narrow):not(.flow).sidescrolled) .top::before { opacity:1; }
+        :host(.split:not(.narrow):not(.flow)) .insphead {
+          box-shadow:inset 0 -1px 0 transparent; transition:box-shadow .18s var(--ease);
+        }
+        :host(.split:not(.flow)) .inspector.scrolled .insphead { box-shadow:inset 0 -1px 0 var(--hair); }
+        .sidelist::-webkit-scrollbar { width:0; height:0; display:none; }
+        :host(.split:not(.flow)) .sidelist {
+          width:var(--side-w); margin-top:calc(var(--top-h) - 26px);
+          height:calc(var(--vph, 100dvh) - var(--top-h) + 26px); box-sizing:border-box;
+          overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain;
+          scrollbar-width:none; -ms-overflow-style:none;
+          padding:10px 10px calc(16px + env(safe-area-inset-bottom, 0px)) 12px;
+          background:rgba(22,22,28,0.42);
+          backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+          box-shadow:inset -1px 0 0 var(--hair);
+          --sicon:24px;
+        }
+        .sidelist #g-rooms {
+          display:flex; align-items:center; gap:6px; padding:6px 10px 0 12px;
+        }
+        .sidelist #g-rooms .railhead2 { flex:1 1 auto; padding:0 0 7px; }
+        .sidelist #rooms .tabs {
+          display:flex; flex-direction:column; align-items:stretch; gap:2px;
+          padding:0; margin:0; overflow:visible;
+        }
+        .sidelist #rooms .tab {
+          justify-content:flex-start; gap:10px; min-height:38px;
+          padding:6px 10px; border-radius:9px; margin:0;
+          background:none; box-shadow:none; color:var(--ink);
+          font-size:14.5px; font-weight:450;
+        }
+        .sidelist #rooms .tab:hover { background:rgba(255,255,255,0.07); }
+        .sidelist #dashes .tab .caret {
+          display:grid; place-items:center; margin-left:auto;
+          width:22px; height:22px; flex:0 0 22px; opacity:0;
+          transition:opacity .14s ease;
+        }
+        .sidelist #dashes .tab .caret svg { width:15px; height:15px; display:block; }
+        .sidelist #dashes .tab:hover .caret,
+        .sidelist #dashes .tab.on .caret { opacity:.62; }
+        .sidelist #dashes .tab .caret:hover { opacity:1; }
+        .sidelist #rooms .tab .caret {
+          margin-left:auto; width:18px; height:18px; flex:0 0 18px;
+          opacity:0; transition:opacity .14s ease;
+        }
+        .sidelist #rooms .tab:hover .caret,
+        .sidelist #rooms .tab.on .caret { opacity:.62; }
+        .sidelist #rooms .tab .caret:hover { opacity:1; }
+        .sidelist #rooms .tab.on { background:rgba(255,255,255,0.18); font-weight:560; }
+        .sidelist #rooms .tab .roomglyph {
+          flex:0 0 20px; width:20px; height:20px; margin-right:0;
+          background-color:var(--hemma-color-teal, #00C3D0);
+          -webkit-mask:var(--i) center / contain no-repeat;
+          mask:var(--i) center / contain no-repeat;
+        }
+        .sidelist #rooms .tabadd {
+          width:100%; box-sizing:border-box; height:auto; min-height:38px; margin:2px 0 0;
+          justify-content:flex-start; gap:10px; padding:6px 10px; border-radius:9px;
+          background:none; box-shadow:none; color:var(--ink-3);
+          font-size:14.5px; font-weight:450;
+        }
+        .sidelist #rooms .tabadd:hover { background:rgba(255,255,255,0.07); color:var(--ink); }
+        .sidelist #rooms .tabadd svg { width:16px; height:16px; flex:0 0 16px; margin-left:2px; }
+        :host(.is-light:not(.phone)) .sidelist #rooms .tabadd:hover { background:rgba(0,0,0,0.05); }
+        .sidelist #rooms .tab.on .roomglyph { background-color:#fff; }
+        :host(.is-light:not(.phone)) .sidelist #rooms .tab:hover { background:rgba(0,0,0,0.05); }
+        :host(.is-light:not(.phone)) .sidelist #rooms .tab.on { background:rgba(0,0,0,0.09); }
+        :host(.is-light:not(.phone)) .sidelist #rooms .tab.on .roomglyph {
+          background-color:var(--hemma-color-teal, #00C3D0);
+        }
+        .sidelist .sidehead {
+          margin:18px 10px 6px; font-size:13px; font-weight:590; letter-spacing:0;
+          /* Between --ink-3 and --ink-2, and mixed from --ink so it follows the
+             mode rather than pinning a white that light mode cannot use. */
+          color:color-mix(in srgb, var(--ink) 62%, transparent);
+        }
+        .sidelist .sidehead:first-child { margin-top:6px; }
+        .sidelist .siderow {
+          display:flex; align-items:center; gap:10px; width:100%; min-height:38px;
+          box-sizing:border-box; padding:6px 10px; margin:0 0 2px; border:0; border-radius:9px;
+          background:none; box-shadow:none; color:var(--ink); text-align:left;
+          font:inherit; font-size:14.5px; font-weight:450; cursor:pointer;
+          transition:background .14s ease;
+        }
+        .sidelist .siderow:hover { background:rgba(255,255,255,0.07); filter:none; }
+        .sidelist .siderow:active { transform:none; }
+        .sidelist .siderow.on { background:rgba(255,255,255,0.18); font-weight:560; }
+        .sidelist .siderow .sideglyph {
+          flex:0 0 20px; width:20px; height:20px;
+          background-color:var(--hemma-color-teal, #00C3D0);
+          -webkit-mask:var(--i) center / contain no-repeat;
+          mask:var(--i) center / contain no-repeat;
+        }
+        .sidelist .siderow .sidelabel {
+          flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .sidelist .siderow.off .sidelabel { opacity:.55; }
+        :host(.split:not(.flow)) .groupseg { display:none; }
+        :host(.split:not(.flow)) .detailbar.rootlevel .back { display:none; }
+        .sidelist .sidegap { height:14px; }
+        :host(.split:not(.flow)) .insphead .navrow:not(:has(.detailbar)) { display:none; }
+
+        :host(.compact) .toprow, :host(.compact) .body { --pad:18px; }
+        :host(.compact:not(.narrow)) .toprow { padding-left:18px; }
+        :host(.compact) .burger { margin-left:0; margin-right:0; }
+
         .railhead {
           position:relative; z-index:7;
           flex:0 0 auto; box-sizing:border-box;
@@ -4165,22 +4557,6 @@ class HemmaPanel extends HTMLElement {
         .railhead .burger {
           margin:0; width:36px; height:36px; flex:0 0 36px;
         }
-        /* A label over the ONLY list says nothing; with two lists, each gets a
-           header. */
-        /* .canvas is position:relative and lays the preview out as if this were
-           not here, so nothing moves when it arrives. Dismissable, since it must
-           not permanently cover the thing you came to look at, and it returns
-           next load while anything is unsettled. */
-        /* In the flow, not floating: Apple floats what is TRANSIENT and inlines
-           what PERSISTS until you act on it. Floating also covered the preview's
-           nav row and media badge, which is the surface you would be checking. */
-        /* [hidden] is display:none from the UA sheet and ANY author display beats
-           it - this card sets display:grid, so hiding it left a blank capsule.
-           No backticks in here: this stylesheet is a JS template literal. */
-        .reconcile[hidden] { display:none; }
-        /* Standing context for the surface being edited, at the top of the
-           inspector rather than over the preview. Quiet: it is an explanation,
-           not a task. */
         .surfnote {
           display:flex; align-items:center; gap:12px;
           margin:0 0 14px; padding:11px 13px;
@@ -4192,146 +4568,33 @@ class HemmaPanel extends HTMLElement {
           color:var(--ink-2);
         }
         .surfnote .ract { flex:0 0 auto; }
-        .reconcile {
-          box-sizing:border-box; width:min(760px, 100%);
-          /* Above the control row, not between it and the preview: the controls
-             describe the preview, so the two are one object and nothing should
-             come between them. */
-          margin:0 auto 14px; padding:14px 16px 12px 15px;
-          display:grid; grid-template-columns:auto 1fr auto; column-gap:14px;
-          border-radius:16px;
-          background:rgba(255,255,255,0.055);
-          box-shadow:inset 0 0 0 1px rgba(255,255,255,0.10);
+        .toprow > button.diffs, .toprow > :where(.navpill) > button.diffs { gap:8px; padding:0 16px 0 13px; }
+        .toprow > button.diffs[hidden], .toprow > :where(.navpill) > button.diffs[hidden] { display:none; }
+        .diffs .ddot {
+          width:8px; height:8px; flex:0 0 8px; border-radius:50%;
+          background:var(--hemma-color-orange, #ff9f0a);
         }
-        /* Big enough to sit beside the whole text block rather than beside the
-           first line of it - it spans both rows and is optically centered on the
-           heading and the sentence together. */
-        .reconcile .rglyph {
-          grid-column:1; grid-row:1 / span 2; align-self:center;
-          width:31px; height:31px; flex:0 0 31px;
-          /* Blue says "here is what this is"; orange says "this needs you".
-             Two notices, two jobs, and the color is what tells them apart at a
-             glance rather than the wording. */
-          background-color:var(--hemma-color-blue, #0088FF);
-          -webkit-mask:var(--i) center / contain no-repeat;
-          mask:var(--i) center / contain no-repeat;
-        }
-        .reconcile h3 {
-          grid-column:2; grid-row:1;
-          margin:0 0 3px; font-size:14px; font-weight:600; color:var(--ink);
-          letter-spacing:-0.01em;
-        }
-        .reconcile p {
-          grid-column:2; grid-row:2;
-          margin:0; font-size:12.5px; line-height:1.4; color:var(--ink-2);
-        }
-        /* Top corner, the way every dismissible thing on the platform puts it.
-           Centered against both rows it read as a control for the sentence next
-           to it rather than for the card. */
-        .reconcile .rclose {
-          grid-column:3; grid-row:1; align-self:start; margin-top:-1px;
-          width:24px; height:24px; padding:0; border:0; border-radius:50%;
-          display:grid; place-items:center; cursor:pointer;
-          background:rgba(255,255,255,0.10); color:var(--ink-2);
-          transition:background-color .16s var(--ease), color .16s var(--ease);
-        }
-        .reconcile .rglyph.warn { background-color:var(--hemma-color-orange, #FF9230); }
-        .reconcile .rclose:hover { background:rgba(255,255,255,0.20); color:var(--ink); }
-        .reconcile .rclose svg { width:11px; height:11px; display:block; }
-        /* Aligned with the TEXT, not with the glyph. Spanning from column one
-           started the divider and the rows under the glyph while the heading
-           began past it, which is what read as uncentered. */
-        .reconcile .rrows { grid-column:2 / span 2; grid-row:3; margin-top:6px; }
-        /* No min-height: the buttons are the tallest thing, so let them set it. */
-        .reconcile .rrow {
-          display:flex; align-items:center; gap:10px;
-          padding:6px 0;
-        }
-        /* Between rows, never above the first. A grouped list separates its
-           rows from each other; it does not draw a line under its header. With
-           one row there is nothing to separate at all. */
-        .reconcile .rrow + .rrow { border-top:1px solid rgba(255,255,255,0.09); }
-        /* No rule. Apple separates SIBLING ROWS in a list - an expanded
-           notification's stacked actions, a grouped table - and does not draw
-           one between a card's body and a single button. The conflict notice
-           has a list, so its rows keep theirs; this one has an action. */
-        /* Beside the text, centered against it, the way Mail banners its one
-           action. Under the text it left the card top heavy: two lines of
-           content, then a gap, then a button alone on the floor. */
-        .reconcile .ractions {
-          grid-column:3; grid-row:1 / span 2; align-self:center;
-          display:flex; align-items:center; margin-left:4px;
-        }
-        .reconcile .rkey {
-          flex:1 1 auto; min-width:0; font-size:12.5px; color:var(--ink);
-          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-        }
-        .reconcile .rkey em { color:var(--ink-3); font-style:normal; }
-        /* The same capsule .addrowbar .editbtn uses, a step down in height because
-           these sit inside a card rather than on a bar. */
-        .reconcile button.ract {
-          flex:0 0 auto; border:0; border-radius:999px; cursor:pointer;
-          height:32px; padding:0 15px; display:grid; place-items:center;
-          font-family:inherit; font-size:13px; font-weight:520;
-          background:rgba(255,255,255,0.13); color:var(--ink);
-          transition:background-color .16s var(--ease);
-        }
-        .reconcile button.ract:hover { background:rgba(255,255,255,0.22); }
-        .reconcile .rdone { font-size:12.5px; color:var(--ink-2); }
-        /* Nothing travels on the way in - the preview below is already where it
-           belongs, so a slide would move it twice. It resolves. */
-        /* Holds its space and nothing else. Laying it out from the first frame
-           is what keeps the preview from being shoved down a beat after it has
-           already settled. */
-        .reconcile.pending { opacity:0; }
-        /* It resolves rather than travels, like everything else the panel
-           brings in - a few pixels of settle, not a slide. */
-        @keyframes hemma-orn-in {
-          from { opacity:0; transform:translateY(-6px) scale(.982); }
-          to   { opacity:1; transform:translateY(0) scale(1); }
-        }
-        .reconcile.arriving { animation:hemma-orn-in .40s cubic-bezier(.22,.61,.36,1) both; }
-        @media (prefers-reduced-motion: reduce) {
-          .reconcile.arriving { animation:none; }
-          .reconcile.pending { opacity:1; }
-        }
+        :host(.phone) .toprow > button.diffs, :host(.phone) .toprow > :where(.navpill) > button.diffs { padding:0 12px 0 11px; }
+        :host(.flow) #diffs { display:none; }
         .railhead2 {
           margin:0; padding:0 20px 7px;
-          font-size:11.5px; font-weight:600; letter-spacing:0.04em;
-          text-transform:uppercase; color:var(--ink-3);
+          font-size:13px; font-weight:590; letter-spacing:0;
+          color:var(--ink-3);
         }
-        /* A source list acts on its section from the section's own header, not
-           from a chevron parked on every row. Finder, Notes and Music all put
-           the control on the header; none of them repeat one per item. */
         .railgroup {
           flex:0 0 auto; display:flex; align-items:center; gap:6px;
           padding-right:10px;
         }
-        /* The heading carries its own bottom padding, so centering the row
-           against it still left the button high. Take the padding off the
-           alignment by giving the button the same. */
-        /* display:flex outranks the hidden attribute's UA display:none, so the
-           group stayed on screen with its heading intact. Same trap as the
-           dashboard's own hidden tiles. */
         .railgroup[hidden] { display:none; }
         .railgroup .railmore { margin-bottom:7px; }
         .railgroup .railhead2 { flex:1 1 auto; }
-        /* Edit, the way a list on an Apple platform offers it: a word on the
-           section header that turns the rows into something you can act on,
-           rather than a control repeated on every row. */
         .railedit {
           flex:0 0 auto; padding:0 2px; border:0; border-radius:5px;
-          background:transparent; color:var(--hemma-color-blue, #0088FF);
+          background:transparent; color:var(--accent);
           font-family:inherit; font-size:12px; font-weight:590; cursor:pointer;
           margin-bottom:7px; transition:opacity .14s ease;
         }
-        .railedit:hover { text-decoration:underline; }
-        /* The minus arrives from the trailing edge and the label makes room,
-           which is exactly what a tile row does when you arm it - one idiom for
-           removing things, not two. */
-        /* NOT scoped to .rail: #rooms moves into the top strip below
-           PANEL_NARROW, and a rule left behind leaves the minus as the panel's
-           default button - a blue pill eating 40px of a room pill. */
+        @media (hover: hover) { .railedit:hover { opacity:.7; } }
         .tab .railminus {
           flex:0 0 auto; width:0; overflow:hidden; opacity:0;
           margin-left:0; border:0; padding:0; border-radius:50%;
@@ -4340,59 +4603,41 @@ class HemmaPanel extends HTMLElement {
           transition:width .26s var(--ease), opacity .2s var(--ease),
                      margin-left .26s var(--ease);
         }
+        :host(.editing-rooms) #rooms .tab .caret,
+        :host(.editing-dashes) #dashes .tab .caret { display:none; }
         :host(.editing-rooms) #rooms .tab .railminus,
         :host(.editing-dashes) #dashes .tab .railminus {
-          width:18px; height:18px; opacity:1; margin-left:6px;
+          width:18px; height:18px; opacity:1; margin-left:auto;
         }
         .tab .railminus svg { width:11px; height:11px; display:block; }
-        /* Selection is off while editing: a tap is for renaming, not for
-           navigating somewhere you did not mean to go. */
         :host(.editing-rooms) #rooms .tab, :host(.editing-dashes) #dashes .tab {
           cursor:text;
         }
-        /* Dashboards sit under the rooms, so the group needs air above it and
-           the rooms above must not eat the space. */
-        /* Far enough below the rooms to read as its own list rather than a
-           continuation of that one. The heading's own uppercase tracking sits
-           tight to whatever precedes it, so this is doing all the separating. */
         #g-dashes { margin-top:34px; }
-        /* A dashboard row is a room row: same pill, same hover, same caret, so
-           the sidebar reads as one list of two kinds rather than two designs. */
         #dashes .tab .roomglyph { display:none; }
         #dashes .tab .dashkind {
-          flex:0 0 auto; margin-left:6px; padding:1px 6px; border-radius:999px;
+          flex:0 0 auto; margin-left:13px; padding:1px 6px; border-radius:999px;
           background:var(--chip); color:var(--ink-2);
           font-size:10px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase;
         }
         #dashes .tab.on .dashkind { background:rgba(0,0,0,0.16); color:var(--ink); }
-        /* In the toolbar strip below PANEL_NARROW there is no rail. The rooms
-           move up there; the dashboards do not - a second sideways strip of
-           pills beside the first reads as one list with two halves. */
-        :host(.narrow) #g-rooms, :host(.narrow) #g-dashes,
-        :host(.narrow) #dashes { display:none; }
+        :host(.flow) #g-rooms, :host(.flow) #g-dashes,
+        :host(.phone) #g-rooms, :host(.phone) #g-dashes,
+        :host(.narrow) #dashes:not(.rail #dashes), :host(.phone) .rail #dashes { display:none; }
 
-        /* Sized to its CONTENT, so the Dashboards group sits directly under it
-           rather than at the far end of the rail. It still scrolls, but only once
-           the rooms outgrow the space. */
         .rail #rooms {
           flex:0 1 auto; min-height:0;
           display:flex; flex-direction:column;
           padding:0 10px 10px;
         }
         .rail #rooms:empty { display:none; }
-        /* The list takes the slack, so the + lands on the rail's floor rather
-           than trailing the last room up the column. */
         .rail #rooms .tabs {
           flex:0 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
           flex-direction:column; align-items:stretch; align-content:flex-start;
           gap:1px; scrollbar-width:none; -ms-overflow-style:none;
         }
         .rail #rooms .tabs::-webkit-scrollbar { width:0; height:0; display:none; }
-        /* The rail's floor group, the way Finder pins a section under the one
-           that scrolls. It has to STACK: .tabs is a horizontal row by default,
-           which laid these out sideways along the bottom of the window. */
         .rail #g-dashes, .rail #dashes { flex:0 0 auto; }
-        /* The rail ends after the two groups instead of stretching them. */
         .rail::after { content:""; flex:1 1 auto; min-height:0; }
         .rail #dashes {
           display:flex; flex-direction:column;
@@ -4402,10 +4647,6 @@ class HemmaPanel extends HTMLElement {
           flex:0 0 auto; flex-direction:column; align-items:stretch;
           align-content:flex-start; gap:1px;
         }
-        /* A row on the sidebar's own material, not a capsule and not a chip.
-           Nothing paints at rest; hover and selection are the only fills, and
-           selection is a neutral lift rather than the accent - Home selects
-           with a light fill, and blue on a rounded row is what a menu does. */
         .rail .tab {
           justify-content:flex-start; gap:10px;
           padding:7px 10px; border-radius:7px;
@@ -4420,33 +4661,31 @@ class HemmaPanel extends HTMLElement {
           flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
           white-space:nowrap;
         }
-        /* One warm tint for every room, the way Home draws its room list. The
-           icon says "a room", not "which room" - the label does that. */
         .rail .tab .roomglyph {
-          flex:0 0 19px; width:19px; height:19px;
-          /* Teal, not Home's orange: #ff9f0a is not a Hemma color at all. Teal
-             is TILE_TINT, already on every tile this panel edits. */
+          flex:0 0 19px; width:19px; height:19px; margin-right:7px;
           background-color:var(--hemma-color-teal, #00C3D0);
           -webkit-mask:var(--i) center / contain no-repeat;
           mask:var(--i) center / contain no-repeat;
         }
         .rail .tab.on .roomglyph { background-color:#fff; }
-        /* The same glyph inside the picker. Its own rule, not the rail's: the
-           rail's is scoped to .rail and the menu is appended to the body. */
+        .combo-opt .menuglyph.plain { background-color:currentColor; }
+        .combo-opt .menuicon {
+          flex:0 0 21px; width:21px; height:21px; margin-right:0; display:grid; place-items:center;
+        }
+        .combo-opt .menuicon svg { width:100%; height:100%; display:block; }
+        .combo-opt ha-icon.menuicon { --mdc-icon-size:21px; }
+        :host(.phone) .combo-opt ha-icon.menuicon { --mdc-icon-size:21px; }
+        .combo-opt.danger { color:#ff453a; }
+        :host(.phone) .combo-opt .menuglyph, :host(.phone) .combo-opt .menuicon {
+          flex-basis:20px; width:20px; height:20px; margin-right:0;
+        }
         .combo-opt .menuglyph {
-          flex:0 0 17px; width:17px; height:17px; margin-right:8px;
+          flex:0 0 21px; width:21px; height:21px; margin-right:0;
           background-color:var(--hemma-color-teal, #00C3D0);
           -webkit-mask:var(--i) center / contain no-repeat;
           mask:var(--i) center / contain no-repeat;
         }
-        /* The room's own menu, revealed by the pointer that is going to use it.
-           A chevron parked on the selected row is what made this read as a
-           pop-up button. Right-click opens the same menu, as it does in Home. */
-        /* Gone from the rail: invisible until hover yet costing 15px on every
-           row, and a chevron per item is not how a sidebar offers actions. */
         .rail .tab .caret { display:none; }
-        /* Its own row on the rail's floor, the way Mail parks the one control
-           that adds to the list. */
         .rail .tabadd {
           flex:0 0 auto; width:auto; height:auto; margin-top:4px;
           justify-content:flex-start; gap:10px;
@@ -4456,112 +4695,316 @@ class HemmaPanel extends HTMLElement {
         }
         .rail .tabadd:hover { background:rgba(255,255,255,0.07); color:var(--ink); filter:none; }
         .rail .tabadd svg { width:16px; height:16px; flex:0 0 16px; margin-left:2px; }
-        /* The page scrolls, so nothing may be wider than it: the blurred
-           photo overhangs by 280px on every side and used to drag a
-           horizontal scroll along with it. */
-        :host(.narrow) { width:auto; height:auto; overflow-x:clip; overflow-y:visible;
-          overscroll-behavior:auto; }
+        :host(.narrow) { width:auto; height:auto;
+          overflow:visible; overscroll-behavior:contain; touch-action:pan-y pinch-zoom; }
         :host(.narrow) .toprow, :host(.narrow) .body { --pad:18px; }
-        /* No centering margin to hang out into down here. */
         :host(.narrow) .burger { margin-left:0; margin-right:0; }
-        /* Fixed, not absolute: absolute stretched the photo over the whole
-           scroll height of the form, which on a phone is many screens tall,
-           so it was scaled to cover a column ten times its own aspect. */
-        :host(.narrow) .bg, :host(.narrow) .bgtint, :host(.narrow) .bgnoise { position:fixed; }
-        :host(.narrow) .bg { width:calc(100vw + 560px); height:calc(100vh + 560px); }
-        /* --top-h carries 26px the desktop columns want behind the bar. Here the
-           page scrolls, so that is just a hole: take it back and add one
-           --band-gap, so the first section sits like every other. */
-        :host(.narrow) .body { height:auto; display:block; overflow:visible;
-          padding:calc(var(--top-h) - 26px + var(--band-gap, 30px)) 18px 18px; }
-        /* The band gap was holding the preview clear of the room pills. On a
-           phone there is no preview any more, so it is holding nothing clear of
-           anything - and the switcher sat marooned under the pills. */
-        :host(.phone) .body { padding-top:calc(var(--top-h) - 26px + 12px); }
+        /* --top-h carries 26px the desktop columns want behind the bar; the phone scrolls instead. */
+        :host(.narrow:not(.split)) .body { height:auto; display:block; overflow:visible;
+          padding:0 18px 18px; }
+        :host(.phone) .body { padding-top:calc(max(8px, env(safe-area-inset-top, 0px)) + 56px + var(--hemma-mobile-chrome-drop, 4px)); }
         :host(.narrow) .status { margin:10px 2px 12px; }
-        /* No heading on a phone: the preview says it. Hiding it leaves one grid
-           item, so the track collapses and the controls center over the card.
-           :first-child still names the HIDDEN heading, hence .segrow. */
-        /* The 24px lines a heading-row control up with the switches on the
-           cards below. With the heading gone the row centers instead, and
-           that padding just pulls it 12px off. Other bandheads keep it. */
-        /* Under the preview, as its caption. Moved with order, not DOM order:
-           the desktop heading row is one grid and the fit code measures it. */
-        :host(.narrow) .plinth { order:1; }
-        :host(.narrow) .canvashead { order:2; margin:0; }
+        :host(.narrow) .plinth { order:2; }
+        :host(.narrow) .canvashead { order:1; margin:0 0 14px; }
         :host(.narrow) .canvas { padding:0; }
         :host(.narrow) .stage { flex-direction:column; gap:0; margin-left:0; }
         :host(.narrow) .canvas { width:100%; margin-bottom:22px; }
-        /* The panel reaches the body gutter; the screen is inset inside it. */
         :host(.narrow) .plinth { padding:14px; }
-        /* No fixed-height stage here, so the slot takes its height from the
-           card rather than the other way round. */
         :host(.narrow) .mapslot { flex:0 0 auto; }
-        /* The page is the scroller down here, so the column does not clip.
-           It carries its own gutter now: .body used to supply one, and the
-           inspector sits outside .body. */
         :host(.narrow) .sheet { overflow:visible; flex:1 1 auto; margin:0; }
-        /* The bar on one line, rooms on their own under it - one row down to
-           360px, with flex-wrap catching anything narrower. The controls do NOT
-           join the rooms line: it scrolls sideways and they would slide under. */
-        :host(.phone) .top { padding-top:max(26px, calc(15px + env(safe-area-inset-top, 0px))); }
-        :host(.phone) .toprow { flex-wrap:wrap; gap:7px; row-gap:10px; }
-        /* A phone reaches the sidebar by swiping in from the edge, so the
-           button is 41px of header doing nothing. */
+        :host(.phone) .top { padding-top:calc(max(8px, env(safe-area-inset-top, 0px)) + var(--hemma-mobile-chrome-drop, 4px)); padding-bottom:8px; }
         :host(.phone) .burger { display:none; }
-        :host(.phone) .ver { display:none; }
         :host(.phone) #save .s-long { display:none; }
         :host(.phone) #save .s-short { display:inline; }
-        :host(.phone) #brand .s-long { display:none; }
-        :host(.phone) #brand .s-short { display:inline; }
-        :host(.phone) .toprow > button:not(.burger) { padding:0 11px; }
-        /* A 36px circle with 3px dots is a target you have to aim at. */
-        :host(.phone) .toprow > select, :host(.phone) .toprow > button:not(.burger) { height:40px; }
-        :host(.phone) .toprow > button.icon { width:40px; padding:0; }
-        :host(.phone) .toprow > button#more svg { width:22px; height:22px; }
-        /* Ten rooms cannot wrap onto a phone header - it would be taller than
-           the form. One line that scrolls sideways instead, ruled off from
-           the controls above it so the two rows do not read as one pile. */
-        /* Bleeds to the bar's edges so a pill scrolls flush while the row keeps
-           its gutter. The border rides the scroller itself, which does not
-           scroll with its content. */
-        :host(.phone) .toprow #rooms {
-          order:9; flex:0 0 100%; min-width:0;
-          margin:1px calc(var(--pad) * -1) 0;
-          padding:13px var(--pad) 2px;
-          border-top:1px solid var(--hair);
-          scroll-padding-left:var(--pad);
-          -webkit-overflow-scrolling:touch;
+        :host(.phone) #diffs .s-long { display:none; }
+        :host(.phone) #diffs .s-short { display:inline; }
+        /* ── the phone's nav bar ───────────────────────────────────────────
+           A room is the document, and a nav bar names the document. Above this
+           width the rail names it and the strip of pills is a reasonable second
+           best; on a phone a scrolling rail of filled pills is a chip group,
+           which is not how iOS switches scope - a title with a chevron is. It
+           also buys back the whole second row of chrome. */
+        :host(.phone) .toprow #rooms { display:none; }
+        :host(.phone) #brand { display:none; }
+
+        .toprow > button.navtitle, .toprow > :where(.navpill) > button.navtitle {
+          display:none; height:auto; padding:0; font-size:inherit;
+          justify-content:flex-start;
         }
-        :host(.phone) .toprow #rooms .tabs { margin:0; padding:0; }
-        /* A drag owns touch-action, which on a scroller means the row cannot be
-           swiped at all. The swipe wins; the drag handler bails out on touch to
-           match. */
-        :host(.phone) .toprow #rooms .tab, :host(.phone) .thead { touch-action:auto; }
+        .bigtitle, .navtitle {
+          display:none; align-items:center; gap:5px;
+          background:none; border:0; box-shadow:none; padding:0;
+          color:var(--ink); cursor:pointer; text-align:left;
+          -webkit-tap-highlight-color:transparent;
+        }
+        .bigtitle:hover:not(:disabled), .navtitle:hover:not(:disabled) { filter:none; }
+        .bigtitle:active:not(:disabled) { transform:none; opacity:.55; }
+        .navtitle:active:not(:disabled) { transform:none; opacity:.55; }
+        :host(.phone) .bigtitle {
+          display:flex; max-width:100%; min-width:0;
+          padding:0 0 4px; margin:0;
+        }
+        :host(.phone) .bigtitle .bt-label {
+          font-size:38px; line-height:1; letter-spacing:-0.03em;
+          padding-block:.18em; margin-block:-.18em;
+        }
+        :host(.phone) .bigtitle .bt-caret { width:26px; height:26px; margin-top:6px; opacity:.6; }
+        :host(.phone) .bigtitle .bt-caret svg { width:22px; height:22px; }
+        .bigtitle .bt-label {
+          font-size:34px; font-weight:700; letter-spacing:-0.028em;
+          min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .bigtitle .bt-caret { flex:0 0 auto; display:grid; place-items:center;
+          width:22px; height:22px; margin-top:4px; opacity:.45; }
+        .bigtitle .bt-caret svg { width:17px; height:17px; display:block; }
+
+        :host(.phone) .navtitle {
+          display:flex; order:-1; flex:0 1 auto;
+          margin-right:auto; min-width:0;
+          opacity:0; visibility:hidden; translate:0 7px;
+          transition:opacity .18s var(--ease), translate .18s var(--ease),
+                     visibility 0s linear .18s;
+        }
+        :host(.phone.collapsed) .navtitle:active { opacity:.55; }
+        :host(.phone.collapsed) .navtitle {
+          opacity:1; visibility:visible; translate:0 0;
+          transition:opacity .18s var(--ease), translate .18s var(--ease);
+        }
+        .navtitle .nt-label {
+          font-size:17px; font-weight:600; letter-spacing:-0.015em;
+          min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .navtitle .nt-caret { flex:0 0 auto; display:grid; place-items:center;
+          width:13px; height:13px; opacity:.5; }
+        .navtitle .nt-caret svg { width:11px; height:11px; display:block; }
+        :host(.phone) .navtitle .nt-caret { width:18px; height:18px; opacity:.62; }
+        :host(.phone) .navtitle .nt-caret svg { width:15px; height:15px; }
+        :host(.phone) .top {
+          box-shadow:none; background:transparent;
+          backdrop-filter:none; -webkit-backdrop-filter:none;
+        }
+        :host(.phone) .top::before {
+          content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+          backdrop-filter:blur(22px) saturate(1.2) brightness(0.97);
+          -webkit-backdrop-filter:blur(22px) saturate(1.2) brightness(0.97);
+          opacity:0; transition:opacity 220ms ease-in-out;
+        }
+        :host(.phone.collapsed) .top::before { opacity:1; }
+        :host(.phone) .toprow { flex-wrap:nowrap; gap:6px; min-height:44px; }
+
+        :host(.phone) .toprow > button.ghost, :host(.phone) .toprow > :where(.navpill) > button.ghost {
+          background:none; box-shadow:none; padding:0 11px; height:44px; min-width:38px;
+          margin:0; color:var(--ink); font-weight:400; font-size:17px;
+        }
+        /* Outside the nav capsule, so it carries one of its own. */
+        :host(.phone) .toprow > button#diffs {
+          height:34px; min-width:0; padding:0 12px 0 10px; gap:6px;
+          border-radius:17px; font-size:15px;
+          background-color:var(--hemma-pill-fill, rgba(255,255,255,0.10));
+          backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          -webkit-backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          box-shadow:var(--hemma-pill-rim, inset 0 0.5px 0 rgba(255,255,255,0.10),
+            inset 0 -0.5px 0 rgba(255,255,255,0.10));
+        }
+        :host(.phone) .toprow > button#save.dirty, :host(.phone) .toprow > :where(.navpill) > button#save.dirty {
+          background:none; color:var(--ink); box-shadow:none;
+        }
+        :host(.phone) .toprow > button.ghost:disabled, :host(.phone) .toprow > :where(.navpill) > button.ghost:disabled,
+        :host(.phone) .toprow > button#save.dirty:disabled, :host(.phone) .toprow > :where(.navpill) > button#save.dirty:disabled {
+          color:rgba(255,255,255,0.45); opacity:1;
+        }
+        .navpill { display:contents; }
+        :host(.phone) .toprow > :where(.navpill) > button#save { position:relative; isolation:isolate; }
+        :host(.phone) .toprow > :where(.navpill) > button#save::before {
+          content:""; position:absolute; inset:6px 0; z-index:-1; border-radius:16px;
+          background:transparent; transition:background-color .22s ease;
+        }
+        :host(.phone) .toprow > :where(.navpill) > button#save.dirty:is(:disabled, :enabled) {
+          color:var(--on-fill); font-weight:600; background:none;
+        }
+        :host(.phone) .toprow > :where(.navpill) > button#save.dirty::before { background:var(--fill); }
+        :host(.phone) .toprow > :where(.navpill) > button#save.ok:is(:disabled, :enabled) {
+          color:var(--on-fill); background:none; opacity:1;
+        }
+        :host(.phone) .toprow > :where(.navpill) > button#save.ok::before { background:var(--fill); }
+        :host(.phone) .toprow > :where(.navpill) > button#save.ok svg { width:17px; height:17px; }
+        :host(.phone) .navpill {
+          display:flex; align-items:center; position:relative;
+          height:44px; padding:0 6px; border-radius:22px;
+        }
+        :host(.phone) .navpill::before, :host(.phone) .navpill::after {
+          content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+        }
+        :host(.phone) .navpill::before {
+          z-index:0;
+          background-color:var(--hemma-pill-fill, rgba(255,255,255,0.10));
+          backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          -webkit-backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          box-shadow:var(--hemma-pill-rim, inset 0 0.5px 0 rgba(255,255,255,0.10), inset 0 -0.5px 0 rgba(255,255,255,0.10)),
+            -0.5px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50)), 0.5px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50));
+        }
+        :host(.phone.collapsed) .navpill::before { backdrop-filter:none; -webkit-backdrop-filter:none; }
+        :host(.phone) .navpill::after {
+          z-index:3;
+          backdrop-filter:var(--hemma-pill-highlight, brightness(1.45));
+          -webkit-backdrop-filter:var(--hemma-pill-highlight, brightness(1.45));
+          padding:1px; box-sizing:border-box;
+          -webkit-mask:linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+          -webkit-mask-composite:source-in, source-out;
+          mask:linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+          mask-composite:intersect, subtract;
+        }
+        :host(.phone) .navpill > :not(.navflash) { position:relative; z-index:1; }
+        .navsep { display:none; }
+        :host(.phone) .navsep {
+          display:block; flex:0 0 1px; width:1px; height:18px; margin:0 3px;
+          background:var(--hemma-pill-divider, rgba(60,60,67,0.36));
+        }
+        .navflash { display:none; }
+        .toprow > :where(.navpill) > button#undo {
+          width:36px; min-width:36px; padding:0; margin-right:-6px;
+          background:none; box-shadow:none; color:var(--ink);
+        }
+        .toprow > :where(.navpill) > button#undo:hover:not(:disabled) { background:none; filter:none; opacity:.72; }
+        .toprow > :where(.navpill) > button#undo svg { width:21px; height:21px; display:block; }
+        :host(.phone) .toprow > :where(.navpill) > button#undo,
+        :host(.flow) .toprow > :where(.navpill) > button#undo { display:none; }
+        :host(.phone) .navflash {
+          display:block; position:absolute; inset:0; z-index:2;
+          border-radius:inherit; opacity:0; pointer-events:none;
+        }
+        :host(.phone) #donebtn { font-weight:600; }
+        :host(.phone) .toprow .spacer { display:none; }
+        :host(.phone) .toprow > button#more, :host(.phone) .toprow > :where(.navpill) > button#more {
+          width:40px; min-width:40px; height:44px; padding:0; color:var(--ink);
+        }
+        :host(.phone) .toprow > button#more svg, :host(.phone) .toprow > :where(.navpill) > button#more svg { width:21px; height:21px; }
+
+        /* ── phone type ─────────────────────────────────────────
+           The panel's 14px base is desktop density: a form built for a 360px
+           column standing beside a preview. On a phone it is the whole screen,
+           and iOS reads body at 17 and secondary at 15. Sizes only - the boxes
+           they sit in are already thumb-sized.
+           16px on the fields is not a taste: under 16, WebKit zooms the page to
+           meet the caret, and with a fixed bar it never comes back. */
+        :host(.phone) select, :host(.phone) input[type=text],
+        :host(.phone) input:not([type]), :host(.phone) textarea,
+        :host(.phone) .colorfield, :host(.phone) .combo > input { font-size:16px; }
+        :host(.phone) .row label { font-size:15px; }
+        :host(.phone) .row label .lsub { font-size:13px; }
+        :host(.phone) .card > .chead h2 { font-size:17px; }
+        :host(.phone) .count { font-size:13.5px; }
+        :host(.phone) .grouphead p { font-size:14px; line-height:1.38; color:rgba(255,255,255,0.72); }
+        :host(.phone) .band.detail .card > .chead .blurb { font-size:14px; }
+        :host(.phone) .hint { font-size:13.5px; line-height:1.38; color:rgba(255,255,255,0.64); }
+        :host(.phone) .subhead, :host(.phone) .advsum { font-size:13.5px; }
+        :host(.phone) .sortstrip .sortnote { font-size:13px; }
+        :host(.phone) .detailbar h3 { font-size:20px; }
+        :host(.phone) .detailbar .back {
+          --back:40px; position:relative; overflow:visible;
+          background-color:rgba(255,255,255,0.07);
+          background-image:radial-gradient(140% 90% at 50% -20%,
+            rgba(255,255,255,0.14), rgba(255,255,255,0.04) 45%, transparent 62%);
+          backdrop-filter:blur(10px) saturate(1.2); -webkit-backdrop-filter:blur(10px) saturate(1.2);
+          box-shadow:none;
+        }
+        :host(.phone) .detailbar .back::before {
+          content:""; position:absolute; inset:0; border-radius:50%; padding:1.4px;
+          background:conic-gradient(from 0deg,
+            rgba(255,255,255,0.55) 0deg, rgba(255,255,255,0.12) 55deg,
+            rgba(255,255,255,0.02) 90deg, rgba(255,255,255,0.12) 130deg,
+            rgba(255,255,255,0.30) 175deg 185deg, rgba(255,255,255,0.12) 230deg,
+            rgba(255,255,255,0.02) 270deg, rgba(255,255,255,0.12) 305deg,
+            rgba(255,255,255,0.55) 360deg);
+          -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite:xor;
+          mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite:exclude; pointer-events:none;
+        }
+        :host(.phone) .detailbar .back::after {
+          content:""; position:absolute; inset:-1px; border-radius:50%; padding:1px;
+          background:conic-gradient(from 0deg,
+            transparent 0deg 50deg, rgba(0,0,0,0.32) 80deg 100deg,
+            transparent 130deg 230deg, rgba(0,0,0,0.32) 260deg 280deg,
+            transparent 310deg 360deg);
+          -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite:xor;
+          mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite:exclude; pointer-events:none;
+        }
+        :host(.phone) .detailbar .back:hover:not(:disabled),
+        :host(.phone) .detailbar .back:active:not(:disabled) {
+          background-color:rgba(255,255,255,0.07); box-shadow:none;
+        }
+        :host(.phone) .detailbar .back:active:not(:disabled) { transform:scale(0.94); }
+        :host(.phone.is-light) .detailbar .back::before {
+          background:conic-gradient(from 0deg,
+            rgba(255,255,255,0.75) 0deg, rgba(255,255,255,0.28) 55deg,
+            rgba(255,255,255,0.10) 90deg, rgba(255,255,255,0.28) 130deg,
+            rgba(255,255,255,0.45) 175deg 185deg, rgba(255,255,255,0.28) 230deg,
+            rgba(255,255,255,0.10) 270deg, rgba(255,255,255,0.28) 305deg,
+            rgba(255,255,255,0.75) 360deg);
+        }
+        :host(.phone) .detailbar .back svg {
+          width:16px; height:27px; flex-basis:16px; stroke-width:3; transform:translateX(-1px);
+        }
+        :host(.phone) .detailbar .mini.icon,
+        :host(.phone) .detailbar .plus { width:36px; height:36px; flex:0 0 36px; }
+        :host(.phone) .detailbar .mini.icon svg { width:18px; height:18px; }
+        :host(.phone) .plus { width:32px; height:32px; flex-basis:32px; }
+        :host(.phone) .plus svg { width:17px; height:17px; }
+        :host(.phone) .row .drop { width:28px; height:28px; }
+        :host(.phone) .badgeedit,
+        :host(.phone) .addrowbar .editbtn { height:32px; min-width:66px; padding:0 16px; font-size:15px; }
+        :host(.phone) .addrowbar .editbtn.on { min-width:32px; width:32px; padding:0; }
+        :host(.phone) .mini:not(.icon) { min-height:32px; padding:0 16px; font-size:15px; }
+        :host(.phone) .row:has(> .sw) {
+          grid-template-columns:minmax(0,1fr) auto;
+          column-gap:12px; row-gap:0; min-height:44px; padding:4px 0; align-items:center;
+        }
+        :host(.phone) .row:has(> .sw) > label { grid-column:1; grid-row:1; font-size:17px; color:var(--ink); }
+        :host(.phone) .row:has(> .sw) > .sw { grid-column:2; grid-row:1; }
+        :host(.phone) .row:is(:has(> .combo), :has(> input)) {
+          grid-template-columns:minmax(0,1fr); row-gap:7px; padding:11px 0 13px; align-items:start;
+        }
+        :host(.phone) .row:is(:has(> .combo), :has(> input)) > label {
+          grid-column:1; grid-row:1; font-size:14px; color:var(--ink-2);
+        }
+        :host(.phone) .row:is(:has(> .combo), :has(> input)) > :nth-child(2) {
+          grid-column:1; grid-row:2; min-width:0;
+        }
+        :host(.phone) .row:is(:has(> .combo), :has(> input)) > .drop { display:none; }
+        :host(.phone) .row .combo > input,
+        :host(.phone) .row > input {
+          height:46px; padding:0 40px 0 14px; text-align:left;
+          background-color:var(--field); border:1px solid var(--field-rim); border-radius:13px;
+          box-shadow:none; color:var(--ink); font-size:17px; text-overflow:ellipsis;
+        }
+        :host(.phone) .row > input { padding-right:14px; }
+        :host(.phone) .row > .combo.hasicon > input { padding-left:46px; }
+        :host(.phone) .row > .combo.hasicon > .glyph { left:15px; width:20px; height:20px; flex-basis:20px; }
+        :host(.phone) .row .combo::after {
+          content:""; position:absolute; right:14px; top:50%; width:13px; height:18px; margin-top:-9px;
+          background-color:rgba(255,255,255,0.42); pointer-events:none;
+          -webkit-mask:var(--updown) center/contain no-repeat; mask:var(--updown) center/contain no-repeat;
+        }
+        :host(.phone) .row .drop svg { width:15px; height:15px; }
+        :host(.phone) .sw { width:51px; height:31px; flex:0 0 51px; }
+        :host(.phone) .sw::after { top:2px; left:2px; width:27px; height:27px; }
+        :host(.phone) .sw[aria-checked="true"]::after { transform:translateX(20px); }
+        :host(.phone) .thead { touch-action:auto; }
         .cols { display:flex; gap:var(--gap); align-items:flex-start; }
-        /* Grouped table, not a stack of cards: the card is the GROUP, divided by
-           hairlines. The column carries the glass, its children only content. */
         .col, .tilegrid {
           position:relative;
           display:flex; flex-direction:column; gap:0;
           border-radius:var(--r-group);
-          /* On the element itself, not a ::before: a transform on an ANCESTOR
-             freezes a descendant's backdrop-filter, so the glass animated flat
-             and snapped into focus at the end. */
           background-color:var(--card-tint);
           background-image:var(--pane);
           backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
           box-shadow:var(--g-rim);
-          /* Seals the grain's blend, the same way .bgwrap does: a mix-blend-mode
-             layer composites against its stacking context, and the entrance
-             animation hands out and takes back compositing layers as it runs. */
           isolation:isolate;
-          /* border-radius alone does not bound a backdrop-filter - the blur
-             leaks a hairline past the curve and the corner reads doubled. */
           clip-path:inset(0 round var(--r-group));
         }
-        /* backdrop-filter blurs the page's dither away, so --pane's ramp bands on
-           the column. Same grain, re-laid over the blur. */
         .col::before, .col::after,
         .tilegrid::before, .tilegrid::after {
           content:""; position:absolute; inset:0; border-radius:inherit;
@@ -4574,94 +5017,57 @@ class HemmaPanel extends HTMLElement {
         .col::after, .tilegrid::after {
           mix-blend-mode:screen; opacity:var(--pane-grain-dark, .04);
         }
+        :host(.phone) .col::before, :host(.phone) .col::after,
+        :host(.phone) .tilegrid::before, :host(.phone) .tilegrid::after { content:none; }
         .col { flex:1 1 0; min-width:0; }
-        /* The glass is a LAYER, not the column: backdrop-filter on .col makes it a
-           containing block for position:fixed descendants, so overflow:hidden then
-           clips every combo menu opened inside a row. */
+        :host(.phone) .col, :host(.phone) .tilegrid { padding-block:4px; }
         .col > *, .tilegrid > * { position:relative; z-index:1; }
-        /* Rounds the first and last rows against the group without clipping
-           anything: overflow:hidden here would take the menus with it. */
         .col > *:first-child, .tilegrid > *:first-child {
           border-top-left-radius:var(--r-group); border-top-right-radius:var(--r-group);
         }
         .col > *:last-child, .tilegrid > *:last-child {
           border-bottom-left-radius:var(--r-group); border-bottom-right-radius:var(--r-group);
         }
-        /* Inset to the label rather than wall to wall, which a border-top cannot
-           do - so it is an overlay. It survives _shutCard's overflow:clip because
-           it sits at the very top of the box being clipped. */
         .col > .grouphead + .card::before,
         .col > .card + .card::before,
+        .col > .badgebar + .card::before,
         .tilegrid > * + *::before {
           content:""; position:absolute; top:0;
           left:var(--rule-inset); right:var(--card-pad-h);
-          height:1px; background:rgba(255,255,255,0.14); pointer-events:none;
+          height:1px; background:var(--hair); pointer-events:none;
         }
-        /* Except the FIRST: both bands open on a .grouphead, so that rule was the
-           topmost line in the list - and with hints off the caption is
-           display:none, leaving it hanging under the switcher. */
         .band:not(.detail) .col > .grouphead + .card::before,
         .band:not(.detail) .tilegrid > .grouphead + *::before { content:none; }
-        /* With hints on, the caption ran straight into the first row and read as
-           its text rather than the section's heading. Scoped to hints ON, since
-           with them off the caption is display:none. On the CAPTION, not on what
-           follows, so it lands the same in both band shapes. */
+        :host(.nohints) .col > .grouphead + .card::before { content:none; }
         :host(:not(.nohints)) .inspector .band:not(.detail) .grouphead {
           position:relative;
         }
         :host(:not(.nohints)) .inspector .band:not(.detail) .grouphead::after {
           content:""; position:absolute; pointer-events:none;
           left:var(--card-pad-h); right:var(--card-pad-h); bottom:0; height:1px;
-          background:rgba(255,255,255,0.14);
+          background:var(--hair);
         }
-        /* The tiles band renders into a .col, and it brings its own group
-           (.tilegrid). Without this the column painted a SECOND surface around
-           it - the tiles appeared nested inside one big outer tile, with the
-           picker and + sitting on its top edge. One group per band. */
-        .col:has(> .tilewrap) {
+        :host(.split:not(.flow)) .inspector .band:not(.detail) .grouphead::after {
+          content:none;
+        }
+        :host(.narrow) .tilegrid {
           border-radius:0; background:none; box-shadow:none;
           backdrop-filter:none; -webkit-backdrop-filter:none;
+          clip-path:none; isolation:auto;
         }
-        .col:has(> .tilewrap)::before, .col:has(> .tilewrap)::after { content:none; }
-        .col:has(> .tilewrap) > *:first-child,
-        .col:has(> .tilewrap) > *:last-child { border-radius:0; }
-        /* An empty column must not paint an empty slab. */
+        :host(.narrow) .tilegrid::before, :host(.narrow) .tilegrid::after { content:none; }
         .col:empty { display:none; }
-        /* No stretching the last row: inside one surface a grouped table hugs
-           its content, and a tall final row reads as a mistake rather than as
-           the column filling out. */
         .col > .card:last-child { flex:0 0 auto; }
-        /* ...but not when it is folded. Absorbing the column's leftover height
-           made the last card in each column 412px against its siblings' 78px
-           the moment everything was collapsed. */
         .col > .card:last-child.shut { flex:0 0 auto; }
-        /* Cards and tiles stack in the same column, so folded they have to land
-           on the same height. They do not naturally: .chead is 52px against
-           .thead's 44, and the two carry different padding, which put a folded
-           card at 78px and a folded tile at 60. One number for both. */
-        /* A tile head carries no icon, so its hairline starts at the label -
-           which here is the row inset itself. */
         .tile { --rule-inset:var(--card-pad-h); }
+        .tile:has(> .thead .sicon) { --rule-inset:var(--card-pad-h); }
         .card.shut, .tile.shut { min-height:var(--shut-h); box-sizing:border-box; }
-        /* A card's own padding already centers its heading in that 78px. A tile
-           is 18px shorter naturally, so min-height alone left its heading stuck
-           at the top with the slack below. Give the head the whole box instead:
-           it already centers its own row, and the hit area grows with it. */
-        /* The head is the same height in BOTH states, so the icon, name and
-           summary never move when a tile opens. Folded it was centered in 78px
-           and open it sat at the top of a 44px head - a 9px jump on every tap.
-           The card already worked out this way; the tile did not. */
         .tile > .thead {
           margin:0 calc(var(--card-pad-h) * -1); padding:0 var(--card-pad-h);
           min-height:var(--shut-h);
         }
         .tile.shut { padding-bottom:0; }
-        /* Same for a card, so the heading is the whole box when folded. That is
-           what lets one hover rule mark the fold target in both states. */
         .card.shut { padding-top:0; padding-bottom:0; }
-        /* align-content, not just align-items: .sicon spans two rows, so with a
-           min-height the two tracks stretch to fill and the content centers in
-           the upper one. Grouping the tracks puts the row back in the middle. */
         .card.shut > .chead {
           margin:0 calc(var(--card-pad-h) * -1); padding:0 var(--card-pad-h);
           min-height:var(--shut-h); align-content:center;
@@ -4669,8 +5075,6 @@ class HemmaPanel extends HTMLElement {
 
         :host(.narrow) .cols { flex-direction:column; align-items:stretch; }
 
-        /* Collapses with the head's own 4px, so the gap below a heading is
-           --card-pad-v - the same as the gap above it. */
         .card > .chead + * { margin-top:var(--card-pad-v); }
         .card > .cdesc { font-size:12px; margin:4px 0 0; }
         .card > .cdesc.drift { color:#ffd60a; }
@@ -4680,31 +5084,16 @@ class HemmaPanel extends HTMLElement {
           display:flex; flex-direction:column; align-items:center;
           gap:12px; margin:0 0 30px;
         }
-        /* The CARD is capped, not the photo inside it, so there is no second card
-           and no dead space. aspect-ratio with no max-height: clamping the height
-           makes WebKit shrink the width to keep the ratio. */
         .card.map {
           margin:0; padding:0; overflow:hidden; flex:0 0 auto;
-          /* top, not center: the card is laid out at NATURAL size and scaled, so
-             a centered origin puts its painted top half the shrinkage below its
-             layout box. The trade is that a size switch grows downward into the
-             slack rather than opening evenly. */
           position:relative; transform-origin:top center;
-          /* The photo is opaque, so the glass fill and its blur would only
-             cost paint. The rim stays, to frame the tile like every other. */
           background-color:transparent; background-image:none;
           backdrop-filter:none; -webkit-backdrop-filter:none;
-          /* The rim is NOT here: an inset shadow paints under the element's own
-             children, and the photo inside is opaque. */
           box-shadow:0 12px 30px -12px rgba(0,0,0,0.42), 0 2px 8px rgba(0,0,0,0.18);
         }
-        /* The same specular rim the tiles carry, as an overlay so it sits on
-           top of the photo the way it sits on top of a tile's fill. */
         .card.map::after {
           content:""; position:absolute; inset:0; border-radius:inherit;
           pointer-events:none;
-          /* THIS is the preview's rim, not the card's own box-shadow. Asymmetric:
-             light comes from above, and a bright lower lip reads as a seam. */
           box-shadow:
             inset 0 1px .5px -0.5px rgba(255,255,255,0.20),
             inset 0 -1px .5px -0.5px rgba(255,255,255,0.10),
@@ -4713,11 +5102,6 @@ class HemmaPanel extends HTMLElement {
             inset 0 0 0 .5px rgba(255,255,255,0.08);
         }
         :host(.narrow) .card.map::after { box-shadow:inset 0 0 0 .5px rgba(255,255,255,0.12); }
-        /* Sized by the flex chain above it, never by the card inside it.
-           Measuring a box that the card had just resized made every tap on
-           Desktop/Tablet shrink the preview again. */
-        /* Centered: the slot is pinned to the TALLER shape, so top-aligned put
-           all the slack underneath and a switch read as the card growing down. */
         .mapslot {
           width:100%; flex:0 0 auto;
           display:flex; justify-content:center; align-items:flex-start;
@@ -4729,61 +5113,33 @@ class HemmaPanel extends HTMLElement {
           --wx:20px; --nm:40px; --nav:10.5px;
           /* --nav over the theme's chrome font size (18px). */
           --menu-k:0.583;
-          /* Badges: the theme's desktop values (u-badge 10px) at this card's
-             960-for-1728 draw ratio, so the pill is the same shape here as
-             there - 50px min-height is what gives it the bubble it has. */
           --bmh:27.8px; --bgl:16.7px; --bl:8.3px; --bv:7.8px;
           --bpt:2.2px; --bpb:2.2px; --bpr:8.3px; --bpl:5px; --bcg:2.2px; --bgap:5.6px;
           --tw:154px; --th:105px; --tc:20px; --tg:7px; --tn:12.5px; --ts:10.5px; --tt:25px;
-          /* Now Playing: nav-top minus its 12px drop, the 400px tile cap, and
-             hemma_now_playing_primary's own paddings and type. */
           --np-drop:0px; --np-max:222px; --np-gap:5.6px; --np-hg:5.6px; --np-lb:10px;
           --np-wg:1.7px; --np-wb:1.4px; --np-wu:5.6px;
           --np-pt:7.8px; --np-pr:8.9px; --np-pl:8.9px; --np-cg:5.6px; --np-r:14.4px;
           --np-art:52.2px; --np-ar:8.3px; --np-ti:8.3px; --np-sb:7.2px;
-          /* Track and transport at the same K: real 8/4/10px and 20px between
-             16/20px glyphs. */
           --np-tg:4.4px; --np-bh:2.2px; --np-rg:5.6px;
           --np-xg:11.1px; --np-gs:8.9px; --np-gp:11.1px;
-          /* The 322px cap at K: about two and a half tiles. */
           --np-stack-max:178.9px;
-          /* The theme blurs every ha-card by 22px, and this screen is drawn at
-             960 for a 1728 window - so the honest radius here is 22 x 0.556. */
           --tbl:12px;
           --hfill:24%;
-          /* The chrome row at K = 0.5556 (960 for 1728): a 34px button and an
-             18px gap, top = center - half a button, 47K = 26.1. Margins do the
-             lift, since .mini-nav cannot take position:relative - it is the
-             offset parent for the burger and the settings disc. */
-          --chrome-btn:18.9px; --chrome-btn-gap:10px;
+          --chrome-btn:18.9px; --chrome-btn-gap:6.7px;
           --chrome-top-btn:26.1px;
           --nav-lift:8.5px;
         }
         .card.map.size-tablet {
-          /* The theme's own tablet numbers at this card's 700-for-1180 draw
-             ratio, K = 0.5932. The 4:3 model put the preview on the theme's
-             four-tile tier; the real screen is on the five-tile one. */
           --pad-x:21px; --pad-t:24.1px; --pad-b:20.4px;
-          /* The theme's own tablet tokens at K: pill 46 at top 30, inset 4,
-             route gap 4, label 16 in a 38-high fill. The screen honors all
-             of them to within a pixel. */
           --nav-top:17.8px; --nav-h:27.3px; --nav-inset:2.4px; --nav-gap:2.4px;
           --nav-label:9.5px; --nav-label-h:22.5px; --nav-pad-x:9.5px;
           --menu-k:0.5932;
-          /* chrome-side-reserve is measured from the screen edge; the pill's
-             containing block already starts at the gutter, so the reserve here
-             is 118 - 3vw. Taking the whole 118 clipped the last route. */
           --nav-reserve:49px; --chrome-top:26.7px; --chrome-font:10.7px;
           --wx:19.6px; --nm:43.2px;
           --bmh:23.7px; --bgl:15.4px; --bl:7.7px; --bv:7.1px;
           --bpt:4.2px; --bpb:4.7px; --bpr:8.3px; --bpl:4.2px; --bcg:2.4px; --bgap:5.9px;
-          /* col-width-tablet-landscape solves to 208.9px at 1180: five across
-             plus the 60px peek, not the -sm variant's four. */
           --tw:123.9px; --th:94.9px; --tc:22.5px; --tg:5.9px; --tt:22.6px;
           --tn:8.9px; --ts:7.7px;
-          /* hemma_now_playing_primary's TABLET breakpoint - 78px art, 12px
-             pads, 14/12 type. These had been carrying the mobile block's 108px
-             art, which is what pushed the panel onto the navbar. */
           --np-drop:-24.9px; --np-max:284.7px; --np-gap:5.9px; --np-hg:5.9px;
           --np-wg:1.2px; --np-wb:1.5px; --np-wu:5.9px;
           --np-pt:7.1px; --np-pr:9.5px; --np-pl:7.1px; --np-cg:4.7px; --np-r:15.4px;
@@ -4791,32 +5147,42 @@ class HemmaPanel extends HTMLElement {
           --np-tg:4.7px; --np-bh:2.4px; --np-rg:5.9px;
           --np-xg:11.9px; --np-gs:9.5px; --np-gp:11.9px;
           --np-stack-max:191.0px;
-          /* The tablet block alone pads #np_head by 12px. 12K = 7.1. */
           --np-hp:7.1px;
           --tbl:13px;
           --hfill:23.4%;
-          /* Same three at 700-for-1180; the tablet row centers on the pill:
-             chrome-row-top 30 + 46/2 - 17 = 36. */
-          --chrome-btn:20.2px; --chrome-btn-gap:10.7px;
+          --chrome-btn:20.2px; --chrome-btn-gap:7.1px;
           --chrome-top-btn:21.4px;
         }
 
-        /* Tablet swaps the nav row for hemma-nav's floating pill. All three pieces
-           of tablet chrome are position:fixed on the real dashboard, so here they
-           leave the row's flow too and the row keeps an explicit height. */
         .size-tablet .mini-nav { position:static; height:12px; --nav-lift:0px; }
         .size-tablet .mini-tabs {
           position:absolute; top:var(--nav-top); left:50%; transform:translateX(-50%);
           flex:0 1 auto; gap:var(--nav-gap); padding:0 var(--nav-inset);
           height:var(--nav-h); border-radius:9999px; align-items:center;
           max-width:calc(100% - 2 * (var(--pad-x) + var(--nav-reserve))); overflow:hidden;
-          background:var(--hemma-glass-background, rgba(255,255,255,0.115));
-          backdrop-filter:blur(24px) saturate(120%);
-          -webkit-backdrop-filter:blur(24px) saturate(120%);
-          box-shadow:inset 0 0 0 1px rgba(255,255,255,0.16);
         }
-        /* The selected room is a filled pill inside the bar, not an underline,
-           and the labels carry their own padding to make room for it. */
+        .size-tablet .mini-tabs::before, .size-tablet .mini-tabs::after {
+          content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+        }
+        .size-tablet .mini-tabs::before {
+          z-index:0;
+          background-color:var(--hemma-pill-fill, rgba(255,255,255,0.10));
+          backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          -webkit-backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          box-shadow:var(--hemma-pill-rim, inset 0 0.5px 0 rgba(255,255,255,0.10), inset 0 -0.5px 0 rgba(255,255,255,0.10)),
+            -0.5px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50)), 0.5px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50));
+        }
+        .size-tablet .mini-tabs::after {
+          z-index:3;
+          backdrop-filter:var(--hemma-pill-highlight, brightness(1.45));
+          -webkit-backdrop-filter:var(--hemma-pill-highlight, brightness(1.45));
+          padding:1px; box-sizing:border-box;
+          -webkit-mask:linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+          -webkit-mask-composite:source-in, source-out;
+          mask:linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+          mask-composite:intersect, subtract;
+        }
+        .size-tablet .mini-tabs > * { position:relative; z-index:1; }
         .size-tablet .mini-tab {
           color:#fff; opacity:.82; font-weight:600;
           font-size:var(--nav-label); padding:0 var(--nav-pad-x);
@@ -4826,27 +5192,21 @@ class HemmaPanel extends HTMLElement {
           opacity:1; font-weight:600; box-shadow:none;
           background:rgba(255,255,255,0.26);
         }
-        /* The clock leads the row on the left, on the rail the hero name uses. */
         .size-tablet .mini-time {
           position:absolute; top:var(--chrome-top); left:var(--pad-x); right:auto;
           margin:0; z-index:1; font-size:var(--chrome-font);
         }
 
-        /* Segmented control, the way macOS draws one. */
         .seg {
           position:relative;
           display:inline-flex; gap:2px; padding:2px; border-radius:999px;
           background:var(--field); box-shadow:inset 0 0 0 1px var(--field-rim);
         }
-        /* One pill that travels, rather than a fill switching off one label and
-           on at the other. It overshoots slightly and settles, and the width
-           eases with it so it stretches into the new label. */
         .segthumb {
           position:absolute; top:2px; left:2px; width:0; height:calc(100% - 4px);
           border-radius:999px; pointer-events:none;
           transform-origin:center center;
           background:var(--chip-hi);
-          box-shadow:inset 0 0 0 1px var(--chip-rim), 0 1px 3px rgba(0,0,0,0.20);
         }
         .segopt {
           position:relative; z-index:1;
@@ -4857,10 +5217,12 @@ class HemmaPanel extends HTMLElement {
         .segopt:hover:not(.on):not(:disabled) { color:var(--ink); filter:none; }
         .segopt:active:not(:disabled) { transform:none; }
         .segopt.on { color:var(--ink); }
+        @media (hover: none) {
+          .segopt { transition:none; }
+          .segopt:hover:not(.on):not(:disabled) { color:var(--ink-2); }
+          .segopt:hover:not(:disabled) { filter:none; }
+        }
 
-        /* Its own stacking context, so photo and scrim stay behind the content
-           without a negative z-index. Height is explicit, not an aspect ratio:
-           WebKit shrinks a ratio box's WIDTH to honor max-height. */
         .miniroom {
           position:relative; isolation:isolate; overflow:hidden;
           border-radius:inherit;
@@ -4868,32 +5230,20 @@ class HemmaPanel extends HTMLElement {
           background:#3a3a42;
         }
         .mini-photo, .mini-grain, .mini-tint, .mini-scrim { position:absolute; inset:0; }
-        /* The room card's hero, value for value: blurred, then scaled past the
-           edge so the blur has pixels to sample. An <img>, not a
-           background-image: filter:blur() over a photo background-image does not
-           render in this stack. */
         .mini-photo {
           width:100%; height:100%; object-fit:cover; display:block;
           filter:blur(4px) saturate(1.02) brightness(.985);
           transform:scale(1.08);
           transform-origin:center;
         }
-        /* hemma_shared's dither: the demo renders band in the sky. Its own
-           element, never .mini-photo - that layer carries the hero blur, and a
-           blurred dither is not a dither. Divided back out of --map-scale, since
-           a dither only works at one screen pixel. */
-        /* The phone card's own units, derived from the 390pt the mobile dashboard
-           is laid out against. Without them every calc resolved to nothing. */
         .card.map.size-phone {
-          /* This card is laid out at 390pt, so its pixels ARE the phone's points
-             and every number below is the theme's own phone tier verbatim. */
           --u:12.2px; --pad-x:16px; --pad-t:15px; --pad-b:12px;
-          --ph-gap:8px;          /* smart-row's grid gap */
+          --ph-gap:8px;          
           --ph-th:66px;          /* --hemma-tile-row-h-mobile */
           --ph-radius:26px;      /* --hemma-tile-radius-phone */
           --ph-hero-blur:4px;    /* --hemma-mobile-hero-blur */
-          --ph-overscan:12px;    /* 3 * the blur, as the shell computes it */
-          --ph-circle:38px;      /* the height minus 2 * 14px of padding */
+          --ph-overscan:12px;    
+          --ph-circle:38px;      
           --ph-glyph:26px;       /* --hemma-entity-icon-size-mobile */
           --ph-name:15px;        /* --hemma-entity-name-font-mobile */
           --ph-state:13px;       /* --hemma-entity-state-font-mobile */
@@ -4901,23 +5251,15 @@ class HemmaPanel extends HTMLElement {
           --ph-badge-h:43px;     /* --badge-min-height-mobile */
           --ph-badge-i:24px;     /* --badge-icon-size-mobile */
           --ph-badge-f:13px;     /* --badge-font-size-mobile */
-          --ph-title:38px;       /* hero-title-size-mobile clamps here at 390 */
-          --ph-head:18px;        /* hemma_mobile_header's name font */
-          /* Small phone tile: two and a bit visible across a 390pt screen. */
+          --ph-title:38px;       
+          --ph-head:18px;        
           --tw:113px; --th:64px; --tc:19px; --tg:8px; --tn:9.5px; --ts:8.2px; --tt:20px;
         }
-        /* The phone layout. Its rooms are sections of one scrolling view under a
-           single hero, so the mock stacks them the same way. */
         .miniphone {
           position:absolute; inset:0; overflow:hidden;
           border-radius:inherit; background:var(--hemma-mobile-hero-floor, #524f4d);
-          /* Safari: overflow:hidden does not clip a BLURRED child. clip-path is
-             the backup that holds, and it must name the radius. */
           clip-path:inset(0 round var(--r-xl));
         }
-        /* hemma_mobile_bg's hero with the THEME's numbers, not the template's
-           fallbacks - they differ. The overscan is the shell's rule: overhang by
-           3x the blur radius or the blur samples past the edge and darkens it. */
         .miniphone .mp-photo {
           position:absolute; top:calc(var(--ph-overscan) * -1); height:calc(64% + var(--ph-overscan));
           left:calc(var(--ph-overscan) * -1); right:calc(var(--ph-overscan) * -1);
@@ -4929,9 +5271,6 @@ class HemmaPanel extends HTMLElement {
                  brightness(1.00);
         }
         .miniphone.nophoto .mp-photo { display:none; }
-        /* The sampled wash the phone fills its lower screen with. Sampling the
-           photo per render is what hemma-core does on the device; here the
-           gradient stands in for it. */
         .miniphone .mp-wash {
           position:absolute; inset:0;
           background:linear-gradient(to bottom,
@@ -4940,25 +5279,64 @@ class HemmaPanel extends HTMLElement {
             var(--hemma-mobile-hero-floor, #524f4d) 72%,
             var(--hemma-mobile-hero-floor, #524f4d) 100%);
         }
-        /* Nothing shrinks: the body holds more than a phone screen, and a flex
-           item shrinks by default - the badge row has no text to hold it open. */
         .miniphone .mp-body > * { flex:0 0 auto; }
         .miniphone .mp-body {
           position:absolute; inset:0; z-index:2; display:flex; flex-direction:column;
-          gap:14px; padding:104px var(--pad-x) var(--pad-b);
-          /* The phone scrolls, so this does. It holds far more than one screen,
-             and clipping it meant everything past Favorites was unreachable. */
+          gap:14px; padding:calc(var(--ph-safe) + 65px) var(--pad-x) var(--pad-b);
           overflow-y:auto; overflow-x:hidden;
           overscroll-behavior:contain;
           scrollbar-width:none; -ms-overflow-style:none;
         }
         .miniphone .mp-body::-webkit-scrollbar { display:none; }
-        /* The hero is painted behind a scrolling body, so it has to travel with
-           it rather than staying pinned over the tiles as they pass. */
+        .miniphone .mp-pill {
+          position:absolute; z-index:9;
+          top:calc(var(--ph-safe) + 4px); right:var(--pad-x);
+          box-sizing:border-box; height:44px; border-radius:22px;
+          padding:0 8px; display:inline-flex; align-items:center; gap:1px;
+        }
+        .miniphone .mp-pill::before, .miniphone .mp-pill::after {
+          content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+        }
+        .miniphone .mp-pill::before {
+          z-index:0;
+          background-color:var(--hemma-pill-fill, rgba(255,255,255,0.10));
+          backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          -webkit-backdrop-filter:var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+          box-shadow:var(--hemma-pill-rim, inset 0 0.5px 0 rgba(255,255,255,0.10), inset 0 -0.5px 0 rgba(255,255,255,0.10)),
+            -0.5px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50)), 0.5px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50));
+        }
+        .miniphone .mp-pill::after {
+          z-index:3;
+          backdrop-filter:var(--hemma-pill-highlight, brightness(1.45));
+          -webkit-backdrop-filter:var(--hemma-pill-highlight, brightness(1.45));
+          padding:1px; box-sizing:border-box;
+          -webkit-mask:linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+          -webkit-mask-composite:source-in, source-out;
+          mask:linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+          mask-composite:intersect, subtract;
+        }
+        .miniphone .mp-pill > * { position:relative; z-index:1; }
+        .miniphone .mp-pill.solo {
+          width:44px; padding:0; border-radius:50%;
+          justify-content:center; gap:0;
+        }
+        .miniphone .mp-pbell, .miniphone .mp-passist, .miniphone .mp-pdots {
+          flex:0 0 auto; width:44px; height:44px;
+          display:flex; align-items:center; justify-content:center;
+        }
+        .miniphone .mp-psep {
+          flex:0 0 1px; width:1px; height:18px; margin:0 .5px;
+          background:var(--hemma-pill-divider, rgba(60,60,67,0.36));
+        }
+        .miniphone .mp-pbell svg { width:15.48px; height:19px; display:block; }
+        .miniphone .mp-pdots { gap:3.5px; }
+        .miniphone .mp-passist svg { width:18.9px; height:17px; display:block; fill:#fff; }
+        .miniphone .mp-pdots i {
+          width:4.4px; height:4.4px; border-radius:50%; background:#fff;
+        }
         .miniphone .mp-body > .mp-title { position:relative; z-index:1; }
-        /* Title left, weather right, on one line over the photo. */
         .miniphone .mp-title {
-          display:flex; align-items:flex-start; justify-content:space-between;
+          display:flex; align-items:center; justify-content:space-between;
           gap:calc(var(--u) * 1);
         }
         .miniphone .mp-name {
@@ -4969,10 +5347,10 @@ class HemmaPanel extends HTMLElement {
           display:flex; align-items:center; gap:8px; flex:0 0 auto;
         }
         .miniphone .mp-weather {
-          text-align:right; line-height:1.12; padding-top:calc(var(--u) * .12);
+          text-align:right; line-height:1.05;
         }
         .miniphone .mp-wglyph {
-          width:34px; height:34px; flex:0 0 34px; display:block;
+          width:26px; height:26px; flex:0 0 26px; display:block;
         }
         .miniphone .mp-wtemp {
           display:block; color:#fff; font-size:17px;
@@ -4983,16 +5361,8 @@ class HemmaPanel extends HTMLElement {
           font-size:14px; font-weight:520; text-transform:capitalize;
         }
 
-        /* The filter row. It draws the SHARED .pbadge now, so all this scope
-           does is state the phone's own badge tokens - badge-min-height-mobile,
-           badge-icon-size-mobile, badge-font-size-mobile - and the pill sizes
-           itself from them exactly as the wide one does from the desktop set. */
         .miniphone .mp-badges {
           display:flex; gap:8px; flex-wrap:nowrap; align-items:center;
-          /* The rail bleeds to BOTH screen edges and carries the gutter as its
-             own padding, the way the device's row does. Bleeding only to the
-             right clipped the first pill on the way back and left the scroll
-             container short of the left edge. */
           margin-left:calc(var(--pad-x) * -1);
           margin-right:calc(var(--pad-x) * -1);
           padding-left:var(--pad-x);
@@ -5002,24 +5372,20 @@ class HemmaPanel extends HTMLElement {
         }
         .miniphone .mp-badges::-webkit-scrollbar { display:none; }
         .miniphone .mp-badges { margin-top:6px; }
+        .miniphone .mp-chips .pbadge,
         .miniphone .mp-badges .pbadge {
           --bmh:var(--ph-badge-h); --bgl:var(--ph-badge-i);
           --bl:var(--ph-badge-f); --bv:12px;
           --bpt:5px; --bpb:5px; --bpr:14px; --bpl:9px; --bcg:7px;
           flex:0 0 auto;
-          /* --badge-blur. An unselected pill is translucent over the hero and
-             the photo reads through it blurred; flat fill looked pasted on. */
+          /* --badge-blur: an unselected pill reads the hero through it. */
           backdrop-filter:blur(10px) saturate(1.4);
           -webkit-backdrop-filter:blur(10px) saturate(1.4);
         }
-        /* The selected filter, the way the device draws it: solid and light. */
         .miniphone .mp-badges .pbadge.open {
           backdrop-filter:none; -webkit-backdrop-filter:none;
         }
 
-        /* The sensor chips row. Bare readings on the field rather than pills:
-           the device draws them as a gauge ring beside a label and a value, with
-           no capsule behind them. */
         .miniphone .mp-chips {
           display:flex; gap:16px; flex-wrap:nowrap; align-items:center;
           margin-left:calc(var(--pad-x) * -1);
@@ -5041,6 +5407,10 @@ class HemmaPanel extends HTMLElement {
         .miniphone .mp-ring svg {
           position:absolute; inset:0; width:100%; height:100%; display:block;
         }
+        .miniphone.filtered .mp-pill { display:none; }
+        .miniphone .mp-ring.bare .mp-cglyph {
+          width:100%; height:var(--gh, 90%); background-color:var(--gc, #fff);
+        }
         .miniphone .mp-cglyph {
           width:calc(34px * 0.54); height:calc(34px * 0.54);
           background-color:#fff;
@@ -5056,11 +5426,6 @@ class HemmaPanel extends HTMLElement {
           color:rgba(255,255,255,0.78); font-size:13px; font-weight:500;
           white-space:nowrap;
         }
-        /* hemma_now_playing_primary's phone numbers, already resolved: the mock
-           is 390pt wide, where --hemma-u-np sits on its 10px floor. */
-        /* The device's media_row: full-width tiles that snap one at a time,
-           bled to the gutters so a tile scrolls flush to the edge while the row
-           keeps its inset. */
         .miniphone .mp-nprow {
           display:flex; gap:var(--ph-gap);
           overflow-x:auto; overflow-y:hidden;
@@ -5087,9 +5452,7 @@ class HemmaPanel extends HTMLElement {
           backdrop-filter:blur(22px) saturate(1.2);
           -webkit-backdrop-filter:blur(22px) saturate(1.2);
         }
-        /* No artwork is a different fill, not a dimmer one. */
         .miniphone .mp-np.noart { background:rgba(10,12,14,0.65); }
-        /* Nothing to control: the row collapses rather than leaving a gap. */
         .miniphone .mp-np.noctl { grid-template-rows:max-content 0px; row-gap:0px; }
         .miniphone .mp-npart {
           grid-area:art; align-self:center; justify-self:start;
@@ -5124,13 +5487,10 @@ class HemmaPanel extends HTMLElement {
           grid-area:ctl; justify-self:center; align-self:center;
           display:flex; align-items:center; gap:20px;
         }
-        /* Bare glyphs: the primary passes neither ring nor compact. */
         .miniphone .mp-npbtn { display:block; line-height:0; }
         .miniphone .mp-npbtn svg { display:block; width:auto; overflow:visible; }
         .miniphone .mp-npbtn path { fill:rgba(255,255,255,0.96); }
-        /* One box for the whole section, so growing it moves one edge. */
         .miniphone .mp-scenegroup { display:flex; flex-direction:column; gap:14px; }
-        /* The scene row: wide pills that scroll sideways, like the device's. */
         .miniphone .mp-scenes {
           display:flex; gap:var(--ph-gap); flex-wrap:nowrap; align-items:stretch;
           margin-left:calc(var(--pad-x) * -1);
@@ -5140,12 +5500,8 @@ class HemmaPanel extends HTMLElement {
           scrollbar-width:none; -ms-overflow-style:none;
         }
         .miniphone .mp-scenes::-webkit-scrollbar { display:none; }
-        /* hemma_scene_core's SC_C, value for value. Its backdrop is 22px, NOT
-           the tile's 12px, and its rim is the glass rim rather than a hairline. */
         .miniphone .mp-scene {
           flex:0 0 auto;
-          /* chip_width: min(41vw, 176px). vw here is the browser window, not the
-             390pt the mock stands for, so it is resolved against that instead. */
           width:min(calc(0.41 * 390px), 176px);
           height:var(--ph-th);
           display:flex; align-items:center; gap:12px;
@@ -5171,7 +5527,6 @@ class HemmaPanel extends HTMLElement {
           mask:var(--i) center / contain no-repeat;
         }
         .miniphone .mp-scene ha-icon { --mdc-icon-size:26px; }
-        /* The grid layout the row switches to: its own gaps, not the tiles'. */
         .miniphone .mp-scenes.grid {
           display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));
           gap:12px 11px; overflow:visible; margin-top:4px;
@@ -5189,16 +5544,9 @@ class HemmaPanel extends HTMLElement {
         }
         .miniphone .mp-chev svg { width:100%; height:100%; display:block; }
 
-        /* TWO COLUMNS, not a scrolling row, with the icon BESIDE the text - the
-           -mq arrangement hemma_entity switches to under its phone query, and
-           what makes a phone tile a wide pill instead of a small square. */
         .miniphone .mp-tiles {
           display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));
           gap:var(--ph-gap); align-items:stretch;
-          /* Fixed tracks, exactly as the row declares them: a large tile is two
-             small ones tall and dense backfills the hole beside it. Auto rows
-             let a 140px large tile stretch the small tile next to it to match,
-             which is what made these look taller than the device's. */
           grid-auto-rows:var(--ph-th);
           grid-auto-flow:row dense;
         }
@@ -5209,8 +5557,7 @@ class HemmaPanel extends HTMLElement {
           align-content:center; align-items:center;
           column-gap:10px; row-gap:0;
           padding:0 var(--ph-pad);
-          /* --hemma-tile-radius-phone. NOT half the height: a full pill reads
-             blobbier and taller than the card actually is. */
+          /* --hemma-tile-radius-phone, not half the height: a full pill reads taller than the card. */
           border-radius:var(--ph-radius);
         }
         .miniphone .mp-tiles .mtile .mtop {
@@ -5225,36 +5572,25 @@ class HemmaPanel extends HTMLElement {
         }
         .miniphone .mp-tiles .mtile .mname { font-size:var(--ph-name); }
         .miniphone .mp-tiles .mtile .mstate { font-size:var(--ph-state); }
-        /* Set the UNIT, not the box. --tc sizes the circle, the glyph inside it
-           at 0.6, and the thermostat's reading at 0.386 - overriding only the
-           circle left that number sized off the desktop's 19px circle, which is
-           why the temperature came out about 7px tall. */
         .miniphone .mp-tiles .mtile { --tc:var(--ph-circle); }
-        /* The theme states the phone glyph outright rather than deriving it. */
         .miniphone .mp-tiles .mtile .mglyph { width:var(--ph-glyph); height:var(--ph-glyph); }
-        /* The toggle and the action rail belong to the wide tile; the phone
-           pill has no room for them and does not draw them. */
-        .miniphone .mp-tiles .mtile .mtgl, .miniphone .mp-tiles .mtile .mact,
-        .miniphone .mp-tiles .mtile .mprog { display:none; }
-        /* Large is the STACKED tile, not a wider one. hemma_entity keeps its -lg
-           set at "i" / "n" / "s" while the phone media query flips the small -mq
-           set to "i n" / "i s" - so on a phone the two sizes differ in ARRANGEMENT
-           and height, and both still sit one per column. */
+        .miniphone .mp-tiles .mtile .mtgl,
+        .miniphone .mp-tiles .mtile:not(.hasmore) .mprog { display:none; }
+        .miniphone .mp-tiles .mtile.hasmore .mtop {
+          display:flex; align-items:center; width:100%;
+        }
         .miniphone .mp-tiles .mtile.mp-lg {
           grid-template-columns:minmax(0, 1fr);
           grid-template-areas:"i" "n" "s";
-          align-content:space-between; align-items:start;
+          grid-template-rows:1fr min-content min-content;
+          align-content:stretch; align-items:start;
           grid-row:span 2; height:100%;
           padding:var(--ph-pad);
           border-radius:var(--ph-radius);
         }
         .miniphone .mp-tiles .mtile.mp-lg .mtop { grid-area:i; justify-items:start; }
         .miniphone .mp-tiles .mtile.mp-lg .mbot { grid-column:1; grid-row:2 / span 2; }
-        /* The popup back button, at filter-overlay's own proportions. */
         .miniphone .mp-back {
-          /* Sits above the title with a little air. The mock has no status bar
-             to inset against, so this is measured off the title rather than
-             off env(safe-area-inset-top) + 4px the way the device does it. */
           position:absolute; left:var(--pad-x); top:48px; z-index:9;
           width:40px; height:40px; border-radius:50%;
           display:flex; align-items:center; justify-content:center;
@@ -5265,7 +5601,6 @@ class HemmaPanel extends HTMLElement {
         }
         .miniphone .mp-back svg { margin-right:2px; display:block; }
         .miniphone .mp-back:active { transform:scale(0.94); }
-        /* The rim: bright at the top and bottom, gone at the sides. */
         .miniphone .mp-back::before {
           content:""; position:absolute; inset:0; border-radius:50%; padding:1.4px;
           background:conic-gradient(from 0deg,
@@ -5279,7 +5614,6 @@ class HemmaPanel extends HTMLElement {
           mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           mask-composite:exclude; pointer-events:none;
         }
-        /* And the side wraps: a crisp dark hairline, not a soft band. */
         .miniphone .mp-back::after {
           content:""; position:absolute; inset:-1px; border-radius:50%; padding:1px;
           background:conic-gradient(from 0deg,
@@ -5291,49 +5625,56 @@ class HemmaPanel extends HTMLElement {
           mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           mask-composite:exclude; pointer-events:none;
         }
-        /* The popup's 22% black. The blur that goes with it is a filter on the
-           content, not a backdrop-filter here - see _playPhoneFilterIn. */
         .miniphone .mp-scrim {
           position:absolute; inset:0; z-index:5; pointer-events:none;
           background:rgba(0,0,0,0.22);
         }
-        /* Held for as long as a filter is open, not played once. Its 22% black
-           over the hero, and the hero itself taken to the popup's own 40px. */
         .miniphone .mp-veil {
           position:absolute; inset:0; z-index:1; pointer-events:none;
           background:rgba(0,0,0,0);
           transition:background 0.30s ease;
         }
         .miniphone.filtered .mp-veil { background:rgba(0,0,0,0.22); }
-        /* The overscan grows with the radius: a blur samples past its own box, so
-           it must overhang by ~3x the radius or the edges go dark. The photo is
-           object-fit:cover, so widening it only crops more of the same shot. */
         .miniphone.filtered { --ph-overscan:120px; }
         .miniphone.filtered .mp-photo {
           filter:blur(40px) contrast(0.75) saturate(0.90) brightness(1.00);
         }
         .miniphone .mp-photo { transition:filter 0.30s ease; }
-        /* The collapsing header. A 44px bar (DASH_BAR_HEIGHT) whose blur is
-           masked to a hard stop at 52px, with the hairline just under it - the
-           same three layers filter-overlay builds, at the same numbers. */
+        .miniphone { --ph-safe:59px; }
         .miniphone .mp-bar {
-          position:absolute; top:0; left:0; right:0; height:150px;
+          position:absolute; top:0; left:0; right:0;
+          height:calc(var(--ph-safe) + 150px);
           z-index:6; pointer-events:none; opacity:0;
           backdrop-filter:blur(22px) saturate(1.2) brightness(0.97);
           -webkit-backdrop-filter:blur(22px) saturate(1.2) brightness(0.97);
-          -webkit-mask-image:linear-gradient(to bottom, #000 0px, #000 52px, transparent 52px);
-          mask-image:linear-gradient(to bottom, #000 0px, #000 52px, transparent 52px);
+          background:rgba(120,124,132,0.18);
+          -webkit-mask-image:linear-gradient(to bottom, #000 0px,
+            #000 calc(var(--ph-safe) + 52px), transparent calc(var(--ph-safe) + 52px));
+          mask-image:linear-gradient(to bottom, #000 0px,
+            #000 calc(var(--ph-safe) + 52px), transparent calc(var(--ph-safe) + 52px));
           transform:translateZ(0);
         }
+        .miniphone .mp-barveil {
+          position:absolute; inset:0; z-index:7;
+          opacity:0; pointer-events:none;
+          clip-path:inset(0 0 calc(100% - (var(--ph-safe) + 52px)) 0);
+        }
+        .miniphone .mp-barveilimg {
+          filter:blur(calc(var(--ph-hero-blur) + 8px))
+                 contrast(0.75) saturate(0.90) brightness(1.00);
+          transform:scale(1.08); transform-origin:top center;
+          opacity:0.5;
+        }
         .miniphone .mp-baredge {
-          position:absolute; left:0; right:0; top:51px; height:11px;
+          position:absolute; left:0; right:0;
+          top:calc(var(--ph-safe) + 51px); height:11px;
           z-index:7; pointer-events:none; opacity:0;
           background:linear-gradient(to bottom, rgba(18,20,26,0.025), rgba(18,20,26,0));
           border-top:0.5px solid rgba(255,255,255,0.10);
           box-sizing:border-box;
         }
         .miniphone .mp-bartitle {
-          position:absolute; left:var(--pad-x); top:0; height:44px;
+          position:absolute; left:var(--pad-x); top:var(--ph-safe); height:44px;
           z-index:8; display:flex; align-items:center;
           font-size:20px; font-weight:700; color:#fff; letter-spacing:-0.3px;
           opacity:0; transform:translateY(5px); pointer-events:none;
@@ -5346,8 +5687,6 @@ class HemmaPanel extends HTMLElement {
         .mini-grain {
           pointer-events:none;
           background-image:var(--grain);
-          /* applySize rounds this to whole pixels; see the note there. The
-             calc() is only the frame before the first measurement. */
           background-size:
             var(--grain-px, calc(180px / var(--map-scale, 1)))
             var(--grain-px, calc(180px / var(--map-scale, 1)));
@@ -5355,7 +5694,6 @@ class HemmaPanel extends HTMLElement {
           opacity:var(--hemma-bg-grain, 0.16);
         }
         .mini-tint { background:var(--hero-tint, rgba(55,55,55,0.50)); }
-        /* Only enough to keep the name and the tile row legible over the photo. */
         .mini-scrim {
           background:linear-gradient(to bottom,
             rgba(0,0,0,0.16) 0%, rgba(0,0,0,0) 34%, rgba(0,0,0,0.20) 74%, rgba(0,0,0,0.40) 100%);
@@ -5367,9 +5705,6 @@ class HemmaPanel extends HTMLElement {
           padding:var(--pad-t) var(--pad-x) var(--pad-b);
           display:flex; flex-direction:column; gap:11px;
         }
-        /* Fixed above the room name, so the header sits in one place whatever
-           happens below. Only the lower spacer flexes, so extra rows and missing
-           tiles both resolve downward. */
         .mini-fill { flex:0 0 var(--hfill); min-height:8px; }
         .mini-fill.lower { flex:1 1 auto; min-height:0; }
 
@@ -5388,9 +5723,6 @@ class HemmaPanel extends HTMLElement {
         .mini-tab.on { color:#fff; font-weight:590; box-shadow:inset 0 -1.5px 0 #fff; }
         .mini-tab:not(.on) { cursor:pointer; transition:color .16s ease; }
         .mini-tab:not(.on):hover { color:#fff; }
-        /* hemma-nav's real menu at this card's draw ratio: 6px padding, a 26px
-           outer radius against 20px rows so the corners nest. K is --nav over the
-           theme's chrome font; the tablet block carries its own. */
         .mini-scenemenu {
           position:absolute; z-index:8; box-sizing:border-box;
           padding:calc(6px * var(--menu-k)); border-radius:calc(26px * var(--menu-k));
@@ -5421,9 +5753,6 @@ class HemmaPanel extends HTMLElement {
         }
         .mini-scenerow ha-icon {
           width:calc(20px * var(--menu-k)); height:calc(20px * var(--menu-k));
-          /* A custom property, so it has to be CSS - Object.assign cannot set
-             one, which is how the real menu's icon ended up at its 24px
-             default once before. */
           --mdc-icon-size:calc(18px * var(--menu-k));
           color:currentColor; place-self:center;
           display:flex; align-items:center; justify-content:center;
@@ -5443,43 +5772,51 @@ class HemmaPanel extends HTMLElement {
           border:solid currentColor; border-width:0 1.2px 1.2px 0;
           transform:rotate(-45deg) translate(-.06em, -.06em);
         }
-        /* position:fixed on the dashboard, so absolute here rather than a row in
-           the column. Every number is hemma_now_playing's at this card's draw
-           ratio. */
         .mz-np {
           position:absolute; top:var(--chrome-top-btn); right:var(--pad-x);
           z-index:3; max-width:var(--np-max);
           display:flex; flex-direction:column; align-items:flex-end; gap:var(--np-gap);
-          /* Capped and scrolling, as the panel is. */
           max-height:var(--np-stack-max);
           overflow-y:auto; overflow-x:hidden;
           scrollbar-width:none;
         }
         .mz-np::-webkit-scrollbar { display:none; }
-        /* Chrome, not a tile: it stays put while the stack moves. */
         .mini-nphead { position:sticky; top:0; z-index:1; }
         .mini-nphead {
           display:flex; align-items:center; justify-content:flex-end;
-          /* Tablet only: the nav is a floating pill there. */
           padding-bottom:var(--np-hp, 0px);
+          padding-right:var(--mini-np-inset, 0px);
         }
-        /* The two chrome buttons the dashboard draws in that corner: identical
-           flat discs, the waveform rightmost with the settings ellipsis beside
-           it. --chrome-btn is the real 34px at this card's draw ratio. */
-        .mini-wave, .mini-settings {
+        .mini-wave, .mini-settings, .mini-bell, .mini-assist {
           flex:0 0 auto; box-sizing:border-box;
           width:var(--chrome-btn); height:var(--chrome-btn); border-radius:50%;
-          background:rgba(255,255,255,0.22);
+          background:rgba(0,0,0,0.40);
           display:inline-flex; align-items:center; justify-content:center;
         }
-        /* Inverted only while the panel is up - the same thing the real
-           button does, and the head is a toggle here too. */
         .mini-wave { gap:var(--np-wg); }
         .mini-wave.on { background:#fff; }
         .mini-settings {
           position:absolute; top:var(--chrome-top-btn); z-index:2;
-          right:calc(var(--pad-x) + var(--chrome-btn) + var(--chrome-btn-gap));
+          right:var(--pad-x);
           gap:calc(var(--chrome-btn) * 0.13);
+        }
+        .mini-bell {
+          position:absolute; top:var(--chrome-top-btn); z-index:2;
+          right:calc(var(--pad-x) + var(--chrome-btn) + var(--chrome-btn-gap));
+        }
+        .mini-bell svg {
+          width:calc(var(--chrome-btn) * 0.5); height:auto; display:block;
+          fill:#fff;
+        }
+        .mini-assist {
+          position:absolute; top:var(--chrome-top-btn); z-index:2;
+          right:calc(var(--pad-x) + var(--chrome-btn) + var(--chrome-btn-gap));
+        }
+        .mini-assist svg { width:calc(var(--chrome-btn) * 0.52); height:auto; display:block; fill:#fff; }
+        .mini-bell .dot {
+          position:absolute; top:-1px; right:-1px;
+          width:calc(var(--chrome-btn) * 0.33); height:calc(var(--chrome-btn) * 0.33);
+          border-radius:50%; background:var(--hemma-color-red, #FF453A);
         }
         .mini-settings i {
           width:calc(var(--chrome-btn) * 0.1); height:calc(var(--chrome-btn) * 0.1);
@@ -5498,7 +5835,6 @@ class HemmaPanel extends HTMLElement {
         .mini-wave.on i { background:#1c1c20; }
         @keyframes miniwave { 0%, 100% { transform:scaleY(.42); } 50% { transform:scaleY(1); } }
         @media (prefers-reduced-motion: reduce) { .mini-wave i { animation:none; } }
-        /* The card's grid: "art meta" over "art ctl", art spanning both. */
         .mini-nptile {
           width:100%; box-sizing:border-box;
           display:grid; grid-template-areas:"art meta" "art ctl";
@@ -5512,7 +5848,6 @@ class HemmaPanel extends HTMLElement {
           -webkit-backdrop-filter:blur(var(--tbl, 12px)) saturate(1.2);
           box-shadow:inset 0 0 0 .5px rgba(255,255,255,0.12);
         }
-        /* Nothing to press, so the second track collapses. */
         .mini-nptile.noctl {
           grid-template-rows:max-content 0px; row-gap:0px;
         }
@@ -5522,7 +5857,6 @@ class HemmaPanel extends HTMLElement {
           background-size:cover; background-position:center; background-repeat:no-repeat;
           box-shadow:inset 0 0 0 .5px rgba(255,255,255,0.16);
         }
-        /* Only the placeholder gets the sheen; over artwork it is a haze. */
         .mini-npart:not(.art) {
           background-image:linear-gradient(135deg,
             rgba(255,255,255,0.30), rgba(255,255,255,0.12));
@@ -5558,15 +5892,16 @@ class HemmaPanel extends HTMLElement {
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         }
 
-        /* Hover zones stand in for the old legend: the preview is the map. */
         .mz { cursor:pointer; }
-        /* The tile row runs to the frame edge and scrolls past it, the way the
-           real row does; the body's own padding is canceled and re-applied
-           inside so the first tile still lines up with the name above it. */
+        .miniroom .mz:not(.mz-np), .miniroom .mini-subs { position:relative; }
+        .miniroom .mzscrim {
+          position:absolute; inset:0; z-index:20; pointer-events:none;
+          border-radius:inherit; background:rgba(6,8,14,0.42); opacity:0;
+          transition:opacity .22s var(--ease);
+        }
+        .miniroom.focusing .mz.infocus,
+        .miniroom.focusing .mini-subs.infocus { z-index:21; }
         .mz-tiles { margin:0 calc(var(--pad-x) * -1); }
-        /* Longhands, not the shorthand: this rule outranks .mini-tiles, and the
-           shorthand reset the vertical padding holding the clip box open while
-           leaving the negative margin behind. */
         .mz-tiles .mini-tiles {
           padding-left:var(--pad-x); padding-right:var(--pad-x);
         }
@@ -5576,9 +5911,6 @@ class HemmaPanel extends HTMLElement {
           color:#fff; font-size:var(--wx); font-weight:590; letter-spacing:-0.01em;
           text-shadow:0 1px 6px rgba(0,0,0,0.34);
         }
-        /* Height only, width auto - these files run from square to wide, and a
-           fixed-width box clipped the wide ones. object-fit and the 0.92 are
-           what hemma_weather.yaml gives its own <img>. */
         .mini-wglyph {
           height:calc(var(--wx) * 0.85); width:auto; display:block;
           object-fit:contain; opacity:.92;
@@ -5595,16 +5927,10 @@ class HemmaPanel extends HTMLElement {
           overflow-x:auto; overflow-y:clip; -webkit-overflow-scrolling:touch;
           overscroll-behavior-x:contain;
           scrollbar-width:none; -ms-overflow-style:none;
-          /* A sideways scroller computes overflow-y to clip, so a tile that grows
-             on hover is cut by exactly what it grew. Padding opens the clip box,
-             the negative margin gives the space back. */
           padding-top:8px; padding-bottom:8px;
           margin-top:-8px; margin-bottom:-8px;
         }
         .mini-tiles::-webkit-scrollbar { display:none; }
-        /* overflow:visible cannot win here - a horizontal scroller computes
-           overflow-y to clip. Grow the clip box instead: padding opens it, the
-           negative margin keeps the row put, and scrollLeft never moves. */
         .mini-tiles.mfree {
           padding-top:44px; padding-bottom:44px;
           margin-top:-44px; margin-bottom:-44px;
@@ -5615,10 +5941,6 @@ class HemmaPanel extends HTMLElement {
         }
         .mini-subs.on { opacity:1; pointer-events:auto; }
         .mini-none { color:rgba(255,255,255,0.55); font-size:11.5px; }
-        /* A new Keynote slide is placeholders you click to replace, not blank
-           text. Ghosts make the canvas pointable from the first second and show
-           what a room can hold. Invitations, never breakage: dashed, dimmed, and
-           carrying no invented reading. */
         .pbadge.ghost, .mtile.ghost {
           background:rgba(255,255,255,0.05); box-shadow:none;
           border:1px dashed rgba(255,255,255,0.30);
@@ -5638,7 +5960,6 @@ class HemmaPanel extends HTMLElement {
         .mtile.ghost .gplus { font-size:calc(var(--tn) * 1.4); line-height:1; font-weight:300; }
         .mtile.ghost .gcap { font-size:var(--ts); }
 
-        /* Stand-ins for the real badges: label over value, tinted glyph. */
         .pbadge {
           display:inline-flex; align-items:center; gap:var(--bcg); max-width:100%;
           min-height:var(--bmh);
@@ -5656,9 +5977,6 @@ class HemmaPanel extends HTMLElement {
           box-shadow:inset 0 0 0 .5px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.26);
         }
         .pbadge.open .plabel, .pbadge.open .ptext { color:#1d1d1f; }
-        /* A pill never dims on the dashboard - an off Lights badge is the same
-           surface as an on one, and only its reading changes. Sub badges tint
-           their glyph instead, the way hemma_badge_light does. */
         .pbadge.sub.dim .pglyph { background-color:rgba(255,255,255,0.42); }
         .pbadge.clip { min-width:0; }
         .pcol { display:flex; flex-direction:column; min-width:0; }
@@ -5672,43 +5990,37 @@ class HemmaPanel extends HTMLElement {
           -webkit-mask:var(--i) center / auto var(--bgl) no-repeat;
           mask:var(--i) center / auto var(--bgl) no-repeat;
         }
+        /* The same turn hemma_badge_climate_group runs, at the same rate. */
+        .pglyph.spin { animation:hemma-preview-fan 0.9s linear infinite; }
+        @keyframes hemma-preview-fan {
+          from { transform:rotate(0deg); }
+          to { transform:rotate(360deg); }
+        }
+        @media (prefers-reduced-motion: reduce) { .pglyph.spin { animation:none; } }
         .pbadge.sub { cursor:default; background:rgba(28,28,32,0.72); }
         .ppic {
           width:var(--bgl); height:var(--bgl); flex:0 0 var(--bgl);
           border-radius:50%; object-fit:cover; display:block;
         }
-        /* Cover art, not a face: the dashboard's media badge squares it off. */
         .ppic.art { border-radius:24%; }
 
-        /* Tiles: tinted icon circle above a name and its state, light when on. */
         .mtile {
           display:flex; flex-direction:column; justify-content:space-between;
           flex:0 0 auto; width:var(--tw); height:var(--th); box-sizing:border-box;
           padding:calc(var(--th) * 0.10) calc(var(--tw) * 0.075);
           border-radius:calc(var(--th) * 0.16);
-          /* hemma-entity-background, copied rather than read: every other
-             color in this preview is a literal, so one theme lookup would be
-             the only thing that moved under a different theme. */
           background:rgba(0,0,0,0.40);
           backdrop-filter:blur(var(--tbl, 12px)) saturate(1.2);
           -webkit-backdrop-filter:blur(var(--tbl, 12px)) saturate(1.2);
           box-shadow:inset 0 0 0 .5px rgba(255,255,255,0.12);
         }
         .mtile.on { background:rgba(248,248,250,0.94); box-shadow:inset 0 0 0 .5px rgba(0,0,0,0.06); }
-        /* Set to show only while it is active, and not active: on the dashboard
-           this slot is closed. Faded rather than gone, because the preview is
-           also how you select the thing. */
         .mtile.away { opacity:.42; }
         .mtile.away.linked, .mtile.away:hover { opacity:.72; }
         .mtile { cursor:grab; touch-action:pan-y; }
-        /* Nothing to drag against inside one tile, so it must not offer to. */
         .band.detail .tile > .thead { cursor:default; }
-        /* The icon, the name and the line about it live at the top of the pane
-           now, so the card does not say them again. */
         .band.detail .card.sel > .chead,
         .band.detail .tile.sel > .thead { display:none; }
-        /* .chead carried the card's top padding; without it the first row sat
-           against the edge. */
         .band.detail .card.sel { padding-top:var(--card-pad-v); }
         .band.detail .tile.sel { padding-top:var(--card-pad-v); }
         .band.detail .tile > .thead .rmbtn,
@@ -5722,81 +6034,49 @@ class HemmaPanel extends HTMLElement {
           width:var(--tc); height:var(--tc); border-radius:50%; display:grid; place-items:center;
           background:var(--sc, #00C3D0);
         }
-        /* hemma_entity tints the circle ONLY in its active state block; inactive
-           falls back to rgba(0,0,0,0.20). background-color, not the shorthand,
-           or it wipes the media artwork set inline. */
         .mtile:not(.on) .mcircle { background-color:rgba(0,0,0,0.20); }
-        /* Holding real cover art, so it drops the tint and squares off to
-           match the media badge rather than cropping a poster into a circle. */
         .mcircle.art {
           background-color:rgba(255,255,255,0.10);
           background-size:cover; background-position:center; background-repeat:no-repeat;
           border-radius:24%;
         }
-        /* hemma_presence's own icon-circle-bg: darker than a light tile, lighter
-           than a dark one, so it reads as a recess either way. */
         .mcircle.art.face {
           border-radius:50%;
           background-color:rgba(255,255,255,0.12);
         }
         .mtile.on .mcircle.art.face { background-color:rgba(0,0,0,0.14); }
-        /* hemma_entity fits the glyph in a SQUARE 60% of the circle with
-           mask-size:contain. Sizing by height alone overflows anything wide. */
         .mglyph {
           width:calc(var(--tc) * 0.6); height:calc(var(--tc) * 0.6);
           background-color:var(--ic, #fff);
           -webkit-mask:var(--i) center / contain no-repeat;
           mask:var(--i) center / contain no-repeat;
         }
-        /* hemma_fan's own 0.9s linear spin. */
         .mglyph.spin { animation:hemma-mini-fan-spin 0.9s linear infinite; }
         @keyframes hemma-mini-fan-spin { to { transform:rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) { .mglyph.spin { animation:none; } }
-        /* hemma_thermostat fills the circle with the reading instead of an
-           icon, so the preview does too. */
         .mnum {
           color:rgba(255,255,255,0.9); font-weight:800; line-height:1;
           font-size:calc(var(--tc) * 0.386); letter-spacing:-0.02em;
         }
-        /* The switch hemma_entity puts in the tile's top corner: a 46x26 track,
-           and when it is on the thumb is a hole punched out of the fill. */
-        /* The card's own proportions: a 56px rail inset 22px in a ~210px tile.
-           Absolute, with the tile making room by padding rather than reflow. */
-        .mrail {
-          position:absolute; z-index:2;
-          top:calc(var(--th) * 0.09); bottom:calc(var(--th) * 0.09);
-          right:calc(var(--tw) * 0.055); width:calc(var(--tw) * 0.24);
-          display:flex; flex-direction:column; gap:calc(var(--th) * 0.035);
+        .mtile.hasmore .mtop {
+          justify-content:flex-start; gap:calc(var(--tc) * 0.1);
         }
-        .mtile.hasrail { position:relative; }
-        .mtile.hasrail .mbot, .mtile.hasrail .mtop {
-          padding-right:calc(var(--tw) * 0.30);
+        .mtile.hasmore .mcircle { margin-right:auto; }
+        .mmore {
+          flex:0 0 auto; width:var(--tc); height:var(--tc);
+          display:grid; place-items:center; color:#fff;
+          align-self:flex-start; margin:calc(var(--tc) * -0.119) calc(var(--tc) * -0.119) 0 0;
         }
-        .mact {
-          flex:1 1 0; min-height:0; border-radius:calc(var(--th) * 0.10);
-          display:grid; place-items:center;
-          background:var(--ac); color:#fff;
+        .mmore:not(:last-child) { align-self:center; margin:0; }
+        .miniphone .mp-tiles .mtile .mmore:has(+ .mtgl) {
+          align-self:flex-start; margin:calc(var(--tc) * -0.119) calc(var(--tc) * -0.119) 0 0;
         }
-        /* Off, it is the same neutral the tile's own circle takes; unavailable
-           or missing, it dims rather than disappearing - the card says the
-           button is configured but has nothing to act on. */
-        .mact:not(.hot) { background:rgba(255,255,255,0.16); color:#fff; }
-        /* A lit tile is white, and a white chip holding a white glyph is not a
-           chip - so both ends darken. */
-        .mtile.on .mact:not(.hot) { background:rgba(0,0,0,0.14); color:rgba(0,0,0,0.88); }
-        .mact.dim { opacity:.45; }
-        .mact ha-icon {
-          --mdc-icon-size:calc(var(--th) * 0.13);
-          width:calc(var(--th) * 0.13); height:calc(var(--th) * 0.13); display:block;
+        .mtile.on .mmore { color:rgba(0,0,0,0.88); }
+        .mmore svg {
+          width:50%; height:50%;
+          display:block; fill:currentColor; opacity:.9;
         }
-        .mactglyph {
-          width:calc(var(--th) * 0.13); height:calc(var(--th) * 0.13); display:block;
-          background-color:currentColor;
-          -webkit-mask:var(--i) center / contain no-repeat;
-          mask:var(--i) center / contain no-repeat;
-        }
-        /* --hemma-progress-size-mq: the icon circle times 0.9, standing where
-           the toggle would. */
+        /* --hemma-progress-size-mq: the icon circle times 0.9, where the toggle would be. */
         .mprog { width:calc(var(--tc) * 0.9); height:calc(var(--tc) * 0.9); flex:0 0 auto; }
         .mprog svg { display:block; width:100%; height:100%; overflow:visible; }
         .mprog .pt { stroke:var(--hemma-progress-track-color, rgba(0,0,0,0.12)); }
@@ -5820,8 +6100,6 @@ class HemmaPanel extends HTMLElement {
           line-height:1.15;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         }
-        /* button-card renders #state inside its own .ellipsis class, which is
-           why hemma_entity declares no nowrap of its own. */
         .mstate {
           color:rgba(255,255,255,0.62); font-size:var(--ts);
           font-weight:400; letter-spacing:-0.006em; line-height:1.15;
@@ -5831,8 +6109,6 @@ class HemmaPanel extends HTMLElement {
         .mtile.on .mname { color:#1d1d1f; }
         .mtile.on .mstate { color:rgba(0,0,0,0.55); }
 
-        /* A row inside the group: no surface of its own. The tint stays so an
-           open row can lift slightly off the group, and it still transitions. */
         .card {
           width:100%; box-sizing:border-box;
           background-color:transparent;
@@ -5840,16 +6116,7 @@ class HemmaPanel extends HTMLElement {
           transition:background-color .3s var(--ease);
         }
         .card:not(.shut):not(.off) { background-color:rgba(255,255,255,0.04); }
-        /* .plinth is the surface now, so this keeps only its corners. The blur
-           was paid for and never seen - the photo over it is opaque - and a
-           backdrop-filter under a transform re-samples every frame. */
         .card.map { border-radius:var(--r-xl); }
-        /* Same as .thead: margin above a heading is not clickable, so it becomes
-           padding ON the heading and the whole strip is the fold target. */
-        /* The icon track is the icon, not a 34px slot with it floating inside:
-           iOS gives the chip its own width and then 12pt of air before the
-           label. Measured there, chip 29 and label at 51 from the group edge;
-           here 30 and 58. */
         .card > .chead {
           display:grid;
           grid-template-columns:var(--sicon) 1fr auto auto auto auto; column-gap:12px;
@@ -5857,20 +6124,11 @@ class HemmaPanel extends HTMLElement {
           margin:-6px calc(var(--card-pad-h) * -1) 4px;
           padding:var(--card-pad-v) var(--card-pad-h) 0;
         }
-        .card > .chead .sicon { grid-column:1; grid-row:1 / span 2; align-self:center; }
-        /* The chip spans both header rows, so its height sized the tracks. Past
-           26px it stretched them, and the folded head - which centers the group -
-           sat half the excess too high, so every fold ended with the row jumping.
-           Pin the space it claims to that basis; it still draws full size. */
+        .card > .chead .sicon { grid-column:1; grid-row:1; align-self:center; }
         .card > .chead .sicon {
           margin-top:calc((var(--head-row, 26px) - var(--sicon)) / 2);
           margin-bottom:calc((var(--head-row, 26px) - var(--sicon)) / 2);
         }
-        /* Constrain height only. These icons range from 0.57:1 to 1.43:1, and
-           fitting them to a square box makes the wide ones look half-size. */
-        /* System Settings' sidebar shape: the CHIP is the consistent square, so
-           the glyph inside only has to be CONTAINED. These icons run 0.57:1 to
-           1.43:1, and squaring them individually makes the wide ones half-size. */
         .sicon {
           position:relative;
           width:var(--sicon); height:var(--sicon); flex:0 0 var(--sicon);
@@ -5883,22 +6141,14 @@ class HemmaPanel extends HTMLElement {
           -webkit-mask:var(--i) center / contain no-repeat;
           mask:var(--i) center / contain no-repeat;
         }
-        /* Multi-color icons are drawn, not masked, or they flatten to one tint. */
         .sicon.raw::after {
           background-color:transparent;
           -webkit-mask:none; mask:none;
           background:var(--i) center / contain no-repeat;
         }
-        /* A grouped-table row's label is body text in Settings - the icon and the
-           position say "section". 450 is a half-step over the field labels, and a
-           real weight on a variable system font. */
         .card > .chead h2 { grid-column:2;
-          font-size:16px; font-weight:450; letter-spacing:-0.015em; margin:0; flex:1; color:var(--ink);
+          font-size:13.5px; font-weight:560; letter-spacing:-0.01em; margin:0; flex:1; color:var(--ink);
         }
-        /* No caret. The heading is the control and tapping it is the whole
-           interaction, on every pointer. The button stays in the DOM at zero
-           width so the fold is still reachable by keyboard and still announces
-           its state; tabbing to it brings it back into view. */
         .fold {
           display:flex; align-items:center; justify-content:center;
           width:0; height:26px; flex:0 0 0; padding:0; border:0; border-radius:50%;
@@ -5910,35 +6160,33 @@ class HemmaPanel extends HTMLElement {
           width:26px; flex:0 0 26px; opacity:1; color:var(--ink); background:var(--chip);
         }
         .fold svg { width:15px; height:15px; transition:transform .26s var(--ease); }
-        .band:not(.detail) .fold svg { width:14px; height:14px; }
+        .band:not(.detail) .fold svg { width:18px; height:18px; }
+        :host(.phone) .band:not(.detail) .fold svg { width:22px; height:22px; }
         .fold[aria-expanded="false"] svg { transform:rotate(-90deg); }
-        /* Column 3 was spare, and it is the one place a caret can sit tight
-           against the title however long the title is. */
-        /* Last, at the trailing edge, the way a disclosure indicator sits. */
         .card > .chead .fold { grid-column:6; grid-row:1; justify-self:end; }
-        /* Pointing the way the press goes, and taking no press of its own: the
-           row is the target, the chevron is the sign. */
-        /* .fold defaults to width:0 and opacity:0 for keyboard focus only, so
-           opacity alone paints a zero-width box - it needs a size. No rotation
-           either: the svg rule already turns the chevron. */
         .band:not(.detail) .card > .chead .fold,
         .band:not(.detail) .tile > .thead .fold {
-          width:20px; flex:0 0 20px; opacity:.45;
+          width:20px; flex:0 0 20px; opacity:1; color:rgba(255,255,255,0.42);
           pointer-events:none; overflow:visible;
           transition:opacity .36s cubic-bezier(.36,0,.16,1);
         }
         .band:not(.detail) .card > .chead { cursor:pointer; }
         .band.detail .card > .chead { cursor:default; }
+        /* Label over its summary, the control at the end: the same shape as a
+           tile row, so an unmanaged card does not read as a setting. */
+        .row.extrarow {
+          grid-template-columns:minmax(0, 1fr) auto; align-items:center; row-gap:2px;
+        }
+        .row.extrarow > label { grid-column:1; grid-row:1; min-width:0; }
+        .row.extrarow > .extrasub {
+          grid-column:1; grid-row:2; justify-self:start; min-width:0; max-width:100%;
+          font-size:13px; color:var(--ink-2);
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .row.extrarow > .rowmenu { grid-column:2; grid-row:1 / span 2; align-self:center; }
         .card > .chead .plus, .card > .chead .sw { cursor:pointer; }
-        /* A tile folds the same way; its head is a flex row, not a grid. */
-        /* Delete is not part of the tile's body - it stands behind the row and
-           slides out from under it - so a shut tile must not hide it. This is
-           why it never appeared: the row slid aside onto nothing. */
         .tile.shut > :not(.thead):not(.delbtn) { display:none; }
         .tile.shut > .thead { cursor:pointer; }
-        /* Only a collapsed card carries a summary. Zero WIDTH, not display:none -
-           display cannot be transitioned. The hidden state sits 4px low, so the
-           text travels the same direction the card does. */
         .count {
           color:var(--ink-2); font-size:12px; font-weight:450;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -5947,78 +6195,40 @@ class HemmaPanel extends HTMLElement {
                      opacity .14s var(--ease),
                      transform .2s var(--ease);
         }
-        /* A tile's summary is a friendly_name, not a "9 set" tally, and 16ch cut
-           most of them off. The cap only has to be a number the transition can
-           animate to; the flex row limits the real width. */
         :is(.card, .tile):is(.shut, .counting) > :is(.chead, .thead) .count {
           max-width:16ch; opacity:1; transform:translateY(0);
-          /* Arriving, the space opens first and the text settles into it. It
-             now runs alongside the card closing rather than after it. */
-          /* Legible by ~200ms and still traveling at ~400ms, so the rise is
-             something you watch. A front-loaded curve spends the rest of its time
-             settling, which makes 4px in 240ms read as instant. */
           transition:max-width .24s var(--ease),
                      opacity .18s var(--ease) .02s,
                      transform .38s cubic-bezier(.26,1.08,.36,1) .02s;
         }
-        /* AFTER the rule above on purpose: same specificity, so source order
-           decides. A tile's summary is a friendly_name, not a "9 set" tally, and
-           16ch cut most of them off - the flex row still limits the real width. */
         .tile:is(.shut, .counting) > .thead .count { max-width:32ch; }
         .card > .chead .count { grid-column:3; justify-self:end; }
-        /* Three empty tracks sit between the summary and the caret in the list,
-           and grid still collects the gap either side of each - so the summary
-           floated 36px off the chevron. Span to the caret's own track. */
         .band:not(.detail) .card > .chead .count { grid-column:3 / 6; }
-        /* A card that loads already folded is folded, not fading in on arrival. */
         :host(.booting) .count { transition:none; }
-        /* Side by side on one row. They used to sit in separate rows either
-           side of the section description, which is gone. */
         .card > .chead .plus { grid-column:4; grid-row:1; justify-self:end; }
         .card > .chead .sw { grid-column:5; grid-row:1; justify-self:end; }
-        /* Not in the list. Both live inside the section now - the switch as its
-           first row, the + at the foot of what it adds to. */
         .band:not(.detail) .card > .chead .plus,
         .band:not(.detail) .card > .chead .sw,
         .band:not(.detail) .tile > .thead .sw { display:none; }
-        /* And the caret is only ever a list affordance. */
         .band.detail .card > .chead .fold,
         .band.detail .tile > .thead .fold { display:none; }
-        /* Last in the flex row, wherever it was appended. */
         .band:not(.detail) .tile > .thead .fold { order:9; margin-left:2px; }
-        /* The row menu is a second control on a row that is already a target;
-           it moves in with the thing it acts on. */
         .band:not(.detail) .tile > .thead .rowmenu { display:none; }
 
-        /* A group needs its entities and its switch. Off dims the card so the
-           setup underneath still reads, rather than hiding or clearing it. */
         .sw {
-          position:relative; width:40px; height:24px; flex:0 0 40px; padding:0; border:0;
+          position:relative; width:42px; height:20px; flex:0 0 42px; padding:0; border:0;
           border-radius:999px; cursor:pointer; background:var(--sw-off);
           box-shadow:inset 0 0 0 .5px var(--chip-rim);
-          transition:background .24s var(--ease), filter .16s ease;
+          transition:background .34s var(--sw-ease), filter .16s ease;
         }
         .sw::after {
-          content:""; position:absolute; top:2px; left:2px; width:20px; height:20px;
-          border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.28);
-          transition:transform .24s var(--ease);
+          content:""; position:absolute; top:2px; left:2px; width:24px; height:16px;
+          border-radius:999px; background:#fff; box-shadow:0 .5px 1.5px rgba(0,0,0,0.12);
+          transition:transform .38s var(--sw-ease);
         }
-        .sw[aria-checked="true"] { background:#30d158; }
-        .sw[aria-checked="true"]::after { transform:translateX(16px); }
+        .sw[aria-checked="true"] { background:var(--sw-on); }
+        .sw[aria-checked="true"]::after { transform:translateX(14px); }
         .sw:hover { filter:brightness(1.08); }
-        /* The knob widens toward the pill's CENTER, never past its end: checked,
-           it already reaches 38 in a 40px pill, so the translate has to pull back
-           by the same amount it grows. */
-        .sw:active::after { width:24px; }
-        .sw[aria-checked="true"]:active::after { width:24px; transform:translateX(12px); }
-        /* Off drops the tint and dims the setup, so the switch reads at a glance
-           without anything being hidden or cleared. */
-        /* Folded, only .chead is drawn, so an off card is told apart by its
-           header alone. The SURFACE recedes, not the text: a dimmed label reads
-           as unavailable rather than off. */
-        /* Inside a group there is no slab to take away, so off is simply a row
-           that is not lifted - exactly how Bluetooth reads in System Settings.
-           The switch carries the state and the label stays legible. */
         .card.off { background-color:transparent; }
         .card.off > .chead h2 { opacity:.82; }
         .card > .chead .sicon, .card > .row, .card > .hint,
@@ -6027,27 +6237,14 @@ class HemmaPanel extends HTMLElement {
         }
         .card.off > .row, .card.off > .hint,
         .card.off > .empty-note, .card.off > .adv { opacity:.42; }
-        /* The icon carries the color, so it is the one thing that reads as
-           "off" without hurting legibility. */
         .card.off > .chead .sicon { opacity:.45; }
-        /* Dimmed and inert, not hidden: hiding shifts the header on every toggle
-           and leaves you hunting for where the + went. */
         .card.off > .chead .plus { pointer-events:none; cursor:default; }
-        /* An off card cannot be expanded - the fold toggle returns early on one
-           - so the heading should stop offering. The switch keeps its pointer:
-           it is the one thing here that still does something. */
         .card.off > .chead { cursor:default; }
         .card.off > .chead .sw { cursor:pointer; }
         .card.off > .chead h2 { color:var(--ink-2); }
-        /* Off, there is nothing to read - the card is its heading and no more. */
         .card.shut > :not(.chead) { display:none; }
 
-        /* Optional overrides with working defaults, kept out of the setup flow. */
         .adv { margin-top:6px; }
-        /* No divider: a rule here made Advanced read as another row of the list
-           rather than a drawer belonging to the card. */
-        /* Closed it is a row of the list and takes the row's inset; open it is a
-           heading for what it revealed, and hugs it the way .subhead does. */
         .advsum {
           display:flex; align-items:center; gap:6px; width:100%; padding:12px 0;
           background:none; border:0; color:var(--ink-2); font-size:12.5px; font-weight:560;
@@ -6080,11 +6277,30 @@ class HemmaPanel extends HTMLElement {
           padding:13px 0 3px; border-top:1px solid var(--hair);
           color:var(--ink-2); font-size:12.5px; font-weight:560;
         }
+        :is(.card, .tile).grouped:not(.shut):not(.off) { background-color:transparent; }
+        :is(.card, .tile).grouped .subcard {
+          margin:0 calc(var(--card-pad-h) * -1);
+          padding:0 var(--card-pad-h);
+          border-radius:var(--r-md);
+          background-color:rgba(255,255,255,0.04);
+        }
+        :host(.is-light:not(.phone)) :is(.card, .tile).grouped .subcard { background-color:transparent; }
+        :host(.phone) .col :is(.card, .tile).grouped .subcard { background-color:transparent; }
+        :host(.split:not(.flow):not(.phone)) .inspector .band.detail .col > .card.grouped,
+        :host(.split:not(.flow):not(.phone)) .inspector .band.detail .tilegrid > .tile.grouped { background-color:transparent; }
+        :host(.split:not(.flow):not(.phone)) .inspector :is(.card, .tile).grouped .subcard {
+          background-color:var(--slab-card, rgba(255,255,255,0.085));
+          border-radius:var(--r-group);
+        }
+        .subtitle {
+          padding:20px 0 8px;
+          color:var(--ink); font-size:14px; font-weight:640;
+          letter-spacing:-0.01em;
+        }
+        .card.grouped > .chead + .subtitle { padding-top:4px; }
+        :is(.card, .tile).grouped .subcard + .subcard { margin-top:10px; }
         .subhead + .row { border-top:0; }
-        /* The drawer's own summary already separates it from the fields. */
         .advbody > :first-child { border-top:0; }
-        /* A border is not clipped away with its row - it sits under the heading
-           until .shut lands, then pops. Fade them with the fold instead. */
         .row, .subhead, .advsum, .empty-note, .addmore {
           transition:border-top-color .18s var(--ease);
         }
@@ -6106,9 +6322,6 @@ class HemmaPanel extends HTMLElement {
         .row:hover .drop { opacity:1; }
         .row .drop:hover { background:#ff453a; color:#fff; opacity:1; filter:none; }
         .row:first-of-type { border-top:0; }
-        /* Label OVER field: a 360px panel leaves a two-column row ~180px, and
-           entity names need far more. Not for switch rows - a toggle belongs on
-           the right of the thing it names. */
         :host(:not(.narrow)) .inspector .row:not(:has(> .sw)) {
           grid-template-columns:minmax(0,1fr) 22px;
           column-gap:10px; row-gap:5px; align-items:center;
@@ -6119,28 +6332,29 @@ class HemmaPanel extends HTMLElement {
         :host(:not(.narrow)) .inspector .row:not(:has(> .sw)) > :nth-child(2) {
           grid-column:1; grid-row:2; min-width:0;
         }
-        /* Beside the FIELD, not centered across the label and the field
-           together - stacked, that put it in the gap between the two. */
         :host(:not(.narrow)) .inspector .row:not(:has(> .sw)) > :nth-child(3) {
           grid-column:2; grid-row:2; align-self:center;
         }
-        /* A switch is its own width and belongs at the far end of the row, the
-           way every settings list draws one. */
         .row > .sw { justify-self:end; }
-        /* Switch rows keep the three-column grid, whose 33% label track is ~110px
-           here and wrapped every name. The switch is its own width, so the name
-           takes everything else. */
         :host(:not(.narrow)) .inspector .row:has(> .sw) {
           grid-template-columns:minmax(0,1fr) auto 22px;
         }
+        :host(:not(.narrow)) .inspector .row:has(> .sw):not(:has(> .drop:not(.blank))) {
+          grid-template-columns:minmax(0,1fr) auto;
+        }
+        :host(:not(.narrow)) .inspector .row:not(:has(> .sw)):not(:has(> .drop:not(.blank))) {
+          grid-template-columns:minmax(0,1fr);
+        }
+        :host(:not(.narrow)) .inspector .row:not(:has(> .drop:not(.blank))) > .drop { display:none; }
+        :host(.narrow:not(.tight)) .row:not(:has(> .sw)):not(:has(> .drop:not(.blank))) {
+          grid-template-columns:minmax(110px,33%) 1fr;
+        }
         :host(.tight) .row > .sw { margin-left:auto; }
-        .row label { color:var(--ink-2); font-size:13.5px; }
+        .row label { color:var(--ink); font-size:13.5px; font-weight:450; }
         .row label .lsub {
           display:block; margin-top:2px; color:rgba(255,255,255,0.56); font-size:12px;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         }
-        /* Reads as the field it replaces - same height, same fill, same
-           radius - with the swatch where a value would start. */
         .colorcell { display:block; min-width:0; }
         .colorfield {
           width:100%; height:38px; box-sizing:border-box;
@@ -6155,7 +6369,6 @@ class HemmaPanel extends HTMLElement {
         .colorfield .clabel {
           min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         }
-        /* Unset is not a color, so the chip says so rather than painting one. */
         .colorfield .clabel.ph { color:var(--ink-3); }
         .swatch {
           width:15px; height:15px; flex:0 0 15px; border-radius:50%;
@@ -6167,26 +6380,18 @@ class HemmaPanel extends HTMLElement {
               rgba(255,255,255,0.34) 56%, transparent 56%);
         }
         .combo-opt .swatch { margin-right:2px; }
-        /* The browser's own picker is opened by the menu, never shown itself. */
-        /* Rendered but not shown: a picker cannot be opened from a box that does
-           not exist. pointer-events:none stops it swallowing presses meant for
-           the swatch, and does not affect opening it in code. */
         .nativecolor {
           position:absolute; width:24px; height:24px; margin:-30px 0 0 12px;
           padding:0; border:0; opacity:0; pointer-events:none;
         }
         .row input, .row select, .row textarea { width:100%; box-sizing:border-box; }
-        /* Typed and not yet valid. Nothing is written while this shows, so the
-           ring is the whole message: the field keeps what you typed and the
-           config keeps what it had. */
         .row input.bad { box-shadow:inset 0 0 0 1px #ff453a; }
         .row > select, .row > input, .row > .combo > input { height:38px; }
         .row > textarea { height:auto; }
         .addbar > select { height:36px; box-sizing:border-box; padding:0 34px 0 16px; border-radius:999px; min-width:120px; }
         .addbar > .mini { height:34px; box-sizing:border-box; }
         .hint { color:var(--ink-3); font-size:11.5px; padding:2px 0 12px; }
-        /* Not a hint: a hint is advice, this is the field not working. So the
-           hints switch must not collapse it. */
+        :is(.card, .tile).grouped .hint { padding:7px 2px 0; font-size:12px; }
         .fieldwarn {
           color:var(--hemma-color-orange, #FF9230);
           font-size:11.5px; padding:2px 0 12px;
@@ -6199,36 +6404,89 @@ class HemmaPanel extends HTMLElement {
         }
         select { line-height:normal; }
 
-        /* Native datalist and select popups cannot be styled, so entity and icon
-           fields use a real listbox instead. */
         .combo { position:relative; }
         .combo > input { width:100%; box-sizing:border-box; }
 
-        /* Lives in #overlay, outside any card. A card's own backdrop-filter
-           becomes the backdrop root for its descendants, which leaves a nested
-           backdrop-filter with nothing to sample. */
         #overlay { position:fixed; inset:0; z-index:200; pointer-events:none; }
+        .psheet { position:fixed; inset:0; pointer-events:auto; }
+        .psheet-scrim { position:absolute; inset:0; background:rgba(0,0,0,0.34); touch-action:none; }
+        .psheet-head, .psheet-search { touch-action:none; }
+        .psheet-panel {
+          position:absolute; left:8px; right:8px;
+          top:calc(env(safe-area-inset-top, 0px) + 8px); height:70vh;
+          display:flex; flex-direction:column; overflow:hidden; box-sizing:border-box;
+          border-radius:26px; color:#fff;
+          background:rgba(30,33,38,0.62);
+          backdrop-filter:blur(40px) saturate(170%); -webkit-backdrop-filter:blur(40px) saturate(170%);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,0.26), inset 0 -1px 0 rgba(255,255,255,0.16),
+            inset 1px 0 0 rgba(0,0,0,0.11), inset -1px 0 0 rgba(0,0,0,0.11),
+            0 10px 26px rgba(0,0,0,0.18);
+        }
+        .psheet-head { display:flex; align-items:center; gap:12px; padding:12px 10px 8px 18px; }
+        .psheet-title {
+          flex:1 1 auto; min-width:0; font-size:17px; font-weight:600; letter-spacing:-0.01em;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .psheet-cancel {
+          flex:0 0 auto; height:36px; padding:0 8px; background:none; box-shadow:none;
+          color:var(--ink); font-size:17px; font-weight:400;
+        }
+        .psheet-search {
+          display:flex; align-items:center; gap:8px; margin:0 12px 8px; padding:0 12px;
+          height:40px; border-radius:12px; background:rgba(118,118,128,0.24);
+        }
+        .psheet-search svg { width:17px; height:17px; flex:0 0 17px; color:rgba(235,235,245,0.6); }
+        .psheet-search input, .psheet-search input:focus {
+          flex:1 1 auto; min-width:0; height:100%; padding:0; border:0; outline:none;
+          background:none; box-shadow:none; color:#fff; font-size:17px;
+        }
+        .psheet-list {
+          flex:1 1 auto; overflow-y:auto; overscroll-behavior:contain; touch-action:pan-y;
+          padding:0 6px 8px;
+        }
+        .psheet-row {
+          display:flex; align-items:center; gap:10px; min-height:48px; box-sizing:border-box;
+          padding:8px 12px; border-radius:16px; cursor:pointer;
+        }
+        .psheet-row:active { background:rgba(255,255,255,0.12); }
+        .psheet-icon {
+          flex:0 0 24px; width:24px; height:24px; display:grid; place-items:center;
+          color:var(--ink-2); --mdc-icon-size:22px;
+        }
+        .psheet-icon > * { display:block; --mdc-icon-size:22px; }
+        .psheet-icon > .glyph { width:22px; height:22px; flex-basis:22px; color:var(--ink); }
+        .psheet-row .lbl {
+          flex:1 1 auto; min-width:0; font-size:17px;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .psheet-row .sub {
+          display:block; margin-top:1px; font-size:13px; color:var(--ink-3);
+          overflow:hidden; text-overflow:ellipsis;
+        }
+        .psheet-row .tick { flex:0 0 18px; font-size:17px; font-weight:600; color:var(--accent); text-align:right; }
+        .psheet-empty { padding:14px 12px; color:var(--ink-3); font-size:15px; }
         .combo-menu {
           position:fixed; pointer-events:auto;
-          max-height:300px; overflow-y:auto; overscroll-behavior:contain;
-          padding:6px; border-radius:14px;
-          background:rgba(28,28,32,0.34);
-          backdrop-filter:blur(64px) saturate(210%) brightness(1.06);
-          -webkit-backdrop-filter:blur(64px) saturate(210%) brightness(1.06);
+          max-height:min(560px, 72vh); overflow-y:auto; overscroll-behavior:contain;
+          --menu-r:16px; --menu-pane:rgba(30,33,38,0.30); --menu-shadow:0 8px 20px rgba(0,0,0,0.13);
+          padding:8px 6px; border-radius:var(--menu-r);
+          background:var(--menu-pane);
+          backdrop-filter:blur(40px) saturate(170%);
+          -webkit-backdrop-filter:blur(40px) saturate(170%);
           box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.16),
-            inset 0 0 0 0.5px rgba(255,255,255,0.14),
-            0 2px 6px rgba(0,0,0,0.16),
-            0 18px 48px rgba(0,0,0,0.44);
+            inset 0 1px 0 rgba(255,255,255,0.26),
+            inset 0 -1px 0 rgba(255,255,255,0.16),
+            inset 1px 0 0 rgba(255,255,255,0.10),
+            inset -1px 0 0 rgba(255,255,255,0.10),
+            var(--menu-shadow);
         }
         .combo-opt {
-          padding:6px 10px; border-radius:9px; cursor:default; font-size:13.5px;
-          display:flex; align-items:center; gap:8px; color:var(--ink);
+          padding:9px 13px; border-radius:calc(var(--menu-r, 28px) - 6px); cursor:default; font-size:14px;
+          display:flex; align-items:center; gap:14px; color:var(--ink); font-weight:500;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-          line-height:1.4; letter-spacing:-0.005em;
+          line-height:1.35; letter-spacing:-0.01em;
         }
-        .combo-opt.active { background:var(--accent); color:#fff; }
-        /* Setup: suggestions you can take, and a field for your own. */
+        .combo-opt.active { background:rgba(255,255,255,0.14); color:var(--ink); }
         .sugrow { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 0; }
         .sugchip {
           font-size:12.5px; padding:6px 13px; border-radius:999px;
@@ -6238,60 +6496,30 @@ class HemmaPanel extends HTMLElement {
         .sugchip:hover { background:var(--chip-hi); filter:none; }
         .addroom { margin:10px 0 0; }
         .addroom input { width:100%; box-sizing:border-box; height:36px; }
-        /* Unavailable, rather than armed and then refused. */
         .combo-opt.off { opacity:.38; cursor:default; pointer-events:none; }
         .combo-opt .lbl { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
-        .combo-opt .tick { width:12px; flex:0 0 12px; opacity:0; font-size:11px; }
+        .combo-opt:has(.kbd) .tick { display:none; }
+        .combo-opt .tick { text-align:right; }
+        .combo-opt .kbd {
+          flex:0 0 auto; order:8; margin-left:auto; padding-left:28px;
+          color:var(--ink-3); font-size:13px; letter-spacing:0.04em; white-space:nowrap;
+        }
+        .combo-opt .tick {
+          width:12px; flex:0 0 12px; opacity:0; font-size:11px;
+          order:9; margin-left:6px;
+        }
         .combo-opt.sel .tick { opacity:.85; }
         .combo-menu.noticks .combo-opt .tick { display:none; }
-        .combo-sep { height:1px; margin:5px 8px; background:rgba(255,255,255,0.11); }
+        .combo-sep { height:1px; margin:5px 8px 5px var(--sep-left, 8px); background:rgba(255,255,255,0.11); }
         .combo-empty { padding:6px 9px; color:var(--ink-3); font-size:12.5px; }
-        .scrim {
-          position:fixed; inset:0; z-index:300; display:grid; place-items:center;
-          background:rgba(0,0,0,0.42);
-          backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
-        }
-        /* The same material as a section group, so a dialog reads as part of the
-           panel. Deeper shadow than a group: a group sits on the page, this
-           floats above it. */
-        .dialog {
-          width:min(420px, calc(100vw - 48px)); box-sizing:border-box;
-          padding:24px 24px 20px; border-radius:var(--r-xl);
-          /* OPAQUE by necessity: the scrim above is itself a backdrop root and
-             paints flat black, so this element's blur had nothing to sample. The
-             page blur belongs to the scrim. */
-          background-color:#4b4b53;
-          background-image:var(--pane-solid);
-          box-shadow:var(--g-rim), 0 24px 60px rgba(0,0,0,0.52);
-        }
-        .dialog h3 { margin:0 0 6px; font-size:16px; font-weight:600; letter-spacing:-0.01em; }
-        .dialog p { margin:0 0 16px; font-size:13px; color:var(--ink-2); line-height:1.5; }
-        .dialog input { width:100%; box-sizing:border-box; margin:0 0 18px; height:38px; }
-        .dialog .acts { display:flex; gap:10px; justify-content:flex-end; }
-        .dialog .acts button { height:34px; padding:0 18px; font-size:13.5px; }
-        .dialog .acts button.danger { background:#ff453a; color:#fff; }
-        /* The dialog is itself a backdrop root, so a nested blur here would be
-           inert. A translucent fill plus a rim reads as glass instead. */
-        .dialog .acts button.ghost {
-          background:rgba(255,255,255,0.14);
-          color:var(--ink);
-          box-shadow:inset 0 0 0 1px rgba(255,255,255,0.16);
-        }
-        .dialog .acts button.ghost:hover { background:rgba(255,255,255,0.22); }
 
-        /* Badge reordering, the tile list's gesture on the badge cards. The
-           grip rides in from the right on Edit and the card lifts while it is
-           dragged - the same two rules, scoped to this column. */
         .badgecol > .card > .chead { position:relative; }
-        /* Declared here, because --rm-w and --rm-gap are set on .tile and
-           nowhere else: var(--rm-w) with no fallback resolved to nothing, the
-           grip came out 0x0, and Edit looked like a button that did nothing. */
         .badgecol > .card { --rm-w:22px; --rm-gap:var(--card-pad-h); }
-        /* The grip takes the CARET'S place, as the tile list does: a row either
-           opens or moves, so nothing shifts and the reading stays put. */
         .badgecol.editing > .card > .chead .fold { opacity:0; }
-        /* .chead is full-bleed, so right:0 is the CARD's edge - a whole
-           --card-pad-h past where the caret sat. */
+        .badgecol > .card > .chead .count { transition:opacity .28s var(--ease); }
+        .badgecol.editing > .card > .chead .count { opacity:0; }
+        :host(.phone) .badgebar .bandtog, :host(.phone) .sortstrip .bandtog { font-size:15px; }
+        :host(.phone) .badgebar .bandtog, :host(.phone) .sortstrip .bandtog { font-size:15px; }
         .badgecol > .card > .chead .grip {
           position:absolute; right:var(--card-pad-h); top:50%; z-index:2;
           width:var(--rm-w); height:var(--rm-w); padding:0;
@@ -6309,9 +6537,6 @@ class HemmaPanel extends HTMLElement {
         }
         .badgecol > .card > .chead .grip:hover { color:var(--ink); }
         .badgecol > .card > .chead .grip:active { cursor:grabbing; }
-        /* A dragged row cannot be glass: it moves with a transform, and a
-           backdrop-filter samples where the element started, so the blur
-           smears. --pane-solid is what that token is for. */
         .badgecol > .card.bodrag {
           z-index:4; position:relative;
           background:var(--pane-solid); color:var(--ink);
@@ -6321,11 +6546,7 @@ class HemmaPanel extends HTMLElement {
             inset 0 0 0 1px var(--chip-rim),
             0 18px 42px rgba(0,0,0,0.42);
         }
-        /* Beats .card's own tint, which would wash the solid out. */
         .badgecol > .card.bodrag:not(.shut):not(.off) { background:var(--pane-solid); }
-        /* Never inside .grouphead: that is a two-column grid with no room for a
-           third child, and hints-off collapses it to height:0. It is a
-           .sortstrip instead, so it carries that row's grid and hairline. */
         .badgeedit {
           height:28px; min-width:62px; padding:0 14px; border-radius:999px;
           display:grid; place-items:center;
@@ -6335,32 +6556,130 @@ class HemmaPanel extends HTMLElement {
         }
         .badgeedit:hover { background:var(--chip-hi); filter:none; }
         .badgeedit[aria-pressed="true"] {
-          background:var(--accent); color:#fff; box-shadow:none;
+          background:var(--fill); color:var(--on-fill); box-shadow:none;
         }
         @media (prefers-reduced-motion: reduce) { .badgeedit { transition:none; } }
         @media (prefers-reduced-motion: reduce) {
           .badgecol > .card > .chead .grip { transition:none; }
         }
-        /* One row per scene. NOT .colorfield, which is a full-width field
-           control - reusing it crushed the scene name to nothing and left a
-           column of identical pickers that named no scene at all. */
-        .scenecolors { padding:0 var(--card-pad-h) var(--card-pad-v); }
-        .scenecolors > .flabel { margin:2px 0 6px; }
+        :host(.narrow) .row.scenecolors { grid-template-columns:minmax(0,1fr); }
+        :host(.narrow:not(.tight)) .row.scenecolors { grid-template-columns:minmax(0,1fr) 22px; }
+        :host(.narrow) .row.scenecolors > label { grid-column:1 / -1; }
+        .row.scenecolors > .schead {
+          grid-column:1 / -1; grid-row:1; display:flex; align-items:center; gap:10px; min-width:0;
+        }
+        .row.scenecolors > .schead {
+          padding-bottom:11px; margin-bottom:-4px; position:relative;
+        }
+        .row.scenecolors > .schead::after {
+          content:""; position:absolute; left:0; right:0; bottom:0; height:1px;
+          background:var(--hair);
+        }
+        .row.scenecolors > .schead > label {
+          flex:1 1 auto; font-size:13.5px; font-weight:560; color:var(--ink);
+        }
+        .row.scenecolors > .schead .sccount { color:var(--ink-3); font-size:13px; transition:opacity .2s ease; }
+        .scenecolors.editing > .schead .sccount { opacity:0; }
+        .row.scenecolors > .sclist,
+        :host(:not(.narrow)) .inspector .row.scenecolors > .sclist { grid-column:1 / -1; grid-row:2; min-width:0; }
+        .row.scenecolors > .scadd,
+        :host(:not(.narrow)) .inspector .row.scenecolors > .scadd { grid-column:1 / -1; grid-row:3; }
+        .row.scenecolors > .schidden,
+        :host(:not(.narrow)) .inspector .row.scenecolors > .schidden { grid-column:1 / -1; grid-row:4; display:none; min-width:0; }
+        .row.scenecolors { padding-bottom:2px; }
+        .scadd {
+          width:calc(100% + 8px); box-sizing:border-box; margin:2px -4px 0;
+          display:flex; align-items:center; gap:var(--scgap, 11px);
+          height:42px; padding:0 4px; border:0; border-radius:10px;
+          background:transparent; box-shadow:none; color:var(--accent);
+          font:inherit; font-size:13.5px; text-align:left; cursor:pointer;
+          transition:opacity .2s ease, height .28s var(--ease), margin .28s var(--ease), background-color .16s var(--ease);
+        }
+        @media (hover:hover) and (pointer:fine) {
+          .scadd:hover { background:var(--field); filter:none; }
+        }
+        .scadd:active { transform:none; background:rgba(255,255,255,0.08); }
+        .scadddot {
+          width:28px; height:28px; flex:0 0 28px; border-radius:50%;
+          display:grid; place-items:center; background:var(--chip); box-shadow:inset 0 0 0 1px var(--chip-rim);
+        }
+        .scadddot svg { width:14px; height:14px; }
+        :host(.phone) .scadd { height:50px; font-size:17px; --scgap:13px; }
+        :host(.phone) .scadddot { width:34px; height:34px; flex-basis:34px; }
+        :host(.phone) .scadddot svg { width:16px; height:16px; }
+        .scenecolors.editing > .scadd { opacity:0; height:0; margin-top:0; pointer-events:none; overflow:hidden; }
+        .scenecolors.editing > .schidden,
+        :host(:not(.narrow)) .inspector .row.scenecolors.editing > .schidden { display:block; }
+        .schidden-head { margin:12px 0 4px; font-size:13px; color:var(--ink-3); }
+        :host(.phone) .schidden-head { font-size:14px; }
+        .scenecolor.hid .scname { color:var(--ink-2); }
+        .scenecolor.hid .scdot { background:rgba(255,255,255,0.16); }
+        .scenecolor .scminus, .scenecolor .scplus, .scenecolor .scgrip {
+          flex:0 0 auto; width:0; height:22px; padding:0; border:0; box-shadow:none; overflow:hidden;
+          display:grid; place-items:center; opacity:0; pointer-events:none;
+          transition:width .28s var(--ease), margin .28s var(--ease), opacity .2s ease;
+        }
+        .scenecolor .scminus, .scenecolor .scplus {
+          border-radius:50%; color:#fff; margin-right:calc(-1 * var(--scgap, 11px));
+        }
+        .scenecolor .scminus { background:#ff453a; }
+        .scenecolor .scplus { background:#30d158; }
+        .scenecolor .scminus svg, .scenecolor .scplus svg { width:14px; height:14px; flex:0 0 14px; }
+        .scenecolor .scgrip {
+          background:none; color:var(--ink-3); margin-left:calc(-1 * var(--scgap, 11px));
+          touch-action:none; cursor:grab; border-radius:6px;
+        }
+        .scenecolor .scgrip svg { width:18px; height:18px; flex:0 0 18px; }
+        .scenecolors.editing .scenecolor .scminus, .scenecolors.editing .scenecolor .scplus {
+          width:22px; margin-right:0; opacity:1; pointer-events:auto;
+        }
+        .scenecolors.editing .scenecolor .scgrip { width:28px; margin-left:0; opacity:1; pointer-events:auto; }
+        .scenecolors.editing .scenecolor .scname { flex:1 1 auto; }
+        .scenecolors .scpick { max-width:240px; transition:opacity .2s ease, max-width .28s var(--ease), background-color .16s var(--ease); }
+        .scenecolors.editing .scpick { opacity:0; max-width:0; padding:0; margin:0; pointer-events:none; overflow:hidden; }
+        .scenecolor.scdrag {
+          position:relative; z-index:3; border-radius:12px;
+          background:rgba(58,58,66,0.92); box-shadow:0 8px 22px rgba(0,0,0,0.32);
+        }
         .scenecolor {
-          width:100%; box-sizing:border-box;
-          display:flex; align-items:center; gap:11px;
-          height:40px; padding:0 12px; border:0; border-radius:12px;
+          width:calc(100% + 8px); box-sizing:border-box; margin:0 -4px;
+          display:flex; align-items:center; gap:var(--scgap, 11px);
+          height:42px; padding:0 4px; border:0; border-radius:10px;
           background:transparent; color:var(--ink);
           font:inherit; font-size:13.5px; text-align:left;
           box-shadow:none;
           transition:background-color .16s var(--ease);
         }
-        .scenecolor:hover:not(:disabled) { background:var(--field); filter:none; }
-        .scenecolor:active:not(:disabled) { transform:none; }
-        .scenecolor + .scenecolor { margin-top:2px; }
-        .scenecolor .scicon {
-          --mdc-icon-size:20px; width:20px; height:20px; flex:0 0 20px;
+        .scpick {
+          flex:0 0 auto; display:flex; align-items:center; gap:10px;
+          height:32px; margin-right:-10px; padding:0 10px; border-radius:16px;
+          background:none; box-shadow:none; color:inherit;
+          font:inherit; font-weight:400; cursor:pointer;
+          transition:background-color .16s var(--ease);
         }
+        @media (hover:hover) and (pointer:fine) {
+          .scpick:hover:not(:disabled) { background:var(--field); filter:none; }
+        }
+        .scpick:active:not(:disabled) { transform:none; background:rgba(255,255,255,0.12); }
+        .scenecolor + .scenecolor { margin-top:2px; }
+        .sclist .scenecolor + .scenecolor { position:relative; }
+        .sclist .scenecolor + .scenecolor::before {
+          content:""; position:absolute; top:-1px; left:4px; right:4px; height:1px;
+          background:var(--hair); pointer-events:none;
+        }
+        .scenecolor .scdot {
+          width:28px; height:28px; flex:0 0 28px; border-radius:50%;
+          display:grid; place-items:center;
+          background:rgba(255,255,255,0.94);
+        }
+        .scenecolor .scicon {
+          --mdc-icon-size:18px; width:18px; height:18px; display:block;
+        }
+        :host(.phone) .scenecolor { height:50px; font-size:17px; --scgap:13px; }
+        :host(.phone) .scenecolor .scdot { width:34px; height:34px; flex-basis:34px; }
+        :host(.phone) .scenecolor .scicon { --mdc-icon-size:22px; width:22px; height:22px; }
+        :host(.phone) .scenecolor .scval { font-size:15px; }
+        :host(.phone) .scenecolor .swatch { width:16px; height:16px; }
         .scenecolor .scname {
           flex:1 1 auto; min-width:0;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -6371,23 +6690,56 @@ class HemmaPanel extends HTMLElement {
           flex:0 0 auto; width:14px; height:14px; border-radius:50%;
           box-shadow:inset 0 0 0 1px rgba(255,255,255,0.22);
         }
-        .scenecolors > .hint { padding:6px 12px 0; }
         .glyph {
           width:17px; height:17px; flex:0 0 17px; background-color:currentColor;
           -webkit-mask:var(--i) center/contain no-repeat; mask:var(--i) center/contain no-repeat;
         }
         .combo.hasicon { position:relative; }
         .combo.hasicon > input { padding-left:36px; }
+        .row > label.haslead { display:flex; align-items:center; gap:12px; }
+        .row .rowicon { --sicon:29px; }
+        :host(.phone) .row .rowicon { --sicon:30px; }
+        .row:has(> label.haslead) { position:relative; }
+        .row + .row:has(> label.haslead) { border-top-color:transparent; }
+        .row + .row:has(> label.haslead)::before {
+          content:""; position:absolute; top:-1px; right:0; left:0; height:1px; background:var(--hair);
+        }
+        .combo.hasent > .entglyph {
+          position:absolute; left:12px; top:50%; transform:translateY(-50%);
+          width:20px; height:20px; display:grid; place-items:center; pointer-events:none;
+          color:var(--ink-2); --mdc-icon-size:20px;
+        }
+        .combo.hasent > .entglyph > * { display:block; --mdc-icon-size:20px; }
+        .combo.hasent.noent > .entglyph { display:none; }
+        .combo.hasent:not(.noent) > input { padding-left:42px; }
+        :host(.phone) .row > .combo.hasent > .entglyph { left:14px; }
+        :host(.phone) .row > .combo.hasent:not(.noent) > input { padding-left:46px; }
         .combo.hasicon > .glyph {
           position:absolute; left:12px; top:50%; transform:translateY(-50%); pointer-events:none;
           color:var(--ink-2);
         }
-        /* The glyph a field falls back to, shown as what it is: not chosen. */
         .glyph.faint { opacity:.45; }
         .combo-head {
-          padding:7px 10px 3px; font-size:11px; font-weight:600; letter-spacing:0.05em;
-          text-transform:uppercase; color:var(--ink-3);
+          padding:7px 10px 3px;
+          font-size:12px; font-weight:600; color:var(--ink-2);
         }
+        :host(.phone) .combo-menu {
+          --menu-r:var(--hemma-menu-radius, 28px); --menu-pane:rgba(30,33,38,0.44);
+          --menu-shadow:0 10px 26px rgba(0,0,0,0.18);
+        }
+        :host(.phone) .combo-opt {
+          font-size:var(--hemma-popup-label-size, 15px); font-weight:400;
+          min-height:46px; padding:0 16px 0 13px; gap:15px; letter-spacing:normal;
+        }
+        :host(.phone) .combo-opt.sel { font-weight:500; }
+        :host(.phone) .combo-opt .tick { width:14px; flex-basis:14px; margin-left:4px; font-size:15px; }
+        .combo-opt .lbl .sub {
+          display:block; margin-top:1px; font-size:13px; color:var(--ink-3);
+          overflow:hidden; text-overflow:ellipsis;
+        }
+        :host(.phone) .combo-head { font-size:13px; font-weight:500; padding:10px 14px 4px; }
+        :host(.phone) .combo-sep { margin:6px 14px 6px var(--sep-left, 14px); background:rgba(255,255,255,0.14); }
+        :host(.phone) .combo-empty { font-size:15px; padding:10px 14px; }
 
         .chips { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 8px; }
         .chip {
@@ -6402,6 +6754,334 @@ class HemmaPanel extends HTMLElement {
         }
         .chip button:hover { background:rgba(255,69,58,0.85); filter:none; }
         .chipwrap .none { color:var(--ink-3); font-size:12px; margin:7px 0 0; }
+
+        .flowpane { display:none; }
+        :host(.flow) .rail, :host(.flow) .stage, :host(.flow) .inspector,
+        :host(.flow) #tilespane, :host(.flow) .status, :host(.flow) #save,
+        :host(.flow) #donebtn, :host(.flow) #more, :host(.flow) #brand { display:none; }
+        :host(.flow) .main { padding-right:0; }
+        :host(.flow) .top {
+          margin-left:0; background:none; box-shadow:none;
+          backdrop-filter:none; -webkit-backdrop-filter:none; pointer-events:none;
+        }
+        :host(.flow) .top .burger { pointer-events:auto; }
+        :host(.flow:not(.narrow)) .toprow { max-width:none; margin:0; padding-left:64px; }
+
+        :host(.flow) .flowpane, :host(.sheeted) .flowpane {
+          display:flex; position:fixed; inset:0; box-sizing:border-box;
+        }
+        :host(.flow) .flowpane { z-index:5; }
+        :host(.sheeted) .flowpane {
+          z-index:40; justify-content:center; align-items:flex-start;
+          --hemma-popup-gutter:var(--hemma-popup-gutter-wide, 26px);
+        }
+        .fscrim {
+          position:absolute; inset:0;
+          background:var(--hemma-popup-scrim, var(--mdc-dialog-scrim-color, rgba(0,0,0,0.40)));
+          backdrop-filter:var(--hemma-popup-scrim-backdrop, var(--hemma-scrim-backdrop, blur(6px) saturate(1.35)));
+          -webkit-backdrop-filter:var(--hemma-popup-scrim-backdrop, var(--hemma-scrim-backdrop, blur(6px) saturate(1.35)));
+        }
+        .flowsheet {
+          position:relative; display:flex; flex-direction:column;
+          width:100%; height:100%; box-sizing:border-box;
+        }
+        .flowstack { position:relative; width:100%; height:100%; }
+        :host(.sheeted) .flowstack {
+          --flow-top:var(--hemma-popup-top, 112px);
+          width:580px; max-width:min(600px, calc(100% - 16px)); height:auto;
+          margin-top:var(--flow-top);
+          border-radius:var(--hemma-studio-sheet-radius, 46px);
+        }
+        :host(.sheeted) .flowsheet {
+          height:auto; max-height:calc(var(--vph, 100dvh) - var(--flow-top) - 8px);
+          border-radius:inherit; overflow:hidden;
+        }
+        @media (max-height: 900px) and (min-width: 769px) {
+          :host(.sheeted) .flowstack { --flow-top:64px; }
+        }
+        @media (max-height: 720px) and (min-width: 769px) {
+          :host(.sheeted) .flowstack { --flow-top:40px; }
+        }
+        .fglass {
+          position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+          background:var(--hemma-popup-tint,
+            var(--ha-dialog-surface-background, var(--ha-dialog-background, rgba(0,0,5,0.5))));
+          backdrop-filter:var(--hemma-popup-backdrop, var(--hemma-surface-backdrop, blur(28px) saturate(200%)));
+          -webkit-backdrop-filter:var(--hemma-popup-backdrop, var(--hemma-surface-backdrop, blur(28px) saturate(200%)));
+          box-shadow:var(--hemma-popup-shadow,
+            0 40px 90px -32px rgba(0,0,0,0.78), 0 10px 28px -14px rgba(0,0,0,0.55));
+        }
+        @media (max-width: 768px) {
+          :host(.sheeted) .flowpane {
+            align-items:flex-end; --hemma-popup-gutter:var(--hemma-popup-gutter-phone, 14px);
+          }
+          :host(.sheeted) .flowstack {
+            width:100%; max-width:none; margin-top:0;
+            border-radius:var(--hemma-studio-sheet-radius-phone, 36px)
+                          var(--hemma-studio-sheet-radius-phone, 36px) 0 0;
+          }
+          :host(.sheeted) .flowsheet {
+            max-height:calc(var(--vph, 100dvh) - env(safe-area-inset-top, 0px) - 12px);
+          }
+          :host(.sheeted) .fglass { box-shadow:none; }
+        }
+        .fscrim, .askpane { touch-action:none; }
+        .flowscroll { touch-action:pan-y; }
+
+        .askpane {
+          position:fixed; inset:0; z-index:300; display:flex;
+          align-items:center; justify-content:center; padding:24px; box-sizing:border-box;
+        }
+        .iconstack { width:min(520px, 100%); }
+        .iconcard { padding-bottom:12px; }
+        .icongrid {
+          margin:14px 0 4px; max-height:min(46vh, 380px); overflow-y:auto;
+          display:grid; grid-template-columns:repeat(auto-fill, minmax(58px, 1fr)); gap:6px;
+          scrollbar-width:thin;
+        }
+        .iconcell {
+          display:grid; place-items:center; height:52px; padding:0; border:0;
+          border-radius:12px; background:var(--field); color:var(--ink);
+          --mdc-icon-size:24px; cursor:pointer;
+          transition:background .14s ease;
+        }
+        .iconcell:hover { background:var(--field-hi); filter:none; }
+        .iconcell.on { background:var(--fill); color:var(--on-fill); }
+        .iconnone { font-size:12px; font-weight:500; }
+        .iconempty { grid-column:1 / -1; padding:18px 0; color:var(--ink-3); font-size:13.5px; }
+        .askstack {
+          position:relative; width:min(340px, 100%);
+          border-radius:var(--hemma-studio-alert-radius, 38px);
+        }
+        .askcard {
+          position:relative; box-sizing:border-box; padding:30px 24px 18px; text-align:center;
+        }
+        .askcard h3 {
+          margin:0; font-size:20px; line-height:1.2; font-weight:700; letter-spacing:-0.02em;
+          color:var(--ink); text-wrap:balance;
+        }
+        .askcard p {
+          margin:8px 0 0; font-size:14.5px; line-height:1.45; color:var(--ink-2); text-wrap:pretty;
+        }
+        .askcard .flist { margin:20px 0 0; text-align:left; }
+        .askacts {
+          display:flex; flex-direction:column-reverse; align-items:stretch; gap:4px; margin-top:22px;
+        }
+
+        .flowbar {
+          flex:0 0 auto; display:flex; align-items:center; min-height:48px;
+          padding:16px 16px 4px;
+        }
+        .flowbar.bare { padding-bottom:0; }
+        @media (max-width: 768px) {
+          :host(.sheeted) .flowbar { padding:12px 12px 2px; }
+        }
+        :host(.flow) .flowbar { padding:calc(var(--top-h) - 26px) 12px 0; }
+        :host(.flow) .flowbar.bare { min-height:0; }
+        .fnav {
+          appearance:none; -webkit-appearance:none; position:relative; isolation:isolate;
+          width:48px; height:48px; flex:none; margin:0; padding:0; border:0; border-radius:50%;
+          display:flex; align-items:center; justify-content:center;
+          background:none; box-shadow:none; cursor:pointer;
+          color:var(--hemma-popup-header-title-color, var(--primary-text-color, #fff));
+          -webkit-tap-highlight-color:transparent;
+        }
+        .fnav svg { width:24px; height:24px; display:block; fill:currentColor; }
+        .fnav::after {
+          content:""; position:absolute; inset:0; z-index:-1; border-radius:50%;
+          background-color:currentColor; opacity:0; pointer-events:none;
+        }
+        .fnav:hover:not(:disabled), .fnav:active:not(:disabled) { filter:none; transform:none; }
+        @media (hover: hover) {
+          .fnav:hover:not(:disabled)::after { opacity:.1; }
+        }
+
+        .flowscroll {
+          flex:1 1 auto; min-height:0; display:flex; flex-direction:column;
+          overflow-y:auto; overscroll-behavior:contain;
+          padding:0 calc(var(--hemma-popup-gutter, 26px) + 8px) 12px;
+          scrollbar-width:none; -ms-overflow-style:none;
+        }
+        .flowscroll::-webkit-scrollbar { width:0; height:0; display:none; }
+        :host(.flow) .flowscroll { padding:12px 24px; }
+        :host(.phone) .flowscroll { padding-left:20px; padding-right:20px; }
+
+        .flowin { width:100%; max-width:440px; margin:0 auto; text-align:center; }
+        :host(.flow) .flowin { margin:auto; }
+        :host(.flow.phone) .flowin { margin:3vh auto auto; }
+        .ficon {
+          width:72px; height:72px; margin:0 auto 20px; border-radius:17px;
+          display:grid; place-items:center;
+          background:linear-gradient(to bottom, #2e2f35, #151619);
+          box-shadow:inset 0 1px 0 rgba(255,255,255,0.16), inset 0 0 0 1px rgba(255,255,255,0.07),
+            0 4px 14px rgba(0,0,0,0.18);
+        }
+        .ficon svg { width:42px; height:42px; display:block; color:#f2efe8; }
+        .ficon.ok svg { color:#34c759; }
+        .ficon.warn svg { color:#ff9f0a; }
+        .ftitle {
+          margin:0; font-size:30px; line-height:1.12; font-weight:700;
+          letter-spacing:-0.025em; color:var(--ink); text-wrap:balance;
+        }
+        :host(.sheeted) .ftitle { font-size:26px; }
+        .flede {
+          margin:10px auto 0; max-width:36ch; font-size:15px; line-height:1.45;
+          color:var(--ink-2); text-wrap:pretty;
+        }
+        .flowerr:empty { display:none; }
+        .flowerr {
+          margin:12px auto 0; max-width:38ch; font-size:13.5px; line-height:1.45; color:#ff6961;
+        }
+        .fbody { margin-top:28px; text-align:left; }
+        .fbody:empty { margin-top:0; }
+
+        .fgroup { margin:0 0 24px; }
+        .fgroup:last-child { margin-bottom:4px; }
+        .fhead {
+          margin:0 4px 8px; font-size:15px; font-weight:600; letter-spacing:-0.01em;
+          color:var(--hemma-popup-tiles-text-primary, #fff);
+        }
+        .flist {
+          border-radius:var(--hemma-popup-row-radius, 20px); overflow:hidden;
+          background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));
+        }
+        .ffoot {
+          margin:8px 4px 0; font-size:13px; line-height:1.45;
+          color:var(--hemma-popup-ui-tertiary, rgba(255,255,255,0.42));
+        }
+
+        .askicon .asklabel { flex:1 1 auto; }
+        .askicon .askvalue {
+          flex:0 0 auto; display:flex; align-items:center; gap:8px;
+          color:var(--ink-2); font-size:15px;
+        }
+        .askicon .roomglyph {
+          width:20px; height:20px; flex:0 0 20px;
+          background-color:var(--hemma-color-teal, #00C3D0);
+          -webkit-mask:var(--i) center / contain no-repeat;
+          mask:var(--i) center / contain no-repeat;
+        }
+        .frow {
+          position:relative; display:flex; align-items:center; gap:12px;
+          width:100%; min-height:52px; box-sizing:border-box; margin:0; padding:8px 16px;
+          background:none; border:0; border-radius:0; box-shadow:none;
+          color:var(--hemma-popup-tiles-text-primary, #fff); font:inherit;
+          font-size:17px; font-weight:400; letter-spacing:-0.022em;
+          text-align:left; text-decoration:none;
+        }
+        button.frow, a.frow { cursor:pointer; }
+        button.frow:hover:not(:disabled), a.frow:hover { filter:none; background:rgba(255,255,255,0.06); }
+        button.frow:active:not(:disabled), a.frow:active { transform:none; background:rgba(255,255,255,0.11); }
+        button.frow:disabled { opacity:.45; cursor:default; }
+        .frow + .frow::before {
+          content:""; position:absolute; top:0; left:16px; right:16px; height:1px;
+          background:var(--hemma-popup-ui-divider, rgba(255,255,255,0.08)); pointer-events:none;
+        }
+        .rico {
+          flex:0 0 29px; width:29px; height:29px; border-radius:7px;
+          display:grid; place-items:center;
+          background:var(--tint, linear-gradient(to bottom, #9c9ca3, #6f6f76));
+        }
+        .rico svg { width:17px; height:17px; display:block; color:#fff; }
+        .rico .mk {
+          width:17px; height:17px; background-color:#fff;
+          -webkit-mask:var(--i) center / contain no-repeat; mask:var(--i) center / contain no-repeat;
+        }
+        .rtext { flex:1 1 auto; min-width:0; }
+        .frow.field .rtext { flex:0 0 auto; }
+        .rtext b {
+          display:block; font-weight:400;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .rtext span {
+          display:block; margin-top:1px; font-size:13px; letter-spacing:0;
+          color:var(--hemma-popup-ui-tertiary, rgba(255,255,255,0.42));
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .rtext span.warn, .rdetail.warn { color:var(--hemma-popup-ui-warn, #FF9F0A); }
+        .frow.dim .rico, .frow.dim .rtext b { opacity:.45; }
+        .frow.wrap .rtext b { white-space:normal; font-size:15px; line-height:1.4; letter-spacing:-0.01em; }
+        .frow.wrap2 .rtext span { white-space:normal; line-height:1.4; }
+        .frow.open .rchev svg { transform:rotate(90deg); }
+        .rchev svg { transition:transform .2s var(--ease); }
+        .fdetail[hidden] { display:none; }
+        .fdetail {
+          margin:0; padding:2px 16px 14px 57px; white-space:pre-wrap; word-break:break-word;
+          font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--ink-3);
+          -webkit-user-select:text; user-select:text;
+        }
+        .rdetail {
+          flex:0 1 auto; min-width:0; max-width:60%;
+          color:var(--hemma-popup-tiles-text-secondary, rgba(255,255,255,0.56));
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        }
+        .rchev svg { width:13px; height:13px; display:block; color:var(--ink-3); }
+        .rcheck { flex:0 0 22px; display:grid; place-items:center; color:var(--accent); }
+        .rcheck svg { width:18px; height:18px; display:block; opacity:0; transition:opacity .15s ease; }
+        .frow[aria-checked="true"] .rcheck svg { opacity:1; }
+        .rget {
+          flex:0 0 auto; padding:5px 15px; border-radius:999px;
+          background:rgba(255,255,255,0.14); color:var(--ink);
+          font-size:13.5px; font-weight:600;
+        }
+        .frow input.fin {
+          flex:1 1 auto; min-width:0; height:32px; margin:0; padding:0;
+          background:none; border:0; border-radius:0; box-shadow:none; outline:none;
+          font:inherit; font-size:17px; letter-spacing:-0.022em; text-align:right;
+          color:var(--hemma-popup-tiles-text-secondary, rgba(255,255,255,0.56));
+        }
+        .frow input.fin:focus { background:none; border:0; color:var(--ink); }
+        .frow input.fin.lead { text-align:left; color:var(--ink); }
+
+        .fprog { max-width:300px; margin:4px auto 0; }
+        .fprog .track { height:5px; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.16); }
+        .fprog .fill {
+          width:0; height:100%; border-radius:inherit; background:#fff;
+          transition:width .5s cubic-bezier(.32,.72,0,1);
+        }
+        .fprog .cap { margin-top:12px; text-align:center; font-size:13px; color:var(--ink-3); }
+        .fspin {
+          width:22px; height:22px; margin:6px auto 0; box-sizing:border-box; border-radius:50%;
+          border:2.5px solid rgba(255,255,255,0.18); border-top-color:#fff;
+          animation:flowspin .9s linear infinite;
+        }
+        @keyframes flowspin { to { transform:rotate(360deg); } }
+
+        .flowfoot {
+          flex:0 0 auto; display:flex; flex-direction:column-reverse; align-items:center;
+          gap:4px; padding:12px calc(var(--hemma-popup-gutter, 26px) + 8px) 30px;
+        }
+        :host(.flow) .flowfoot { padding:14px 24px calc(30px + env(safe-area-inset-bottom, 0px)); }
+        :host(.phone) .flowfoot { padding-left:20px; padding-right:20px; }
+        @media (max-width: 768px) {
+          :host(.sheeted) .flowfoot { padding:10px 22px calc(16px + env(safe-area-inset-bottom, 0px)); }
+        }
+        .flowfoot.edge { box-shadow:inset 0 1px 0 var(--hair); }
+        .flowfoot:empty { padding-top:0; padding-bottom:18px; }
+        .flowfoot button, .askacts button {
+          min-width:200px; max-width:100%; height:40px; padding:0 30px; border-radius:999px;
+          font-size:15px; font-weight:600; letter-spacing:-0.005em;
+        }
+        .askacts button { min-width:0; width:100%; height:44px; }
+        .askacts button.danger { background:#ff453a; color:#fff; }
+        .flowfoot button.ghost, .askacts button.ghost {
+          min-width:0; height:34px; padding:0 16px;
+          background:none; box-shadow:none; color:var(--ink);
+          backdrop-filter:none; -webkit-backdrop-filter:none;
+          font-size:14.5px; font-weight:500;
+        }
+        @media (max-width: 768px) {
+          .flowfoot button { width:100%; max-width:260px; height:46px; font-size:16px; }
+          .flowfoot button.ghost { width:auto; height:40px; font-size:15px; }
+        }
+        .flowfoot button.ghost:hover:not(:disabled),
+        .askacts button.ghost:hover:not(:disabled) { filter:none; opacity:.72; }
+        .askacts button.ghost { height:38px; }
+        .flowfoot button:disabled { opacity:.4; cursor:default; }
+        @media (prefers-reduced-motion: reduce) {
+          .fspin { animation-duration:2.4s; }
+          .fprog .fill { transition:none; }
+        }
 
         .empty {
           text-align:center; padding:60px 34px; margin-bottom:var(--gap);
@@ -6421,8 +7101,6 @@ class HemmaPanel extends HTMLElement {
         }
         .area:hover { background:var(--chip-hi); }
 
-        /* 36px is the drop-button column plus its gap, so the previews stop
-           where every input above them stops. */
         .shots {
           display:grid; grid-template-columns:1fr 1fr; gap:12px;
           padding:10px 36px 16px 0;
@@ -6458,30 +7136,21 @@ class HemmaPanel extends HTMLElement {
           text-shadow:0 1px 3px rgba(0,0,0,0.6); pointer-events:none;
         }
         .shot.empty .cap { color:var(--ink-3); text-shadow:none; }
+        :host(.compact:not(.phone)) .shot.empty .cap { display:none; }
         .shothint { color:var(--ink-3); font-size:12px; padding:0 0 14px; }
 
-        /* Glass on glass: nested surfaces sit brighter than the card. */
         .tile {
-          /* border-box: _shutCard animates height from offsetHeight, which IS the
-             border box, so a content-box element overshoots by its padding on
-             every keyframe. There is no global box-sizing reset here. */
           box-sizing:border-box;
-          /* No top padding: .thead carries it, so the heading sits at the same
-             height whether the tile is open or folded. */
-          /* A row in the tile group, on the same terms as a section row: the
-             group owns the surface, the row owns only its content. */
           border-radius:0; padding:0 var(--card-pad-h) var(--card-pad-v); margin:0;
           background-color:transparent;
           transition:background-color .3s var(--ease);
         }
         .tile:not(.shut) { background-color:rgba(255,255,255,0.04); }
+        :host(.phone) .col > .card:not(.shut):not(.off),
+        :host(.phone) .tilegrid > .tile:not(.shut) { background-color:transparent; }
         .tile.off > .thead .sicon, .tile.off > .thead .grow { opacity:.45; }
         .tile.locked { opacity:.6; }
         .tile > .tbody > .adv { margin-top:2px; }
-        /* A row of the list that happens to be a button: same divider, same
-           height, accent-colored because it acts rather than reports. */
-        /* Same chip as .row .drop, right-aligned into the drops' column: a member
-           list's add and remove are one pair. */
         .addmore {
           display:flex; align-items:center; justify-content:center;
           width:22px; height:22px; padding:0; margin:2px 0 14px auto;
@@ -6494,19 +7163,10 @@ class HemmaPanel extends HTMLElement {
         .addmore:hover:not(:disabled) { filter:none; opacity:1; background:var(--chip-hi); }
         .addmore:active:not(:disabled) { transform:none; opacity:1; background:var(--chip-hi); }
         .addmore:disabled { opacity:.45; }
-        /* The row grows out of where the + was rather than appearing under it,
-           so the - lands by travelling to its place instead of cutting to it.
-           No fill mode: when it ends the row keeps its own natural style, which
-           is how max-height gets back to none. */
-        /* Height, not max-height: animating a cap past the real height grows fast
-           while it binds and then crawls, which is a velocity break that reads as
-           a bounce. --rowfrom/--rowto are what the row grows out of and settles
-           into - the + chip's footprint when it is replacing it, else 0. */
         @keyframes hemma-rowin {
           from { height:var(--rowfrom, 0px); opacity:0; border-top-color:transparent; }
           to   { height:var(--rowh); opacity:1; }
         }
-        /* The collapse must outlive the re-render that drops the row. */
         @keyframes hemma-rowout {
           from { height:var(--rowh); opacity:1; }
           to   { height:var(--rowto, 0px); opacity:0; border-top-color:transparent; }
@@ -6517,14 +7177,6 @@ class HemmaPanel extends HTMLElement {
         @media (prefers-reduced-motion:reduce) {
           .row.rowin, .row.rowout { animation:none; overflow:visible; }
         }
-        /* The tile's own padding sat ABOVE the heading, so the top 16px of the
-           tile was dead to both the fold and the drag. Pull the head out over
-           that padding and give it straight back, so the box grows into the
-           corner without a pixel of content moving. */
-        /* pan-y, not none: the browser keeps vertical scrolling until the hold
-           fires, and the drag calls it off itself by preventing the move. With
-           touch-action none the header swallowed every swipe and the list could
-           not be scrolled from a tile at all. */
         .thead {
           display:flex; align-items:center; gap:var(--head-gap, 9px);
           cursor:grab; touch-action:pan-y;
@@ -6539,8 +7191,6 @@ class HemmaPanel extends HTMLElement {
             0 18px 42px rgba(0,0,0,0.42);
         }
         .tile.dragging .thead { cursor:grabbing; }
-        /* Drag states stay dark in both modes: the panel's own surfaces are dark
-           whatever HA reports, so a light lift would leave light text on white. */
         .tile.dragging, .tab.dragging { color:var(--ink); }
         .thead .grow { flex:1; font-size:13.5px; font-weight:560; }
         .thead .kind { color:var(--ink-3); font-size:11.5px; font-weight:400; margin-left:6px; }
@@ -6559,22 +7209,12 @@ class HemmaPanel extends HTMLElement {
         }
         .mini.icon:hover { background:var(--chip-hi); color:var(--ink); filter:none; }
         .mini.icon svg { width:16px; height:16px; display:block; }
-        /* No gap under the head. The head is already a --shut-h box with the
-           name centered in it, so a margin here put the first divider 6px lower
-           open than folded - the same mismatch the card had above its own. */
         .tbody { margin-top:0; }
         .tbody .row { grid-template-columns:minmax(100px,30%) 1fr; padding:10px 0; }
-        /* Its own control row above the tile group, so it needs air: at one --gap
-           it sat on the group's rounded top edge and read as resting on a tile.
-           Squaring those corners would fix it the wrong way round. */
         .addbar {
           display:flex; gap:10px; align-items:center; flex-wrap:wrap;
           margin:0 0 calc(var(--gap) * 1.55);
         }
-        /* Inside the inspector's glass, a nested blur samples that composited
-           surface and flattens these to gray - and drops out while the entrance
-           runs, which is why they changed color as it ended. No nested blur; the
-           fill carries it. */
         .addbar .combo input, .addbar .plus {
           background-color:rgba(28,28,32,0.34);
           box-shadow:inset 0 0 0 1px var(--field-rim);
@@ -6583,13 +7223,6 @@ class HemmaPanel extends HTMLElement {
         #tilespane { margin-top:var(--gap); }
         #tilespane:empty { display:none; }
         .tilewrap { display:block; }
-        /* align-items:start, not the grid default: stretched, a collapsed tile
-           still measures its tallest neighbor, so _shutCard read the same height
-           before and after. */
-        /* One column of rows, matching the sections above. It was a responsive
-           multi-column grid, which is why tiles read as loose cards rather than
-           as part of the same list. .tilegrid holds only tiles - the hint and
-           the add bar are its siblings - so it can be the group surface. */
         .addbar select { border-radius:999px; padding:9px 15px; }
 
         details { margin-top:4px; }
@@ -6603,21 +7236,14 @@ class HemmaPanel extends HTMLElement {
         .line { color:var(--ink-2); white-space:pre-wrap; }
         .line.ok { color:#30d158; } .line.err { color:#ff453a; } .line.warn { color:#ffd60a; }
 
-        /* No .body padding here: resetting the shorthand threw away the --top-h
-           padding the 1100 block sets, and the page slid under the fixed
-           header. That block already pads every width this one covers. */
-        /* Label on its own line, field and remove button sharing the next -
-           a single 1fr column dropped the button onto a third row. */
         :host(.tight) .row { grid-template-columns:1fr auto; gap:7px 0; align-items:center; }
-        /* Tile rows carry their own desktop template and outrank the line
-           above, which left their fields in a 30% column. */
         :host(.tight) .tbody .row { grid-template-columns:1fr auto; }
-        :host(.tight) .row > label { grid-column:1 / -1; }
+        :host(.tight) .row:not(:has(> .sw)) > label { grid-column:1 / -1; }
         :host(.tight) .row > .drop { margin-left:10px; }
-        /* Nothing to leave room for once the third track is gone. */
         :host(.tight) .row > .drop.blank { display:none; }
         :host(.tight) .shots { padding-right:0; }
       </style>
+      <div class="curtain" id="curtain"></div>
       <div class="bgwrap">
         <img class="bg" id="bg" alt="">
         <div class="bgtint"></div>
@@ -6630,6 +7256,7 @@ class HemmaPanel extends HTMLElement {
            macOS window splits its titlebar across a source list. _placeRooms
            moves the burger, the wordmark and #rooms back into that toolbar
            below PANEL_NARROW, where there is no rail. -->
+      <div class="railscrim"></div>
       <aside class="rail" aria-label="Rooms">
         <div class="railhead">
           <button class="burger" id="burger" title="Menu" aria-label="Menu">
@@ -6645,23 +7272,55 @@ class HemmaPanel extends HTMLElement {
           <button class="railedit" id="dashesedit">Edit</button></div>
         <div id="dashes"></div>
       </aside>
+      <nav class="sidelist" id="sidelist" aria-label="Sections"></nav>
+      <div class="sidegrip" id="sidegrip" role="separator" aria-orientation="vertical"
+        aria-label="Resize the sidebar" tabindex="-1"></div>
       <div class="main">
       <div class="top">
         <div class="toprow">
-        <h1 id="brand"><span class="s-long">Hemma Studio</span><span class="s-short">Hemma</span><span class="ver"></span></h1>
+        <button id="railbtn" class="railbtn" type="button" title="Rooms" aria-label="Show rooms" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3.2"/><path d="M9.5 4.5v15"/></svg>
+        </button>
+        <button id="roomtitle" class="roomtitle" type="button" aria-haspopup="menu">
+          <span class="rt-label"></span>
+          <span class="rt-caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
+        </button>
+        <h1 id="brand">Hemma<span class="ver"></span></h1>
         <div class="spacer"></div>
+        <button id="diffs" class="ghost diffs" hidden><span class="ddot"></span><span class="s-long"></span><span class="s-short"></span></button>
+        <div class="navpill">
+        <span class="navflash" aria-hidden="true"></span>
+        <button id="undo" class="ghost icon" aria-label="Undo" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H12"/></svg>
+        </button>
         <button id="save" class="ghost" disabled><span class="s-long">Save changes</span><span class="s-short">Save</span></button>
         <button id="donebtn" class="ghost" title="Save and open the dashboard">Done</button>
+        <span class="navsep" aria-hidden="true"></span>
         <button id="more" class="ghost icon" title="More" aria-label="More">
           <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2.25"/><circle cx="12" cy="12" r="2.25"/><circle cx="19" cy="12" r="2.25"/></svg>
+        </button>
+        </div>
+        <!-- The compact title. Absolutely centered in the bar rather than
+             placed in the flex row, the way a nav bar centers a title between
+             two sets of items of unequal width. Empty until the large title
+             below has scrolled under it. -->
+        <button id="navtitle" class="navtitle" type="button" aria-haspopup="menu">
+          <span class="nt-label"></span>
+          <span class="nt-caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
         </button>
           </div>
       </div>
       <div class="body">
+        <!-- The large title. In the scroller, not in the fixed bar: a bar that
+             grew and shrank would move --top-h, which .body pads itself by, and
+             the page would chase its own scroll. -->
+        <button id="bigtitle" class="bigtitle" type="button" aria-haspopup="menu">
+          <span class="bt-label"></span>
+          <span class="bt-caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
+        </button>
         <div id="status" class="status"></div>
         <div class="stage">
           <div class="canvas">
-            <div id="reconcile" class="reconcile" hidden></div>
             <div class="bandhead canvashead">
               <div class="segrow">
                 <div class="seg" id="sizeseg">
@@ -6713,10 +7372,12 @@ class HemmaPanel extends HTMLElement {
         <div id="pane" class="sheet"></div>
       </aside>
       </div>
+      <div id="flow" class="flowpane"></div>
       <div id="overlay"></div>
 `;
 
     this.classList.add("booting");
+    this._wireSideGrip();
     // Never leave it hidden if a load fails.
     setTimeout(() => this._playEntrance(true), 2500);
     this.shadowRoot.querySelector(".ver").textContent = "v" + PANEL_VERSION;
@@ -6726,40 +7387,55 @@ class HemmaPanel extends HTMLElement {
     if (dm) dm.onclick = () => this._toggleEdit("dashes");
     this.$("burger").onclick = () =>
       this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
+    this.$("bigtitle").onclick = (ev) => this._roomTitleMenu(ev.currentTarget);
+    this.$("navtitle").onclick = (ev) => this._roomTitleMenu(ev.currentTarget);
+    const pill = this.shadowRoot.querySelector(".navpill");
+    const flash = pill && pill.querySelector(".navflash");
+    if (pill && flash) pill.addEventListener("pointerdown", (ev) => {
+      if (!isPhone(this)) return;
+      const r = pill.getBoundingClientRect();
+      const x = r.width ? Math.max(0, Math.min(100, ((ev.clientX - r.left) / r.width) * 100)) : 50;
+      flash.style.background = "radial-gradient(circle at " + x.toFixed(1) + "% 50%,"
+        + " rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.15) 55%, rgba(255,255,255,0.05) 100%)";
+      flash.style.transition = "opacity 140ms ease-out";
+      flash.style.opacity = "1";
+      clearTimeout(this._flashTimer);
+      this._flashTimer = setTimeout(() => {
+        flash.style.transition = "opacity 420ms cubic-bezier(0.4,0,0.6,1)";
+        flash.style.opacity = "0";
+      }, 150);
+    }, true);
     this.$("more").onclick = () => {
       // Sections fold globally; only the tile cards below are this room's.
       const room = this._state && this._state.compact.rooms[this._room];
+      const homes = this._homes(this._dashList || []);
+      const stemOf = (u) => String(u || "").replace(/[-_]mobile$/i, "");
       this._menuAt(this.$("more"), [
-        // Below PANEL_NARROW there is no rail, so this is the only way to change
-        // dashboard. Inline rather than behind a submenu: one tap, not two.
-        ...(isNarrow(this) ? (this._dashList || []).map((d) => ({
-          id: "dash:" + d.url_path,
-          label: this._dashLabels(this._dashList || []).get(d.url_path),
-          checked: d.url_path === this._dashUrl,
-          group: "Dashboard",
-        })) : []),
-        { id: "create", label: "Create dashboard\u2026", group: "Dashboard" },
-        // Only where there is a YAML dashboard to import. Everyone upgrading
-        // from before Studio has one; nobody who started here does.
-        ...(this._yamlCandidates().length
-          ? [{ id: "import", label: "Import from YAML\u2026", group: "Dashboard" }] : []),
-        { id: "delete", label: "Delete dashboard", group: "Dashboard" },
-        // Only where there is one to add. Pair creation happens on Create, so
-        // this is the way in for every dashboard made before that existed -
-        // which is all of them.
-        ...(this._canAddMobile()
-          ? [{ id: "addmobile", label: "Add phone layout", group: "Dashboard" }] : []),
-        // On by default: the descriptions are the only place the panel says what
-        // a badge or a tile IS.
-        // Phone only, where there is no preview. Done also opens the dashboard
-        // but SAVES on the way; this is the look without the commit.
+        ...(isPhone(this) ? [{ id: "undo", label: "Undo", icon: "undo", group: "edit", quiet: true,
+          shortcut: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "") ? "\u2318Z" : "Ctrl+Z",
+          disabled: !(this._undoStack || []).length }] : []),
+        // Phone only: Done also opens the dashboard but saves on the way.
         ...(isPhone(this)
-          ? [{ id: "open", label: "Open dashboard", group: "View" }] : []),
-        { id: "hints", label: this._hints === false ? "Show hints" : "Hide hints",
-          checked: this._hints !== false, group: "View" },
+          ? [{ id: "open", label: "Open dashboard", icon: "open", group: "nav", quiet: true }] : []),
+        ...((panelW(this) < PANEL_COMPACT || this.classList.contains("split")) && homes.length > 1 ? homes.map((h) => ({
+          id: "dash:" + h.wide.url_path,
+          label: h.wide.title || h.wide.url_path, glyph: "home", plainGlyph: true,
+          checked: stemOf(h.wide.url_path) === stemOf(this._dashUrl),
+          group: "homes", quiet: true,
+        })) : []),
+        { id: "create", label: "Create dashboard\u2026", icon: "plus", group: "Dashboard", quiet: true },
+        ...(this._yamlCandidates().length
+          ? [{ id: "import", label: "Import from YAML\u2026", icon: "import", group: "Dashboard", quiet: true }] : []),
+        ...(this._dashUrl && !this._flowMode
+          ? [{ id: "renamedash", label: "Rename dashboard\u2026", icon: "pencil", group: "Dashboard", quiet: true },
+             { id: "icondash", label: "Dashboard icon\u2026", icon: "grid", group: "Dashboard", quiet: true },
+             { id: "delete", label: "Delete dashboard", icon: "trash", danger: true, group: "Dashboard", quiet: true }] : []),
+        ...(this._canAddMobile()
+          ? [{ id: "addmobile", label: "Add phone layout", icon: "phone", group: "Dashboard", quiet: true }] : []),
+        { id: "hints", label: this._hints === false ? "Show hints" : "Hide hints", icon: "hints",
+          checked: this._hints !== false, group: "View", quiet: true },
       ], (id) => {
-        // A second menu on the same anchor: let the first finish closing, or
-        // _menuAt sees its own anchor and treats the request as a toggle.
+        if (id === "undo") return this._undo();
         if (id === "create") return this._createForm();
         if (id === "import") return this._importForm();
         if (id.indexOf("dash:") === 0) {
@@ -6768,6 +7444,14 @@ class HemmaPanel extends HTMLElement {
           this._setDash(p);
           this._remember(p);
           return this._load();
+        }
+        if (id === "renamedash") {
+          const d = (this._dashList || []).find((x) => x.url_path === this._dashUrl);
+          return d && this._renameDashboard(d);
+        }
+        if (id === "icondash") {
+          const d = (this._dashList || []).find((x) => x.url_path === this._dashUrl);
+          return d && this._dashIconMenu(this.$("more"), d);
         }
         if (id === "delete") return this._deleteDashboard();
         if (id === "addmobile") return this._addMobileSibling();
@@ -6785,65 +7469,81 @@ class HemmaPanel extends HTMLElement {
       this._miniSize = (saved === "tablet" || saved === "desktop") ? saved
         : (isNarrow(this) ? "tablet" : "desktop");
     }
-    // The preview shows the day photo until you ask for the night one. It
-    // follows neither the panel's theme nor HA's - which variant you are
-    // setting up is a choice, not a consequence of when you opened the panel.
     if (this._miniDark === undefined) {
-      // Follows HA on every load, never remembered. A stored preference was
-      // winning over the theme, so opening the panel in daylight still showed
-      // the night photo. The switch still works for the rest of the session.
       this._miniDark = !!(this._hass && this._hass.themes && this._hass.themes.darkMode);
     }
 
-    // Measured, not a number that drifts: the header grows when the room pills
-    // wrap. And dvh is the LARGE viewport height, ignoring retractable browser
-    // UI, so it overreads and the whole page scrolls.
     const setVph = () => {
       const w = panelW(this);
       const h = window.innerHeight;
-      // A page the browser has put aside measures as nothing and still fires its
-      // ResizeObserver. Nothing re-measures on the way back, so believing it
-      // stuck until a reload. Below this it is the absence of a size, not one.
+      // A page the browser has put aside measures as nothing and still fires its observer.
       if (w <= 40 || h <= 40) return;
       this.style.setProperty("--vph", h + "px");
       this.style.setProperty("--vpw", w + "px");
       this.classList.toggle("narrow", w < PANEL_NARROW);
+      this.classList.toggle("compact", w < PANEL_COMPACT);
+      this.classList.toggle("roomy", w >= PANEL_ROOMY);
+      this._placeCanvasHead();
+      this._alignCanvas();
       this.classList.toggle("tight", w < PANEL_TIGHT);
       const phone = w < PANEL_PHONE;
       const wasPhone = this._wasPhone;
       this._wasPhone = phone;
       this.classList.toggle("phone", phone);
-      this._placeRooms(w < PANEL_NARROW);
-      // Growing past the breakpoint has to BUILD the preview that was never built
-      // while it was a phone, or the slot stays empty until the signature
-      // changes.
+      this.classList.toggle("is-light", false);
+      const split = !phone;
+      const wasSplit = this.classList.contains("split");
+      this.classList.toggle("split", split);
+      if (wasSplit !== split && this._state) requestAnimationFrame(() => this._renderForm());
+      this._fitSlot();
+      this._placeRooms(this.classList.contains("flow"));
       if (wasPhone === true && !phone) this._rebuildPreview();
     };
     setVph();
-    // Both measurements, on every one of these. The header's offset is as
-    // viewport-dependent as the width is, and only setVph was listening - so a
-    // resize that moved the bar left --top-h behind.
+    this._pinAncestors();
+    if (/[?&]hemmadiag=1/.test(window.location.search)) this._diag();
     const remeasureAll = () => {
       setVph();
       if (this._syncTop) this._syncTop();
+      this._syncCollapse();
+      const thumbs = () => this.shadowRoot.querySelectorAll(".seg").forEach((sg) => sg._moveThumb && sg._moveThumb(false));
+      thumbs();
+      setTimeout(thumbs, 250);
     };
+    if (!this._onScroll) {
+      let queued = false;
+      this._onScroll = () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; this._syncCollapse(); });
+      };
+      window.addEventListener("scroll", this._onScroll, true);
+    }
+    const shellEl = this.shadowRoot.querySelector(".shell");
+    if (shellEl && !this._shellScroll) {
+      // scroll is not composed, so nothing on window hears the phone scroller unless it is forwarded.
+      this._shellScroll = () => window.dispatchEvent(new Event("scroll"));
+      shellEl.addEventListener("scroll", this._shellScroll, { passive: true });
+      // WebKit can leave an overflow scroller past the end when its content shrinks.
+      if (window.ResizeObserver) {
+        new ResizeObserver(() => {
+          if (!this.classList.contains("phone")) return;
+          const max = Math.max(0, shellEl.scrollHeight - shellEl.clientHeight);
+          if (shellEl.scrollTop > max) shellEl.scrollTop = max;
+          this._syncCollapse();
+        }).observe(this.shadowRoot.querySelector(".main"));
+      }
+    }
     window.addEventListener("resize", remeasureAll);
     if (window.visualViewport) {
       window.visualViewport.addEventListener("resize", remeasureAll);
     }
-    // Nothing fires a resize when a hidden page comes back, so every measurement
-    // taken while it was away is still in force.
+    // Nothing fires a resize when a hidden page comes back.
     if (!this._onVisible) {
       this._onVisible = () => {
         if (document.visibilityState !== "visible") return;
-        // Repeatedly, not once: returning to a full-screen Safari tab settles
-        // over several frames, and the fixed bar is restored AFTER the first
-        // paint - a single rAF measures a header that has not landed yet.
         const remeasure = () => {
           if (document.visibilityState !== "visible") return;
-          // The cache has to go first: syncTop returns early when the total it
-          // computes matches _topH, so a wrong value that happens to recur
-          // would never be corrected.
           this._topH = null;
           setVph();
           if (this._syncTop) this._syncTop();
@@ -6856,9 +7556,6 @@ class HemmaPanel extends HTMLElement {
       // bfcache restores skip visibilitychange entirely on some browsers.
       window.addEventListener("pageshow", this._onVisible);
     }
-    // The slot can change width without the window doing so - HA's sidebar
-    // docks, undocks and collapses under the panel's feet, and none of that is
-    // a resize event.
     if (this.parentElement && window.ResizeObserver) {
       if (this._slotObs) this._slotObs.disconnect();
       this._slotObs = new ResizeObserver(() => setVph());
@@ -6868,27 +7565,20 @@ class HemmaPanel extends HTMLElement {
     const bar = this.shadowRoot.querySelector(".top");
     const body = this.shadowRoot.querySelector(".body");
     const syncTop = () => {
-      // The bar is fixed to the VIEWPORT and absorbs the safe-area inset itself,
-      // but the host may inset .body by the same amount - adding the height on
-      // top of an offset already there. Measure the gap instead; subtracting the
-      // scroll keeps it stable, and with no host inset it is the height.
       const b = bar.getBoundingClientRect();
-      // Same reason as setVph: a hidden page measures its bar as nothing, and
-      // caching that in _topH means the correct value is never written.
       if (b.height <= 0) return;
       const docTop = document.documentElement.getBoundingClientRect().top;
-      const bodyTop = body.getBoundingClientRect().top - docTop;
+      const own = this.classList.contains("phone") ? this.shadowRoot.querySelector(".shell") : null;
+      const bodyTop = body.getBoundingClientRect().top - docTop + (own ? own.scrollTop : 0);
       const total = Math.max(0, Math.round(b.bottom - bodyTop)) + 26;
       if (this._topH === total) return;
       this._topH = total;
       this.style.setProperty("--top-h", total + "px");
-      // The columns just got shorter or taller, so the preview no longer fits
-      // what it was measured against.
       if (this._applyMapSize) this._applyMapSize();
     };
     this._syncTop = syncTop;
     syncTop();
-    requestAnimationFrame(syncTop);
+    requestAnimationFrame(() => { syncTop(); this._syncCollapse(); });
     if (window.ResizeObserver) {
       new ResizeObserver(syncTop).observe(bar);
     }
@@ -6897,22 +7587,14 @@ class HemmaPanel extends HTMLElement {
     this._wireSeg(this.$("sizeseg"), "size", this._miniSize || "desktop", (v) => {
       this._miniSize = this._sizeAllowed(v);
       localStorage.setItem("hemma_panel_preview_size", this._miniSize);
-      // REBUILD, not reclass: reclassing works while every size is one markup at
-      // a different scale, and the phone is a different tree.
       this._rebuildPreview();
     });
     this._wireSeg(this.$("modeseg"), "mode", this._miniDark ? "night" : "day", (v) => {
       this._miniDark = v === "night";
-      // Not _syncPreview: which photo you are looking at is not an edit, and
-      // that path marks the form dirty.
       const mount = this.$("mapmount");
       const room = this._state && this._state.compact.rooms[this._room];
       if (!mount || !mount.firstChild || !room) return;
 
-      // Only the photo differs between the two modes, so cross-fade it and the
-      // swap reads as the light changing. The outgoing shot stays on top as a
-      // ghost, inserted after .mini-photo so the tint and scrim hold still and
-      // only the sky moves.
       const heroSel = this._miniSize === "phone" ? ".mp-photo" : ".mini-photo";
       const before = mount.querySelector(heroSel);
       const prevSrc = before && before.src;
@@ -6927,13 +7609,9 @@ class HemmaPanel extends HTMLElement {
       ghost.alt = "";
       ghost.dataset.ghost = "1";
       ghost.src = prevSrc;
-      // The phone hero carries a scroll offset of its own, so a ghost with no
-      // transform would jump to the top of the screen to fade out.
       if (photo.style.transform) ghost.style.transform = photo.style.transform;
       photo.parentNode.insertBefore(ghost, photo.nextSibling);
 
-      // Only ever removes the ghost. If anything adopts it, it stops being one
-      // and this must not reach into the card and take its photo out.
       const drop = () => {
         if (ghost.dataset.ghost && ghost.parentNode) ghost.remove();
       };
@@ -6945,8 +7623,6 @@ class HemmaPanel extends HTMLElement {
           { duration: 900, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" })
           .finished.then(drop, drop);
       };
-      // Waiting for the incoming photo matters: fading the ghost out over an
-      // undecoded image shows the tint through, which is the flash again.
       if (photo.complete && photo.naturalWidth) dissolve();
       else {
         photo.addEventListener("load", dissolve, { once: true });
@@ -6956,14 +7632,67 @@ class HemmaPanel extends HTMLElement {
 
 
     this.$("save").onclick = () => this._save();
+    this.$("railbtn").onclick = () => this._toggleRail();
+    this.$("roomtitle").onclick = () => this._roomTitleMenu(this.$("roomtitle"));
+    this.shadowRoot.querySelector(".railscrim").onclick = () => this._toggleRail(false);
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && this.classList.contains("railopen")) this._toggleRail(false);
+    });
+    this.$("undo").onclick = () => this._undo();
+    this.$("undo").title = "Undo (" + (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "") ? "\u2318Z" : "Ctrl+Z") + ")";
+    this.shadowRoot.addEventListener("focusin", (ev) => {
+      const t = ev.composedPath ? ev.composedPath()[0] : ev.target;
+      if (!t || t.tagName !== "INPUT" || !isPhone(this)) return;
+      if (t.closest && t.closest(".psheet")) return;
+      this._focusSnap = this._scrollSnap();
+    });
+    this.shadowRoot.addEventListener("focusout", (ev) => {
+      const t = ev.composedPath ? ev.composedPath()[0] : ev.target;
+      if (!t || t.tagName !== "INPUT" || !isPhone(this) || !this._focusSnap) return;
+      if (t.closest && t.closest(".psheet")) return;
+      const snap = this._focusSnap;
+      this._focusSnap = null;
+      this._restoreScroll(snap);
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (!(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey || String(ev.key).toLowerCase() !== "z") return;
+      if (!this.isConnected || !(this._undoStack || []).length) return;
+      const t = ev.composedPath ? ev.composedPath()[0] : ev.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      ev.preventDefault();
+      this._undo();
+    });
     this.$("donebtn").onclick = () => this._done();
     await this._refreshDashboards();
   }
 
-  // Whether a dashboard is a Hemma one is only knowable from its config, so the
-  // others are pruned in the background once the panel is already usable.
-  async _pruneDashboards(list) {
-    for (const d of list) {
+  _verdicts() {
+    if (!this._hemmaVerdict) {
+      this._hemmaVerdict = new Map();
+      try {
+        JSON.parse(localStorage.getItem(NOT_HEMMA_KEY) || "[]")
+          .forEach((u) => this._hemmaVerdict.set(u, false));
+      } catch (e) { /* private mode */ }
+    }
+    return this._hemmaVerdict;
+  }
+
+  _setVerdict(url_path, hemma) {
+    const v = this._verdicts();
+    v.set(url_path, hemma);
+    try {
+      localStorage.setItem(NOT_HEMMA_KEY,
+        JSON.stringify([...v].filter(([, h]) => !h).map(([u]) => u)));
+    } catch (e) { /* private mode */ }
+  }
+
+  _shownDashboards(all) {
+    const v = this._verdicts();
+    return (all || []).filter((d) => d.mode === "storage" && v.get(d.url_path) !== false);
+  }
+
+  async _pruneDashboards(all) {
+    for (const d of all) {
       if (d.url_path === this._dashUrl) continue;
       let hemma = false;
       try {
@@ -6973,18 +7702,17 @@ class HemmaPanel extends HTMLElement {
       } catch (e) {
         hemma = false;
       }
-      if (hemma) continue;
-      this._dashList = (this._dashList || []).filter((x) => x.url_path !== d.url_path);
-      this._log(`hid "${d.url_path}", not a Hemma dashboard`);
-      // The sidebar is drawn from this list, so a row nobody removed is a row you
-      // can click into an empty dashboard.
+      this._setVerdict(d.url_path, hemma);
+      const listed = (this._dashList || []).some((x) => x.url_path === d.url_path);
+      if (hemma === listed) continue;
+      this._dashList = hemma
+        ? (this._dashList || []).concat([d])
+        : (this._dashList || []).filter((x) => x.url_path !== d.url_path);
+      if (!hemma) this._log(`hid "${d.url_path}", not a Hemma dashboard`);
       this._paintDashes();
     }
   }
 
-  // withRoom lands on the view you are editing, so the trip out and back keeps
-  // its place. Done opens the half that matches the DEVICE, not the half the
-  // panel happened to be editing.
   _dashForDevice(url_path) {
     const list = this._dashList || [];
     if (!list.length) return url_path;
@@ -6993,8 +7721,6 @@ class HemmaPanel extends HTMLElement {
       || /\bmobile\b/i.test(d.title || "");
     const cur = list.find((d) => d.url_path === url_path);
     if (cur && mobile(cur) === phone) return url_path;
-    // The sibling of the one being edited first: dashboard-hemma pairs with
-    // dashboard-hemma-mobile, so a second Hemma pair cannot pull you across.
     const stem = (u) => String(u || "").replace(/[-_]mobile$/i, "");
     const twin = list.find((d) => d.url_path !== url_path
       && stem(d.url_path) === stem(url_path) && mobile(d) === phone);
@@ -7010,22 +7736,14 @@ class HemmaPanel extends HTMLElement {
     window.location.assign("/" + p + (room && room.path ? "/" + room.path : ""));
   }
 
-  // The current dashboard used to live on the header picker's .value. The
-  // picker is gone - it moved into the ... menu - so it is plain state now.
   _setDash(url_path) {
     this._dashUrl = url_path || "";
     this._paintDashes();
   }
 
-  // Titles, not url_paths. Only ONE dashboard is loaded at a time, so the Phone
-  // tag is read from the name for the others and from state for that one.
-  // A pair is labeled by the axis that separates its halves - the device - and
-  // with two pairs that stops distinguishing, so the titles come back.
   _toggleEdit(which) {
     const cls = "editing-" + which;
     const on = !this.classList.contains(cls);
-    // One section at a time: two lists both in edit mode is two states to hold
-    // in your head for no benefit.
     this.classList.remove("editing-rooms", "editing-dashes");
     const btn = this.$(which + "edit");
     if (btn) btn.textContent = on ? "Done" : "Edit";
@@ -7034,15 +7752,11 @@ class HemmaPanel extends HTMLElement {
     if (ob) ob.textContent = "Edit";
     this._renderTabs();
     this._paintDashes();
-    // Add the class AFTER the rows exist, or they are built at their final width
-    // and the transition has nothing to play from.
     if (on) requestAnimationFrame(() => this.classList.add(cls));
   }
 
   _editing(which) { return this.classList.contains("editing-" + which); }
 
-  // The minus a row grows in edit mode. Both lists build it the same way, and
-  // both confirm before removing anything.
   _minusFor(onTap) {
     const b = document.createElement("button");
     b.className = "railminus";
@@ -7054,8 +7768,158 @@ class HemmaPanel extends HTMLElement {
     return b;
   }
 
-  // Renaming a home. HA owns the title, so this is a dashboard update rather
-  // than a config write - and the sidebar reads titles, so it repaints after.
+  async _mdiList() {
+    if (this._mdiNames) return this._mdiNames;
+    try {
+      const res = await fetch("/static/mdi/iconList.json");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const raw = await res.json();
+      const names = (raw || []).map((x) => (typeof x === "string"
+        ? { n: x, k: "" }
+        : x && x.name && { n: x.name, k: (x.keywords || []).join(" ") }))
+        .filter(Boolean);
+      if (!names.length) throw new Error("empty list");
+      this._mdiNames = names;
+    } catch (e) {
+      this._mdiNames = null;
+      this._log("mdi list unavailable: " + e.message, "warn");
+    }
+    return this._mdiNames;
+  }
+
+  async _dashIconMenu(anchor, d) {
+    const names = await this._mdiList();
+    // No list to browse means the field is the only honest offer.
+    if (!names) return this._dashIconAsk(d);
+    this._iconSheet(d, names);
+  }
+
+  _iconSheet(d, names) {
+    const pane = document.createElement("div");
+    pane.className = "askpane iconpane";
+    const scrim = document.createElement("div");
+    scrim.className = "fscrim";
+    const stack = document.createElement("div");
+    stack.className = "askstack iconstack";
+    const frost = document.createElement("div");
+    frost.className = "fglass";
+    const box = document.createElement("div");
+    box.className = "askcard iconcard";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    stack.appendChild(frost); stack.appendChild(box);
+    pane.appendChild(scrim); pane.appendChild(stack);
+
+    const h = document.createElement("h3");
+    h.textContent = "Dashboard icon";
+    box.appendChild(h);
+
+    const list = document.createElement("div");
+    list.className = "flist";
+    const row = document.createElement("div");
+    row.className = "frow field";
+    const input = document.createElement("input");
+    input.className = "fin lead";
+    input.placeholder = "Search icons";
+    input.spellcheck = false;
+    row.appendChild(input);
+    list.appendChild(row);
+    box.appendChild(list);
+
+    const grid = document.createElement("div");
+    grid.className = "icongrid";
+    box.appendChild(grid);
+
+    const close = () => {
+      document.removeEventListener("keydown", onKey, true);
+      this._flowLockScroll(false);
+      pane.remove();
+    };
+    const onKey = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); close(); } };
+
+    const cell = (name, label) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "iconcell" + ((d.icon || "") === name ? " on" : "");
+      b.title = label || name;
+      if (name) {
+        const ic = document.createElement("ha-icon");
+        ic.setAttribute("icon", name);
+        b.appendChild(ic);
+      } else {
+        const x = document.createElement("span");
+        x.className = "iconnone";
+        x.textContent = "None";
+        b.appendChild(x);
+      }
+      b.onclick = () => { close(); this._setDashIcon(d, name); };
+      return b;
+    };
+
+    const CAP = 240;
+    const paint = () => {
+      const q = input.value.trim().toLowerCase().replace(/^mdi:/, "");
+      grid.replaceChildren();
+      if (!q) grid.appendChild(cell("", "No icon"));
+      let n = 0;
+      for (let i = 0; i < names.length && n < CAP; i++) {
+        const it = names[i];
+        if (q && it.n.indexOf(q) < 0 && it.k.indexOf(q) < 0) continue;
+        grid.appendChild(cell("mdi:" + it.n, it.n));
+        n++;
+      }
+      if (!n) {
+        const none = document.createElement("div");
+        none.className = "iconempty";
+        none.textContent = "No icon matches that.";
+        grid.appendChild(none);
+      }
+    };
+    input.oninput = paint;
+    paint();
+
+    const acts = document.createElement("div");
+    acts.className = "askacts";
+    const cancel = document.createElement("button");
+    cancel.className = "ghost";
+    cancel.textContent = "Cancel";
+    cancel.onclick = close;
+    acts.appendChild(cancel);
+    box.appendChild(acts);
+
+    scrim.onclick = close;
+    document.addEventListener("keydown", onKey, true);
+    this._blockDrag(pane);
+    this._flowLockScroll(true);
+    this.shadowRoot.appendChild(pane);
+    input.focus();
+  }
+
+  async _dashIconAsk(d) {
+    const name = await this._ask({
+      title: "Dashboard icon", value: d.icon || "", placeholder: "mdi:home",
+      message: "Any Material Design Icons name, the way Home Assistant writes it.",
+      confirmLabel: "Set",
+    });
+    if (name === null || name === undefined || name === false) return;
+    this._setDashIcon(d, String(name).trim());
+  }
+
+  async _setDashIcon(d, icon) {
+    if ((d.icon || "") === (icon || "")) return;
+    try {
+      await this._hass.callWS({
+        type: "lovelace/dashboards/update", dashboard_id: d.id, icon: icon || null,
+      });
+      d.icon = icon || undefined;
+      this._paintDashes();
+      this._status(icon ? "Icon set" : "Icon removed", "ok");
+    } catch (e) {
+      this._status("could not set the icon: " + e.message, "err");
+      this._log("dashboard icon failed: " + e.message, "err");
+    }
+  }
+
   async _renameDashboard(d) {
     const name = await this._ask({
       title: "Rename dashboard", value: d.title || d.url_path, confirmLabel: "Rename",
@@ -7066,16 +7930,23 @@ class HemmaPanel extends HTMLElement {
         type: "lovelace/dashboards/update", dashboard_id: d.id, title: name,
       });
       d.title = name;
+      const home = this._homes(this._dashList || []).find((h) => h.wide === d);
+      const phone = home && home.phone;
+      if (phone) {
+        const phoneName = name + " Mobile";
+        await this._hass.callWS({
+          type: "lovelace/dashboards/update", dashboard_id: phone.id, title: phoneName,
+        });
+        phone.title = phoneName;
+      }
       this._paintDashes();
-      this._log(`renamed "${d.url_path}" to "${name}"`, "ok");
+      this._log(`renamed "${d.url_path}" to "${name}"` + (phone ? ` and its phone layout` : ""), "ok");
     } catch (e) {
       this._status("rename failed: " + e.message, "err");
       this._log("rename failed: " + e.message, "err");
     }
   }
 
-  // One row per home, phone half included: the two are renderings of one
-  // configuration, and the size control is how you look at each.
   _homes(list) {
     const stem = (u) => String(u || "").replace(/[-_]mobile$/i, "");
     const isPhone = (d) => /[-_]mobile$/i.test(d.url_path || "");
@@ -7110,17 +7981,11 @@ class HemmaPanel extends HTMLElement {
     const list = this._dashList || [];
     box.innerHTML = "";
     const homes = this._homes(list);
-    // One home is the normal case, and a switcher offering a choice of one only
-    // suggests you were supposed to have made more. Create still lives in the
-    // toolbar menu, which is where it has to be anyway - the rail is off screen
-    // below PANEL_NARROW. The section comes back the moment a second home does.
     const many = homes.length > 1;
     const head = this.$("g-dashes");
     if (head) head.hidden = !many;
     box.hidden = !many;
     if (!many) {
-      // Clear the class directly rather than through _toggleEdit, which repaints
-      // this list and would come straight back here.
       this.classList.remove("editing-dashes");
       const eb = this.$("dashesedit");
       if (eb) eb.textContent = "Edit";
@@ -7141,21 +8006,22 @@ class HemmaPanel extends HTMLElement {
       label.textContent = shown;
       t.appendChild(label);
 
-      // No Phone tag. It existed to tell two rows apart, and there is one row
-      // per home now - what it renders as is the preview's business.
       const caret = document.createElement("span");
       caret.className = "caret";
-      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor">'
+        + '<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/>'
+        + '<circle cx="19" cy="12" r="2"/></svg>';
+      caret.onpointerdown = (ev) => ev.stopPropagation();
+      caret.onclick = (ev) => {
+        ev.stopPropagation();
+        this._dashMenu(caret.getBoundingClientRect().width ? caret : t, d, home);
+      };
       t.appendChild(caret);
-      // Anchored to the ROW, not the chevron: the chevron is display:none now,
-      // so it has no box and the menu opened at the top-left of the screen.
       t.oncontextmenu = (ev) => { ev.preventDefault(); this._dashMenu(t, d, home); };
 
       t.appendChild(this._minusFor(() => this._deleteDashboard(d.url_path)));
 
       t.onclick = () => {
-        // While editing, a tap renames. Navigating out of a list you are in the
-        // middle of editing is never what you meant.
         if (this._editing("dashes")) return this._renameDashboard(d);
         if (d.url_path === this._dashUrl) return;
         this._setDash(d.url_path);
@@ -7168,24 +8034,16 @@ class HemmaPanel extends HTMLElement {
     box.appendChild(el);
   }
 
-  // The section menus are gone. Edit on the header covers removing, a tap in
-  // edit mode covers renaming, and Create keeps its place in the toolbar menu -
-  // which is also where it has to be, since the sidebar is not on screen at all
-  // below PANEL_NARROW.
 
-  // The row's own menu, the way the room rows have one. Delete lives here now
-  // as well as in the toolbar menu - a source list is where you expect to act
-  // on the thing you are pointing at.
   _dashMenu(anchor, d, home) {
-    // No "Edit this dashboard": tapping the row is how you edit it, and a menu
-    // item for the thing the row already does is a menu item that teaches
-    // nothing.
     this._menuAt(anchor, [
       { id: "rename", label: "Rename\u2026" },
+      { id: "icon", label: "Change icon\u2026" },
       ...(home && !home.phone ? [{ id: "addmobile", label: "Add phone layout" }] : []),
       { id: "delete", label: "Delete", destructive: true },
     ], (id) => {
       if (id === "rename") return this._renameDashboard(d);
+      if (id === "icon") return this._dashIconMenu(anchor, d);
       if (id === "addmobile") {
         if (d.url_path !== this._dashUrl) {
           this._setDash(d.url_path); this._remember(d.url_path);
@@ -7197,57 +8055,93 @@ class HemmaPanel extends HTMLElement {
     });
   }
 
-  // Opened from the ... menu, anchored to it, so it reads as a second step of
-  // the same control rather than a new one.
   _remember(url_path) {
     try { if (url_path) localStorage.setItem(LAST_DASH_KEY, url_path); } catch (e) { /* private mode */ }
   }
 
-  // A dashboard the editor could not read must not be what the next reload
-  // opens: that turns one wrong click into a panel you cannot get out of
-  // without clearing storage.
   _forget(url_path) {
     try {
       if (localStorage.getItem(LAST_DASH_KEY) === url_path) localStorage.removeItem(LAST_DASH_KEY);
     } catch (e) { /* private mode */ }
   }
 
-  // Takes a path now: the sidebar can delete a dashboard you are not editing,
-  // and deleting the open one still has to leave the panel on something.
+  _homeHalves(url_path) {
+    const stem = (u) => String(u || "").replace(/[-_]mobile$/i, "");
+    const phone = (u) => /[-_]mobile$/i.test(u || "");
+    return (this._dashList || []).filter((d) => d.url_path === url_path
+      || (stem(d.url_path) === stem(url_path) && phone(d.url_path) !== phone(url_path)));
+  }
+
   async _deleteDashboard(which) {
     const url_path = which || this._dashUrl;
-    const entry = (this._dashList || []).find((d) => d.url_path === url_path);
-    if (!entry) return this._status("pick a dashboard first", "err");
+    const halves = this._homeHalves(url_path);
+    if (!halves.length) return this._status("pick a dashboard first", "err");
+    const home = halves.find((d) => !/[-_]mobile$/i.test(d.url_path)) || halves[0];
 
     const yes = await this._ask({
-      title: 'Delete "' + entry.title + '"?',
-      message: "The dashboard and everything configured in it is removed. Your entities are untouched. This cannot be undone.",
+      title: `Delete \u201c${home.title || home.url_path}\u201d?`,
+      message: (halves.length > 1
+        ? "This dashboard and its phone layout will be deleted, along with everything set up in them."
+        : "This dashboard will be deleted, along with everything set up in it.")
+        + " Your devices aren't affected. This can't be undone.",
       confirmLabel: "Delete", destructive: true,
     });
     if (!yes) return;
 
-    try {
-      await this._hass.callWS({ type: "lovelace/dashboards/delete", dashboard_id: entry.id });
-      this._log(`deleted dashboard "${url_path}"`, "ok");
-      this._status(`Deleted "${entry.title}"`, "ok");
-      this._dashList = (this._dashList || []).filter((d) => d.url_path !== url_path);
-      // Deleting the one being edited leaves nothing loaded, so let the refresh
-      // choose again; deleting any other must not move you off your work.
-      await this._refreshDashboards(url_path === this._dashUrl ? undefined : this._dashUrl);
-    } catch (e) {
-      this._status("delete failed: " + e.message, "err");
-      this._log("delete failed: " + e.message, "err");
+    const gone = [];
+    let failure = null;
+    for (const d of halves) {
+      try {
+        await this._hass.callWS({ type: "lovelace/dashboards/delete", dashboard_id: d.id });
+        gone.push(d.url_path);
+        this._log(`deleted dashboard "${d.url_path}"`, "ok");
+      } catch (e) {
+        failure = e;
+        this._log(`could not delete "${d.url_path}": ${e.message}`, "err");
+      }
+    }
+    this._dashList = (this._dashList || []).filter((d) => !gone.includes(d.url_path));
+    gone.forEach((u) => this._forget(u));
+    if (failure) this._status("Couldn't delete everything: " + this._plainError(failure), "err");
+
+    if (gone.includes(this._dashUrl) || gone.includes(mobilePathOf(this._dashUrl))) {
+      return this._refreshDashboards();
+    }
+    this._paintDashes();
+  }
+
+  async _ws(msg) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this._hass.callWS(msg);
+      } catch (e) {
+        const lost = e === 3 || (e && e.code === 3) || !(e && e.message);
+        if (!lost || attempt >= 20) throw e;
+        const conn = this._hass && this._hass.connection;
+        await new Promise((res) => {
+          let t = null;
+          const done = () => {
+            clearTimeout(t);
+            if (conn && conn.removeEventListener) conn.removeEventListener("ready", done);
+            res();
+          };
+          t = setTimeout(done, Math.min(4000, 300 * (attempt + 1)));
+          if (conn && conn.addEventListener && conn.connected === false) conn.addEventListener("ready", done);
+        });
+      }
     }
   }
 
   async _refreshDashboards(select) {
     let list = [];
+    let all = [];
     try {
-      list = (await this._hass.callWS({ type: "lovelace/dashboards/list" }))
+      all = (await this._ws({ type: "lovelace/dashboards/list" }))
         .filter((d) => d.mode === "storage");
+      list = this._shownDashboards(all);
       this._dashList = list;
     } catch (e) {
-      this._status("could not list dashboards: " + e.message, "err");
+      this._status(this._plainError(e, "Hemma couldn't reach Home Assistant. Reopen it to try again."), "err");
       return;
     }
     if (!list.length) {
@@ -7256,16 +8150,26 @@ class HemmaPanel extends HTMLElement {
       return;
     }
 
-    // Prefer an explicit choice, then the last one used, then anything that
-    // looks like a Hemma dashboard, rather than whatever HA happens to list first.
     let pick = select;
+    // Opened from a dashboard's own "Edit dashboard": that dashboard wins over
+    // whatever was edited here last. A phone path resolves to its desktop pair.
+    if (!pick) {
+      const asked = this._dashFromRoute();
+      if (asked) {
+        const stem = String(asked).replace(/[-_]mobile$/i, "");
+        if (list.some((d) => d.url_path === stem)) pick = stem;
+        else if (list.some((d) => d.url_path === asked)) pick = asked;
+      }
+    }
     if (!pick) {
       let remembered = null;
       try { remembered = localStorage.getItem(LAST_DASH_KEY); } catch (e) { /* private mode */ }
       if (remembered && list.some((d) => d.url_path === remembered)) pick = remembered;
     }
     if (!pick) {
-      const looksHemma = list.find((d) => /hemma/i.test(d.url_path) || /hemma/i.test(d.title || ""));
+      const known = this._verdicts();
+      const looksHemma = list.find((d) => known.get(d.url_path) === true)
+        || list.find((d) => /hemma/i.test(d.url_path) || /hemma/i.test(d.title || ""));
       pick = looksHemma ? looksHemma.url_path : list[0].url_path;
     }
     this._setDash(pick);
@@ -7273,167 +8177,567 @@ class HemmaPanel extends HTMLElement {
 
     this._log(`${list.length} storage dashboard(s)`);
     await this._load();
-    this._pruneDashboards(list);
+    this._pruneDashboards(all);
   }
 
-  _firstRun() {
-    this._saveBlocked = true;
-    this._markDirty();
-    this.$("rooms").innerHTML = "";
-    this.$("tilespane").innerHTML = "";
-    this.$("pane").innerHTML = `
-      <div class="empty">
-        <h2>No dashboard yet</h2>
-        <p>Create a Hemma dashboard and pick which rooms it should have.<br>
-           You can add entities to each room afterwards.</p>
-      </div>`;
+  // ── setup flow ────────────────────────────────────────────────────────────
+
+  _flowOpen(mode) {
+    if (this._flowMode === mode && this._fx) return false;
+    if (this._flowMode) this._exitFlow(false);
+    this._flowMode = mode;
+    const pane = this.$("flow");
+    if (mode === "full") {
+      this._saveBlocked = true;
+      this._markDirty();
+      this.$("rooms").innerHTML = "";
+      this.$("tilespane").innerHTML = "";
+      this.$("pane").innerHTML = "";
+      const head = this.shadowRoot.querySelector(".insphead");
+      if (head) head.innerHTML = "";
+      const mount = this.$("mapmount");
+      if (mount) mount.innerHTML = "";
+      this._status("");
+      this.classList.remove("sheeted");
+      this.classList.add("flow");
+      requestAnimationFrame(() => this._playEntrance(true));
+      this._placeRooms(true);
+    } else {
+      this.classList.remove("flow");
+      this.classList.add("sheeted");
+      this._flowKey = (ev) => {
+        if (ev.key !== "Escape" || this._flowMode !== "sheet" || !this._flowClosable) return;
+        if (this.shadowRoot.querySelector(".askpane")) return;
+        ev.preventDefault();
+        this._flowBack();
+      };
+      document.addEventListener("keydown", this._flowKey, true);
+    }
+    this._flowLockScroll(true);
+    pane.innerHTML = "";
+    let scrim = null;
+    let frost = null;
+    if (mode === "sheet") {
+      scrim = document.createElement("div");
+      scrim.className = "fscrim";
+      pane.appendChild(scrim);
+    }
+    const stack = document.createElement("div");
+    stack.className = "flowstack";
+    if (mode === "sheet") {
+      frost = document.createElement("div");
+      frost.className = "fglass";
+      stack.appendChild(frost);
+      this._blockDrag(pane);
+    }
+    const sheet = document.createElement("div");
+    sheet.className = "flowsheet";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    stack.appendChild(sheet);
+    const bar = document.createElement("div");
+    bar.className = "flowbar";
+    const scroll = document.createElement("div");
+    scroll.className = "flowscroll";
+    const foot = document.createElement("div");
+    foot.className = "flowfoot";
+    sheet.appendChild(bar);
+    sheet.appendChild(scroll);
+    sheet.appendChild(foot);
+    pane.appendChild(stack);
+    this._fx = { sheet, bar, scroll, foot, scrim, frost };
+    if (mode === "sheet") {
+      this._surfaceIn(scrim, [frost, sheet], window.matchMedia("(max-width: 768px)").matches);
+    } else if (!menuStill()) {
+      sheet.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: "ease-out" });
+    }
+    return true;
+  }
+
+  _flowLockScroll(on) {
+    const els = [document.documentElement, document.body].filter((el) => el && el.style);
+    if (on) {
+      this._locks = (this._locks || 0) + 1;
+      if (this._locks > 1) return;
+      this._flowLocked = els.map((el) => [el,
+        ["overflow-x", "overflow-y"].map((k) => [k,
+          el.style.getPropertyValue ? el.style.getPropertyValue(k) : "",
+          el.style.getPropertyPriority ? el.style.getPropertyPriority(k) : ""])]);
+      els.forEach((el) => el.style.setProperty("overflow", "hidden", "important"));
+    } else if (this._locks) {
+      this._locks -= 1;
+      if (this._locks || !this._flowLocked) return;
+      this._flowLocked.forEach(([el, props]) => {
+        el.style.removeProperty("overflow");
+        props.forEach(([k, v, pr]) => { if (v) el.style.setProperty(k, v, pr); });
+      });
+      this._flowLocked = null;
+    }
+  }
+
+  // iOS still drags a page whose overflow is hidden once a touch starts on a scroller.
+  _blockDrag(layer) {
+    layer.addEventListener("touchmove", (ev) => {
+      const t = ev.target;
+      const sc = t && t.closest ? t.closest(".flowscroll") : null;
+      if (!sc || sc.scrollHeight <= sc.clientHeight + 1) ev.preventDefault();
+    }, { passive: false });
+  }
+
+  _surfaceIn(scrim, parts, rises) {
+    if (menuStill()) return;
+    const t = rises
+      ? { duration: 460, easing: "cubic-bezier(0.32, 0.72, 0, 1)" }
+      : { duration: 320, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" };
+    const frames = rises
+      ? [{ transform: "translateY(100%)" }, { transform: "none" }]
+      : [{ opacity: 0, transform: "scale(0.96)" }, { opacity: 1, transform: "none" }];
+    scrim.animate([{ opacity: 0 }, { opacity: 1 }], { duration: t.duration, easing: "ease-out" });
+    parts.forEach((el) => el.animate(frames, t));
+  }
+
+  _surfaceOut(scrim, parts, rises, done) {
+    if (menuStill()) return done();
+    const t = rises
+      ? { duration: 280, easing: "cubic-bezier(0.32, 0, 0.67, 0)", fill: "forwards" }
+      : { duration: 180, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" };
+    const frames = rises
+      ? [{ transform: "none" }, { transform: "translateY(100%)" }]
+      : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(0.96)" }];
+    scrim.animate([{ opacity: 1 }, { opacity: 0 }], t);
+    let left = parts.length;
+    const one = () => { if (--left === 0) done(); };
+    parts.forEach((el) => el.animate(frames, t).finished.then(one, one));
+  }
+
+  _exitFlow(animate) {
+    const mode = this._flowMode;
+    if (!mode) return;
+    const fx = this._fx;
+    this._flowMode = null;
+    this._fx = null;
+    this._flowTok = (this._flowTok || 0) + 1;
+    if (this._flowKey) {
+      document.removeEventListener("keydown", this._flowKey, true);
+      this._flowKey = null;
+    }
+    const pane = this.$("flow");
+    const finish = () => {
+      if (this._flowMode) return;
+      this.classList.remove("flow", "sheeted");
+      pane.innerHTML = "";
+      this._flowLockScroll(false);
+    };
+    if (mode === "full") {
+      finish();
+      this._placeRooms();
+      return;
+    }
+    if (animate === false || !fx) return finish();
+    this._surfaceOut(fx.scrim, [fx.frost, fx.sheet],
+      window.matchMedia("(max-width: 768px)").matches, finish);
+  }
+
+  _flowBack() {
+    if (this._flowMode === "sheet") return this._exitFlow(true);
+    if (this._dashUrl) return this._load();
+    this._refreshDashboards();
+  }
+
+  async _flowLeave(go) {
+    if (this._flowMode === "sheet" && this._state && this._isDirty()) {
+      const ok = await this._ask({
+        title: "Discard unsaved changes?",
+        message: "Your edits to the dashboard you were working on have not been saved.",
+        confirmLabel: "Discard", destructive: true,
+      });
+      if (!ok) return;
+    }
+    go();
+  }
+
+  _flowScreen(opts) {
+    const want = opts.full || !this._state || this._flowMode === "full" ? "full" : "sheet";
+    const opened = this._flowOpen(want);
+    const fx = this._fx;
+    const dir = this._flowDir || 1;
+    this._flowDir = 0;
+    this._flowTok = (this._flowTok || 0) + 1;
+    this._flowClosable = want === "sheet" && opts.closable !== false;
+    this._flowHasBack = !!opts.back;
+    const h0 = !opened && want === "sheet" ? fx.sheet.offsetHeight : 0;
+
+    const keepTop = opts.quiet ? fx.scroll.scrollTop : 0;
+    fx.bar.innerHTML = "";
+    fx.scroll.innerHTML = "";
+    fx.foot.innerHTML = "";
+    const nav = (path, label, onTap) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "fnav";
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + path + '"/></svg>';
+      b.onclick = onTap;
+      fx.bar.appendChild(b);
+    };
+    if (opts.back) nav(FLOW_NAV.back, "Back", () => { this._flowDir = -1; opts.back(); });
+    else if (this._flowClosable) nav(FLOW_NAV.close, "Close", () => this._flowBack());
+    fx.bar.classList.toggle("bare", !opts.back && !this._flowClosable);
+
+    const box = document.createElement("div");
+    box.className = "flowin";
+    if (opts.icon) {
+      const ic = document.createElement("div");
+      ic.className = "ficon" + (opts.tone ? " " + opts.tone : "");
+      ic.innerHTML = FLOW_GLYPH[opts.icon] || "";
+      box.appendChild(ic);
+    }
+    const h = document.createElement("h1");
+    h.className = "ftitle";
+    h.textContent = opts.title || "";
+    box.appendChild(h);
+    let lede = null;
+    if (opts.lede) {
+      lede = document.createElement("p");
+      lede.className = "flede";
+      lede.textContent = opts.lede;
+      box.appendChild(lede);
+    }
+    const err = document.createElement("div");
+    err.className = "flowerr";
+    err.id = "flow_err";
+    box.appendChild(err);
+    const body = document.createElement("div");
+    body.className = "fbody";
+    box.appendChild(body);
+    fx.scroll.appendChild(box);
+    fx.scroll.scrollTop = keepTop;
+    if (keepTop) requestAnimationFrame(() => { fx.scroll.scrollTop = keepTop; });
+    // A rule over the buttons only while content runs on beneath them.
+    fx.edge = () => fx.foot.classList.toggle("edge",
+      fx.scroll.scrollHeight - fx.scroll.scrollTop - fx.scroll.clientHeight > 1);
+    fx.scroll.onscroll = fx.edge;
+    requestAnimationFrame(() => { if (this._fx === fx) fx.edge(); });
+
+    if (!menuStill() && !opened) {
+      if (!opts.quiet) {
+        box.animate([{ opacity: 0, transform: `translateX(${dir * 24}px)` },
+                     { opacity: 1, transform: "none" }],
+          { duration: 300, easing: EASE });
+        fx.foot.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: "ease-out" });
+      }
+      if (h0) requestAnimationFrame(() => {
+        if (!this._fx || this._fx.sheet !== fx.sheet) return;
+        fx.edge();
+        const h1 = fx.sheet.offsetHeight;
+        if (Math.abs(h1 - h0) < 2) return;
+        fx.sheet.animate([{ height: h0 + "px" }, { height: h1 + "px" }],
+          { duration: 340, easing: EASE });
+      });
+    }
+    return { box, body, acts: fx.foot, err, lede };
+  }
+
+  _flowError(msg) {
+    const el = this.$("flow_err");
+    if (el) el.textContent = msg || "";
+  }
+
+  _flowButton(acts, label, onTap, secondary) {
+    const b = document.createElement("button");
+    if (secondary) b.className = "ghost";
+    b.textContent = label;
+    b.onclick = onTap;
+    acts.appendChild(b);
+    return b;
+  }
+
+  // A sheet already has its close button and a step with Back has its way out.
+  _flowCancel(acts, onTap) {
+    if (this._flowMode === "sheet" || this._flowHasBack) return null;
+    return this._flowButton(acts, "Cancel", onTap || (() => this._flowBack()), true);
+  }
+
+  _flowGroup(parent, opts) {
+    opts = opts || {};
+    const g = document.createElement("div");
+    g.className = "fgroup";
+    if (opts.header) {
+      const h = document.createElement("div");
+      h.className = "fhead";
+      h.textContent = opts.header;
+      g.appendChild(h);
+    }
+    const list = document.createElement("div");
+    list.className = "flist";
+    g.appendChild(list);
+    if (opts.footer) {
+      const f = document.createElement("div");
+      f.className = "ffoot";
+      f.textContent = opts.footer;
+      g.appendChild(f);
+    }
+    parent.appendChild(g);
+    return list;
+  }
+
+  _flowRow(list, o) {
+    const tag = o.tag || (o.onTap ? "button" : "div");
+    const row = document.createElement(tag);
+    row.className = "frow" + (o.dim ? " dim" : "");
+    if (tag === "button") row.type = "button";
+    if (o.icon || o.mask) {
+      row.classList.add("hasicon");
+      const ic = document.createElement("span");
+      ic.className = "rico";
+      if (o.tint) ic.style.setProperty("--tint", o.tint);
+      if (o.mask) {
+        const mk = document.createElement("span");
+        mk.className = "mk";
+        mk.style.setProperty("--i", "url('" + o.mask + "')");
+        ic.appendChild(mk);
+      } else {
+        ic.innerHTML = FLOW_GLYPH[o.icon] || "";
+      }
+      row.appendChild(ic);
+    }
+    if (o.title) {
+      const text = document.createElement("span");
+      text.className = "rtext";
+      const b = document.createElement("b");
+      b.textContent = o.title;
+      text.appendChild(b);
+      if (o.sub) {
+        const s = document.createElement("span");
+        if (o.subTone) s.className = o.subTone;
+        s.textContent = o.sub;
+        text.appendChild(s);
+      }
+      row.appendChild(text);
+    }
+    let input = null;
+    let detail = null;
+    if (o.input !== undefined) {
+      row.classList.add("field");
+      input = document.createElement("input");
+      input.className = "fin";
+      input.value = o.input || "";
+      input.spellcheck = false;
+      input.setAttribute("autocapitalize", "off");
+      if (o.placeholder) input.placeholder = o.placeholder;
+      if (o.title) input.setAttribute("aria-label", o.title);
+      row.appendChild(input);
+    }
+    if (o.detail !== undefined) {
+      detail = document.createElement("span");
+      detail.className = "rdetail" + (o.detailTone ? " " + o.detailTone : "");
+      detail.textContent = o.detail;
+      row.appendChild(detail);
+    }
+    if (o.get) {
+      const g = document.createElement("span");
+      g.className = "rget";
+      g.textContent = o.get;
+      row.appendChild(g);
+    }
+    if (o.check !== undefined) {
+      row.setAttribute("role", o.radio ? "radio" : "checkbox");
+      row.setAttribute("aria-checked", o.check ? "true" : "false");
+      const c = document.createElement("span");
+      c.className = "rcheck";
+      c.innerHTML = FLOW_GLYPH.check;
+      row.appendChild(c);
+    }
+    if (o.chevron) {
+      const c = document.createElement("span");
+      c.className = "rchev";
+      c.innerHTML = FLOW_GLYPH.chevron;
+      row.appendChild(c);
+    }
+    if (o.onTap) row.onclick = o.onTap;
+    if (o.before) list.insertBefore(row, o.before);
+    else list.appendChild(row);
+    return { row, input, detail };
+  }
+
+  _flowProgress(parent, labels) {
+    const names = labels.slice();
+    const wrap = document.createElement("div");
+    wrap.className = "fprog";
+    const track = document.createElement("div");
+    track.className = "track";
+    const fill = document.createElement("div");
+    fill.className = "fill";
+    track.appendChild(fill);
+    const cap = document.createElement("div");
+    cap.className = "cap";
+    wrap.appendChild(track);
+    wrap.appendChild(cap);
+    parent.appendChild(wrap);
+    const at = (n) => {
+      const end = n >= names.length;
+      fill.style.width = (end ? 100 : Math.round(((n + 0.5) / names.length) * 100)) + "%";
+      cap.textContent = end ? "Done" : names[n] + "…";
+    };
+    at(0);
+    return { at, label: (i, text) => { names[i] = text; } };
+  }
+
+  // HA needs a url_path, but it is not something anyone should have to choose.
+  _flowPath(title, fallback, suffix) {
+    const s = String(title || "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    // HA requires a hyphen, so a single-word name earns the suffix.
+    return this._freePath(!s ? fallback : s.includes("-") ? s : s + "-" + suffix);
+  }
+
+  async _firstRun() {
+    const s = this._flowScreen({
+      full: true, icon: "home",
+      title: "Welcome to Hemma",
+      lede: "Design your dashboard room by room, using the devices you already "
+        + "have in Home Assistant.",
+    });
+    const go = this._flowButton(s.acts, "Continue", () => {});
+    go.disabled = true;
+    let wides = [];
+    try {
+      wides = (await this._yamlHemma()).filter((d) => d.kind === "wide");
+    } catch (e) {
+      // A read that failed is not a dashboard to offer. Create still works.
+    }
+    if (!this.$("flow").contains(go)) return;
+    go.disabled = false;
+    const back = () => this._firstRun();
+    go.onclick = () => (wides.length
+      ? this._setupChoice(wides) : this._createForm({ back }));
+  }
+
+  _setupChoice(wides) {
+    const one = wides.length === 1;
+    const s = this._flowScreen({
+      full: true, icon: "import",
+      title: "Set Up Your Dashboard",
+      lede: (one ? "Hemma found a dashboard you built in YAML. Import it "
+        : "Hemma found dashboards you built in YAML. Import one ")
+        + "to keep every room, tile and setting.",
+      back: () => this._firstRun(),
+    });
+    const list = this._flowGroup(s.body);
+    const c = one ? this._importCounts(wides[0]) : null;
+    let pick = "import";
+    const rows = {};
+    const paint = (k) => {
+      pick = k;
+      Object.keys(rows).forEach((x) =>
+        rows[x].row.setAttribute("aria-checked", x === k ? "true" : "false"));
+    };
+    rows.import = this._flowRow(list, {
+      icon: "import", tint: FLOW_TINT.teal, title: "Import from YAML",
+      sub: one
+        ? `${wides[0].title || wides[0].url_path}, ${c.rooms.length} room${c.rooms.length === 1 ? "" : "s"}`
+        : `${wides.length} dashboards found`,
+      check: true, radio: true, onTap: () => paint("import"),
+    });
+    rows.fresh = this._flowRow(list, {
+      icon: "plus", tint: FLOW_TINT.gray, title: "Start from Scratch",
+      sub: "Choose your rooms, then add devices",
+      check: false, radio: true, onTap: () => paint("fresh"),
+    });
+    const back = () => this._setupChoice(wides);
+    this._flowButton(s.acts, "Continue", () => (pick === "import"
+      ? this._importForm({ back }) : this._createForm({ back })));
   }
 
   // ── create ────────────────────────────────────────────────────────────────
 
-  async _createForm() {
-    this._saveBlocked = true;
-    this._markDirty();
-    this.$("rooms").innerHTML = "";
-    this.$("tilespane").innerHTML = "";
-    this._status("");
+  async _createForm(o) {
+    o = o || {};
     let areas = [];
+    let failed = null;
     try {
-      areas = await this._hass.callWS({ type: "config/area_registry/list" });
+      areas = (await this._hass.callWS({ type: "config/area_registry/list" })) || [];
     } catch (e) {
-      this._status("could not read areas: " + e.message, "err");
+      failed = e;
     }
 
-    this.$("pane").innerHTML = `
-      <section class="card">
-        <h2>Set up Hemma</h2>
-        <div class="row"><label>Name</label><input id="c_title" value="Hemma"></div>
-        <div class="adv" id="c_adv">
-          <button class="advsum" type="button" id="c_advsum">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
-                 stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-            <span>Address</span>
-          </button>
-          <div class="advbody">
-            <div class="row"><label>Address</label><input id="c_path" value="hemma-dashboard"></div>
-          </div>
-        </div>
-      </section>
-      <section class="card">
-        <h2>Rooms</h2>
-        <div class="hint">Home is always included. Add a room for each part of
-          the house you want a page for.</div>
-        <div class="areas" id="c_areas"></div>
-        <div class="addbar">
-          <button id="c_go">Create Dashboard</button>
-          <button id="c_cancel" class="ghost">Cancel</button>
-        </div>
-      </section>`;
+    const s = this._flowScreen({
+      icon: "rooms",
+      title: "Choose Your Rooms",
+      lede: "Each room gets its own page. Home is always included, and you can "
+        + "change rooms at any time.",
+      back: o.back,
+    });
+    if (failed) {
+      this._flowError("Couldn't read your areas (" + failed.message
+        + "). You can still add rooms by hand.");
+    }
 
-    const box = this.$("c_areas");
-    const addArea = (name, checked) => {
-      const w = document.createElement("label");
-      w.className = "area";
-      const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.checked = checked !== false; cb.dataset.name = name;
-      w.appendChild(cb);
-      w.appendChild(document.createTextNode(name));
-      box.appendChild(w);
-      return w;
-    };
-    areas.forEach((a) => addArea(a.name, true));
-
-    // An empty state that only reports a shortage is the one thing an empty
-    // state must not be. "No areas found" was true and gave you nothing to do
-    // about it, so this one carries the action: take a suggestion, or type your
-    // own. The rooms are Hemma's either way - an HA area only saves you typing.
-    if (!areas.length) {
-      const why = document.createElement("div");
-      why.className = "hint";
-      why.textContent = "You have no areas in Home Assistant yet. Rooms you add "
-        + "here are Hemma's own; assigning entities to areas later makes setup faster.";
-      box.appendChild(why);
-      const sug = document.createElement("div");
-      sug.className = "sugrow";
-      ["Living Room", "Kitchen", "Bedroom"].forEach((name) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "sugchip";
-        b.textContent = name;
-        b.onclick = () => { b.remove(); addArea(name, true); box.appendChild(sug); box.appendChild(adder); };
-        sug.appendChild(b);
+    const list = this._flowGroup(s.body, {
+      header: "Rooms",
+      footer: areas.length ? "" : "You don't have any areas in Home Assistant yet, "
+        + "so here are a few to start with.",
+    });
+    const adder = this._flowRow(list, {
+      icon: "plus", tint: FLOW_TINT.teal, input: "", placeholder: "Add Room",
+    });
+    adder.row.classList.add("adder");
+    adder.input.classList.add("lead");
+    const addRoom = (name, on) => {
+      const r = this._flowRow(list, {
+        mask: iconUrl(roomGlyph(name)), tint: FLOW_TINT.teal, title: name, check: on,
+        before: adder.row,
+        onTap: () => r.row.setAttribute("aria-checked",
+          r.row.getAttribute("aria-checked") === "true" ? "false" : "true"),
       });
-      box.appendChild(sug);
-    }
+      r.row.dataset.name = name;
+      return r;
+    };
+    areas.forEach((a) => addRoom(a.name, true));
+    if (!areas.length) ["Living Room", "Kitchen", "Bedroom"].forEach((n) => addRoom(n, false));
 
-    // Always available, areas or not: a room Hemma has that HA does not.
-    const adder = document.createElement("div");
-    adder.className = "addroom";
-    const nameIn = document.createElement("input");
-    nameIn.placeholder = "Add a room\u2026";
     const commit = () => {
-      const name = nameIn.value.trim();
+      const name = adder.input.value.trim();
       if (!name) return;
-      nameIn.value = "";
-      addArea(name, true);
-      box.appendChild(adder);
-      nameIn.focus();
+      adder.input.value = "";
+      addRoom(name, true);
     };
-    nameIn.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); commit(); } };
-    nameIn.onblur = commit;
-    adder.appendChild(nameIn);
-    box.appendChild(adder);
+    adder.input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); commit(); } };
+    adder.input.onblur = commit;
 
-    const advWrap = this.$("c_adv");
-    const advSum = this.$("c_advsum");
-    advSum.onclick = () => {
-      const now = !advWrap.classList.contains("open");
-      advWrap.classList.toggle("open", now);
-      advSum.setAttribute("aria-expanded", now ? "true" : "false");
-    };
+    const dash = this._flowGroup(s.body, { header: "New Dashboard" });
+    const titleIn = this._flowRow(dash, { title: "Name", input: "Hemma" }).input;
 
-    // "lowercase, must contain a hyphen" was the second thing the panel ever
-    // asked anyone. It is derived from the name now, and only pinned when you
-    // type an address yourself - the same rule a tile's Name follows its entity.
-    const pathIn = this.$("c_path");
-    const titleIn = this.$("c_title");
-    let pathPinned = false;
-    pathIn.oninput = () => { pathPinned = true; };
-    const derive = () => {
-      if (pathPinned) return;
-      const slug = String(titleIn.value || "").toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-      // HA requires a hyphen, so a single-word name earns the suffix and a name
-      // that already reads as two words does not.
-      const base = !slug ? "hemma-dashboard" : slug.includes("-") ? slug : slug + "-dashboard";
-      const taken = new Set((this._dashList || []).map((d) => d.url_path));
-      let out = base, n = 2;
-      while (taken.has(out)) out = base + "-" + n++;
-      pathIn.value = out;
-    };
-    titleIn.oninput = derive;
-    derive();
-
-    this.$("c_cancel").onclick = () => this._load();
-    this.$("c_go").onclick = () => this._create();
+    this._flowCancel(s.acts);
+    this._flowButton(s.acts, "Create Dashboard", () => {
+      const title = (titleIn.value || "").trim() || "Hemma";
+      const url_path = this._flowPath(title, "hemma-dashboard", "dashboard");
+      const picked = [...list.querySelectorAll('[aria-checked="true"]')]
+        .map((r) => r.dataset.name);
+      this._create(url_path, title, picked);
+    });
   }
 
-  async _create() {
-    const title = this.$("c_title").value.trim() || "Hemma";
-    const url_path = this.$("c_path").value.trim();
-    if (!/^[a-z0-9-]+$/.test(url_path) || !url_path.includes("-")) {
-      return this._status("URL path must be lowercase, and must contain a hyphen", "err");
-    }
-
-    const picked = [...this.shadowRoot.querySelectorAll("#c_areas input:checked")]
-      .map((cb) => cb.dataset.name);
-
-    this.$("c_go").disabled = true;
-    this._status("creating...");
+  async _create(url_path, title, picked) {
+    const s = this._flowScreen({
+      icon: "rooms",
+      title: "Creating Your Dashboard",
+      lede: "This only takes a moment.",
+      closable: false,
+    });
+    const prog = this._flowProgress(s.body, [
+      "Reading the card templates",
+      "Building your rooms",
+      "Saving " + title,
+      "Adding the phone layout",
+    ]);
+    this._clearLog();
 
     try {
       const bundle = await this._bundleOnce();
       this._log(`templates bundle: ${Object.keys(bundle.templates).length} templates`);
+      prog.at(1);
 
       const rooms = [blankRoom("Home", "home", "home-demo")];
       picked.forEach((name) => rooms.push(blankRoom(name, slug(name), "home-demo")));
@@ -7450,6 +8754,7 @@ class HemmaPanel extends HTMLElement {
       const config = fixed.config;
       this._log(`rewrote ${fixed.rewritten} navigation route list(s)`);
       if (!fixed.rewritten) this._log("no routes list found - nav links may point elsewhere", "warn");
+      prog.at(2);
 
       await this._hass.callWS({
         type: "lovelace/dashboards/create",
@@ -7463,24 +8768,36 @@ class HemmaPanel extends HTMLElement {
 
       await this._hass.callWS({ type: "lovelace/config/save", url_path, config });
       this._log(`wrote config  ${JSON.stringify(config).length.toLocaleString()} bytes`, "ok");
+      prog.at(3);
 
-      // Hemma is a pair. _dashForDevice already assumes the sibling exists -
-      // Done on a phone looks for <path>-mobile - so creating one without the
-      // other leaves the finish button with nowhere narrow to land.
       const paired = await this._createMobileSibling(url_path, title, picked, bundle);
+      prog.at(4);
 
-      this._status(`Created "${title}" with ${rooms.length} room(s)`
-        + (paired ? " and its phone layout" : "") + ". Click Open to view it.", "ok");
-      await this._refreshDashboards(url_path);
+      await this._flowRelist();
+      this._flowDone({ url_path, title, rooms, paired });
     } catch (e) {
-      this._status("create failed: " + e.message, "err");
       this._log("create failed: " + e.message, "err");
-      this.$("c_go").disabled = false;
+      const fail = this._flowScreen({
+        icon: "alert", tone: "warn",
+        title: "Dashboard Not Created",
+        lede: "Nothing was saved. Check the name and address, then try again.",
+      });
+      this._flowError(e.message);
+      this._flowCancel(fail.acts);
+      this._flowButton(fail.acts, "Try Again", () => this._createForm());
     }
   }
 
-  // Offerable only on a wide dashboard that has been read, and only when the
-  // phone half is genuinely missing - not merely unselected.
+  async _flowRelist() {
+    try {
+      this._dashList = this._shownDashboards(
+        await this._hass.callWS({ type: "lovelace/dashboards/list" }));
+      if (this._flowMode === "sheet") this._paintDashes();
+    } catch (e) {
+      // Only affects the labels on the next screen.
+    }
+  }
+
   _canAddMobile() {
     const s = this._state;
     if (!s || s.surface === "mobile" || !this._dashUrl) return false;
@@ -7514,6 +8831,7 @@ class HemmaPanel extends HTMLElement {
       const extras = { ...clone(bundle.mobile.extras || {}) };
       extras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
       const cfg = expandAny(st, { extras, templates: bundle.templates });
+      if (rooms) applyScenePick(cfg, rooms);
 
       await this._hass.callWS({
         type: "lovelace/dashboards/create",
@@ -7533,10 +8851,7 @@ class HemmaPanel extends HTMLElement {
     }
   }
 
-  // The phone half of the pair. A failure here is logged and nothing more: the
-  // dashboard you asked for exists, and a missing sibling is recoverable while
-  // a half-written one is not.
-  async _createMobileSibling(url_path, title, picked, bundle) {
+  async _createMobileSibling(url_path, title, picked, bundle, rooms) {
     if (!bundle.mobile) {
       this._log("bundle has no mobile scaffold - phone layout skipped", "warn");
       return false;
@@ -7547,13 +8862,12 @@ class HemmaPanel extends HTMLElement {
       return false;
     }
     try {
-      // Favorites, not Home: on the phone the first section is the one whose
-      // tiles are not a room, and the header refuses to open a popup for it.
       const names = [MOBILE_FAVORITES].concat(picked);
       const st = blankMobileState(bundle.mobile, names);
       const extras = { ...clone(bundle.mobile.extras || {}) };
       extras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
       const cfg = expandAny(st, { extras, templates: bundle.templates });
+      if (rooms) applyScenePick(cfg, rooms);
 
       await this._hass.callWS({
         type: "lovelace/dashboards/create",
@@ -7574,9 +8888,6 @@ class HemmaPanel extends HTMLElement {
 
   // ── import a YAML dashboard ───────────────────────────────────────────────
 
-  // A YAML dashboard is declared in configuration.yaml, so it is not in the
-  // storage collection lovelace/dashboards/list returns. It exists only as a
-  // registered panel, which is why nothing here had ever seen one.
   _yamlCandidates() {
     const out = [];
     try {
@@ -7590,8 +8901,6 @@ class HemmaPanel extends HTMLElement {
         out.push({ url_path, title: p.title || url_path });
       });
     } catch (e) {
-      // The panel object has moved between versions. A menu entry is not worth
-      // taking the editor down for.
     }
     return out;
   }
@@ -7607,6 +8916,11 @@ class HemmaPanel extends HTMLElement {
         if (isMobileConfig(cfg)) { found.push({ ...c, kind: "mobile", cfg }); continue; }
         if ((cfg.views || []).some((v) => (((v.cards || [])[0]) || {}).template === "hemma_room")) {
           found.push({ ...c, kind: "wide", cfg });
+        } else if (/"hemma_|"custom:hemma-/.test(JSON.stringify(cfg.views || []))) {
+          found.push({ ...c, kind: "unreadable", cfg,
+            why: (cfg.views || []).length
+              ? "It uses Hemma cards, but none of its pages start with a Hemma room card."
+              : "It has no pages." });
         }
       } catch (e) {
         // Unreadable means not importable. Nothing to say about it.
@@ -7624,166 +8938,328 @@ class HemmaPanel extends HTMLElement {
     return base + "-" + Date.now();
   }
 
-  async _importForm() {
-    this._saveBlocked = true;
-    this._markDirty();
-    this.$("rooms").innerHTML = "";
-    this.$("tilespane").innerHTML = "";
-    this._status("reading YAML dashboards…");
-    const all = await this._yamlHemma(true);
-    const wides = all.filter((d) => d.kind === "wide");
-    this._status("");
+  async _importForm(o) {
+    o = o || {};
+    const seq = (this._importSeq = (this._importSeq || 0) + 1);
+    let expect = this._flowTok;
+    const slow = typeof setTimeout === "function" ? setTimeout(() => {
+      if (seq !== this._importSeq || this._flowTok !== expect) return;
+      const s = this._flowScreen({
+        icon: "import", title: "Looking for Dashboards",
+        lede: "Checking your YAML dashboards for Hemma…", back: o.back,
+      });
+      const spin = document.createElement("div");
+      spin.className = "fspin";
+      s.body.appendChild(spin);
+      expect = this._flowTok;
+    }, 250) : null;
 
-    if (!wides.length) {
-      this.$("pane").innerHTML = `
-        <div class="empty">
-          <h2>Nothing to import</h2>
-          <p>No YAML dashboard here looks like a Hemma dashboard.<br>
-             Create one instead, and pick the rooms you want.</p>
-        </div>`;
-      return;
-    }
-
-    this.$("pane").innerHTML = `
-      <section class="card">
-        <h2>Import a dashboard</h2>
-        <div class="hint">Your YAML dashboard is left exactly as it is. This
-          builds a second one you can edit here, so you can compare them and
-          keep whichever you prefer.</div>
-        <div class="areas" id="i_srcs"></div>
-      </section>
-      <section class="card">
-        <h2>What comes across</h2>
-        <div id="i_summary" class="hint">Reading…</div>
-      </section>
-      <section class="card">
-        <h2>The new dashboard</h2>
-        <div class="row"><label>Name</label><input id="i_title" value="Hemma"></div>
-        <div class="adv" id="i_adv">
-          <button class="advsum" type="button" id="i_advsum">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
-                 stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-            <span>Address</span>
-          </button>
-          <div class="advbody">
-            <div class="row"><label>Address</label><input id="i_path" value=""></div>
-          </div>
-        </div>
-        <div class="addbar">
-          <button id="i_go">Import</button>
-          <button id="i_cancel" class="ghost">Cancel</button>
-        </div>
-      </section>`;
-
-    const srcBox = this.$("i_srcs");
-    wides.forEach((d, n) => {
-      const w = document.createElement("label");
-      w.className = "area";
-      const rb = document.createElement("input");
-      rb.type = "radio"; rb.name = "i_src"; rb.checked = n === 0;
-      rb.dataset.path = d.url_path;
-      rb.onchange = () => this._importPreview(d);
-      w.appendChild(rb);
-      w.appendChild(document.createTextNode(
-        (d.title || d.url_path) + "  (" + d.url_path + ")"));
-      srcBox.appendChild(w);
-    });
-
-    const sum = this.$("i_advsum");
-    if (sum) sum.onclick = () => this.$("i_adv").classList.toggle("open");
-    this.$("i_cancel").onclick = () => this._load();
-    this.$("i_go").onclick = () => {
-      const path = (this.$("i_path").value || "").trim();
-      const title = (this.$("i_title").value || "").trim() || "Hemma";
-      const chosen = srcBox.querySelector("input:checked");
-      const src = wides.find((d) => d.url_path === (chosen && chosen.dataset.path));
-      if (!src) return this._status("pick a dashboard to import", "err");
-      // Same rule and same wording as Create, so the two screens do not
-      // disagree about what a valid address is.
-      if (!/^[a-z0-9-]+$/.test(path) || !path.includes("-")) {
-        return this._status("URL path must be lowercase, and must contain a hyphen", "err");
-      }
-      this._import(src, path, title, all);
-    };
-    this._importPreview(wides[0]);
-  }
-
-  // What the import will produce, before it produces it. The warnings are the
-  // point: they are where a hand-edited dashboard differs from what Hemma
-  // knows how to read, and they are the only place anyone will see them.
-  _importPreview(src) {
-    const box = this.$("i_summary");
-    if (!box) return;
-    let ex;
+    let all = [];
     try {
-      ex = extractAny(src.cfg);
+      all = await this._yamlHemma(true);
     } catch (e) {
-      box.textContent = "This dashboard cannot be read: " + e.message;
-      return;
+      if (slow) clearTimeout(slow);
+      if (seq !== this._importSeq || this._flowTok !== expect) return;
+      return this._importFailed(e, () => this._importForm(o), {
+        title: "Couldn't Read Your Dashboards",
+        reason: "Home Assistant didn't return your YAML dashboards.",
+        nothingSaved: true, back: o.back,
+      });
     }
-    const rooms = ex.compact.rooms || [];
-    const tiles = rooms.reduce((n, r) => n + ((r.tiles || []).length), 0);
-    const entities = rooms.reduce(
-      (n, r) => n + Object.keys(r.variables || {}).length, 0);
+    if (slow) clearTimeout(slow);
+    if (seq !== this._importSeq || this._flowTok !== expect) return;
 
-    box.innerHTML = "";
-    const line = document.createElement("div");
-    line.textContent = rooms.length + " room" + (rooms.length === 1 ? "" : "s")
-      + ", " + tiles + " tile" + (tiles === 1 ? "" : "s")
-      + ", " + entities + " setting" + (entities === 1 ? "" : "s") + " carried over.";
-    box.appendChild(line);
-
-    const names = document.createElement("div");
-    names.style.marginTop = ".4rem";
-    names.textContent = rooms.map((r) => r.name || r.path).join(", ");
-    box.appendChild(names);
-
-    (ex.warnings || []).forEach((w) => {
-      const el = document.createElement("div");
-      el.style.marginTop = ".4rem";
-      el.textContent = "⚠ " + w;
-      box.appendChild(el);
-    });
-
-    const t = this.$("i_title");
-    if (t) t.value = src.title || "Hemma";
-    const p = this.$("i_path");
-    if (p) p.value = this._freePath("hemma-studio");
+    const wides = all.filter((d) => d.kind === "wide");
+    if (!wides.length) return this._importNone(o, all);
+    if (wides.length === 1) return this._importReview(wides[0], wides, all, o);
+    this._importPick(wides, all, o);
   }
 
-  async _import(src, url_path, title, all) {
-    this.$("i_go").disabled = true;
+  _importNone(o, all) {
+    o = o || {};
+    const wides = (all || []).filter((d) => d.kind === "wide");
+    const near = (all || []).filter((d) => d.kind === "unreadable"
+      || (d.kind === "mobile" && !wides.some((w) => w.url_path + "-mobile" === d.url_path)));
+    const s = this._flowScreen({
+      icon: "import",
+      title: near.length ? "Your Dashboard Can't Be Imported" : "No Hemma Dashboards Found",
+      lede: near.length
+        ? "Hemma found YAML dashboards that use its rooms, but they aren't laid out in a way "
+          + "it can read. Nothing has been changed."
+        : "None of your YAML dashboards use Hemma's room layout. You can build a new "
+          + "one from your rooms instead.",
+      back: o.back,
+    });
+    if (near.length) {
+      const list = this._flowGroup(s.body, { header: "Can't Be Imported" });
+      near.forEach((d) => {
+        const r = this._flowRow(list, {
+          icon: "doc", tint: FLOW_TINT.gray, title: d.title || d.url_path,
+          sub: d.kind === "mobile"
+            ? "This is a phone layout. Hemma imports it together with the dashboard it belongs to, "
+              + "and that dashboard wasn't found at /" + d.url_path.replace(/-mobile$/, "") + "."
+            : d.why,
+        });
+        r.row.classList.add("wrap2");
+      });
+    }
+    this._flowCancel(s.acts);
+    this._flowButton(s.acts, "Create Dashboard",
+      () => this._createForm({ back: () => this._importNone(o, all) }));
+  }
+
+  _importCounts(src) {
+    try {
+      const ex = extractAny(src.cfg);
+      const rooms = ex.compact.rooms || [];
+      return {
+        ex,
+        rooms,
+        tiles: rooms.reduce((n, r) => n + ((r.tiles || []).length), 0),
+        settings: rooms.reduce((n, r) => n + Object.keys(r.variables || {}).length, 0),
+      };
+    } catch (e) {
+      return { error: e.message, rooms: [], tiles: 0, settings: 0 };
+    }
+  }
+
+  _importIssues(ex, cfg, phone) {
+    const views = (cfg && cfg.views) || [];
+    const nameOf = (path) => {
+      const v = views.find((x) => x.path === path);
+      const hero = v && (v.cards || []).find((c) => c && c.template === "hemma_room");
+      return (hero && hero.name) || (v && v.title && titleCase(v.title)) || titleCase(String(path || ""));
+    };
+    const firstRoom = nameOf((views[0] || {}).path);
+    const count = (n, one, many) => n + " " + (+n === 1 ? one : many);
+    return ((ex && ex.warnings) || []).map((w) => {
+      let m;
+      if ((m = w.match(/^view "([^"]*)" has (\d+) cards, expected at least 3 - skipped$/))) {
+        const cards = ((views.find((x) => x.path === m[1]) || {}).cards) || [];
+        const has = (test) => cards.some((c) => c && test(c));
+        const short = !has((c) => c.type === "custom:hemma-smart-row") ? "Has no row of tiles"
+          : !has((c) => c.template === "hemma_room") ? "Has no room card" : "Has no navigation bar";
+        return { level: "skip", path: m[1], room: nameOf(m[1]), short };
+      }
+      if ((m = w.match(/^view "([^"]*)" has (\d+) extra card\(s\) after the smart row - preserved as-is$/))) {
+        return { level: "info", path: m[1], room: nameOf(m[1]),
+          short: count(m[2], "extra card stays as it is", "extra cards stay as they are") };
+      }
+      if ((m = w.match(/^view "([^"]*)" card\[0\] template is (.*)$/))) {
+        return { level: "change", path: m[1], room: nameOf(m[1]), short: "Doesn't start with a room card" };
+      }
+      if ((m = w.match(/^view "([^"]*)" nav stack differs from view\[0\]$/))) {
+        return { level: "change", path: m[1], room: nameOf(m[1]),
+          short: `Will use ${firstRoom}'s navigation bar` };
+      }
+      if ((m = w.match(/^view "([^"]*)" card\[2\] is (.*)$/))) {
+        return { level: "info", path: m[1], room: nameOf(m[1]), short: "Tiles can't be edited in Hemma" };
+      }
+      if ((m = w.match(/^(\d+) view\(s\) after the first - preserved as-is$/))) {
+        return { level: "info", phone: true, short: count(m[1], "extra page stays as it is", "extra pages stay as they are") };
+      }
+      if ((m = w.match(/^view "([^"]*)" has (\d+) card\(s\) after the smart row - preserved as-is$/))) {
+        return { level: "info", phone: true, short: count(m[2], "extra card stays as it is", "extra cards stay as they are") };
+      }
+      if (/has no header \+ smart row pair - skipped$/.test(w)) {
+        return { level: "skip", phone: true, short: "No sections Hemma can read" };
+      }
+      return { level: "change", phone: !!phone, short: w };
+    });
+  }
+
+  _importRooms(body, src, c, issues, sib) {
+    const list = this._flowGroup(body, { header: "Rooms" });
+    (src.cfg.views || []).forEach((v) => {
+      const mine = issues.filter((i) => i.path === v.path);
+      const room = c.rooms.find((r) => r.path === v.path);
+      const skipped = !room || mine.some((i) => i.level === "skip");
+      const name = (mine[0] && mine[0].room)
+        || (room && (room.name || titleCase(room.path))) || titleCase(String(v.path || ""));
+      const n = room ? (room.tiles || []).length : 0;
+      const loud = mine.find((i) => i.level !== "info");
+      this._flowRow(list, {
+        mask: iconUrl(roomGlyph(name, room)), tint: FLOW_TINT.teal, title: name, dim: skipped,
+        detail: skipped ? "Not Imported" : !n ? "No tiles" : n + (n === 1 ? " tile" : " tiles"),
+        detailTone: skipped ? "warn" : null,
+        sub: mine.map((i) => i.short).join(" · ") || null,
+        subTone: loud ? "warn" : null,
+      });
+    });
+
+    // A warning nobody has taught Hemma to read still has to be seen.
+    const other = issues.filter((i) => !i.path && !i.phone);
+    if (other.length) {
+      const olist = this._flowGroup(body, { header: "Other Changes" });
+      other.forEach((i) => {
+        const r = this._flowRow(olist, { icon: "info", tint: FLOW_TINT.gray, title: i.short });
+        r.row.classList.add("wrap");
+      });
+    }
+
+    const phone = issues.filter((i) => i.phone);
+    const phoneSkip = phone.some((i) => i.level === "skip");
+    const kept = sib && !phoneSkip;
+    this._flowRow(this._flowGroup(body), {
+      icon: "phone", tint: FLOW_TINT.gray, title: "Phone Layout",
+      detail: kept ? "Included" : "New",
+      sub: phone.map((i) => i.short).join(" · ") || (kept ? null : "Made from your rooms"),
+      subTone: phone.some((i) => i.level !== "info") ? "warn" : null,
+    });
+  }
+
+  _importPick(wides, all, o) {
+    o = o || {};
+    const s = this._flowScreen({
+      icon: "import",
+      title: "Choose a Dashboard",
+      lede: "More than one of your YAML dashboards uses Hemma. Import one now; "
+        + "you can bring the others across later.",
+      back: o.back,
+    });
+    const list = this._flowGroup(s.body);
+    let picked = wides.find((d) => !this._importCounts(d).error) || wides[0];
+    const rows = [];
+    const paint = () => rows.forEach((r, i) =>
+      r.setAttribute("aria-checked", wides[i] === picked ? "true" : "false"));
+    wides.forEach((d) => {
+      const c = this._importCounts(d);
+      const r = this._flowRow(list, {
+        icon: "doc", tint: FLOW_TINT.teal, title: d.title || d.url_path,
+        sub: c.error ? "Can't be read"
+          : `${c.rooms.length} room${c.rooms.length === 1 ? "" : "s"}, `
+            + `${c.tiles} tile${c.tiles === 1 ? "" : "s"}`,
+        check: d === picked, radio: true,
+        onTap: () => { picked = d; paint(); },
+      });
+      rows.push(r.row);
+    });
+    this._flowCancel(s.acts);
+    this._flowButton(s.acts, "Continue", () => this._importReview(picked, wides, all,
+      { back: () => this._importPick(wides, all, o) }));
+  }
+
+  _importReview(src, wides, all, o) {
+    o = o || {};
+    const c = this._importCounts(src);
+    if (c.error) {
+      return this._importFailed({ message: c.error }, null, {
+        title: "This Dashboard Can't Be Read",
+        reason: this._plainError({ message: c.error }, "Hemma couldn't read how this dashboard is laid out."),
+        nothingSaved: true, back: o.back,
+      });
+    }
+
+    const issues = this._importIssues(c.ex, src.cfg, false);
+    const sib = (all || []).find((d) => d.kind === "mobile" && d.url_path === src.url_path + "-mobile");
+    if (sib) {
+      try {
+        issues.push(...this._importIssues(extractMobileConfig(sib.cfg), sib.cfg, true));
+      } catch (e) {
+        issues.push({ level: "skip", phone: true, short: "Isn't arranged the way Hemma expects" });
+      }
+    }
+
+    if (!c.rooms.length) {
+      const none = this._flowScreen({
+        icon: "alert", tone: "warn",
+        title: "Nothing Here Can Be Imported",
+        lede: "None of this dashboard's pages are laid out as Hemma rooms. Nothing has been changed.",
+        back: o.back,
+      });
+      this._importRooms(none.body, src, c, issues, sib);
+      this._flowCancel(none.acts);
+      return;
+    }
+
+    const name = src.title || "Hemma";
+    const s = this._flowScreen({
+      icon: "import",
+      title: "Import Your Dashboard",
+      lede: "Your rooms and tiles will be copied to a new dashboard. "
+        + "The original won't be changed.",
+      back: o.back,
+    });
+
+    this._importRooms(s.body, src, c, issues, sib);
+
+    const taken = new Set((this._dashList || []).map((d) => (d.title || "").trim())
+      .concat(this._yamlCandidates().map((d) => (d.title || "").trim())));
+    const dash = this._flowGroup(s.body, { header: "New Dashboard" });
+    const titleIn = this._flowRow(dash, {
+      title: "Name", input: taken.has(name.trim()) ? name + " (imported)" : name,
+    }).input;
+
+    this._flowCancel(s.acts);
+    this._flowButton(s.acts, "Import", () => {
+      const title = (titleIn.value || "").trim() || "Hemma";
+      this._import(src, this._flowPath(title, "hemma-imported", "imported"), title, all, issues);
+    });
+  }
+
+  _importVerify(cfg) {
+    const state = extractAny(cfg);
+    const back = expandAny(state);
+    if (stable(back) === stable(cfg)) return null;
+    return (cfg.views || []).filter((v, i) => stable(v) !== stable((back.views || [])[i]))
+      .map((v) => ((v.cards || [])[0] || {}).name || v.title || v.path);
+  }
+
+  async _import(src, url_path, title, all, issues) {
+    const s = this._flowScreen({
+      icon: "import",
+      title: "Importing Your Dashboard",
+      lede: "This only takes a moment.",
+      closable: false,
+    });
+    const prog = this._flowProgress(s.body, [
+      "Reading your dashboard",
+      "Checking it can be edited",
+      "Saving " + title,
+      "Adding the phone layout",
+    ]);
     this._clearLog();
-    this._status("importing…");
+    const created = [];
+    let phoneNote = null;
+
     try {
       const bundle = await this._bundleOnce();
       const ex = extractAny(src.cfg);
       const rooms = ex.compact.rooms || [];
       this._log(`read ${rooms.length} room(s) from "${src.url_path}"`);
       (ex.warnings || []).forEach((w) => this._log(w, "warn"));
+      prog.at(1);
 
-      // The user's rooms, the CURRENT templates. A YAML dashboard's templates
-      // came from the local tree; a storage one has to carry its own, and they
-      // should be today's rather than whatever was on disk when it was written.
       const extras = { ...clone(ex.extras || {}) };
       extras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
+      const sib = (all || []).find(
+        (d) => d.kind === "mobile" && d.url_path === src.url_path + "-mobile");
+      seedScenePrefs(rooms, [src.cfg, sib && sib.cfg]);
       const built = expandConfig(ex.compact, ex.scaffold, extras, bundle.templates);
       const fixed = retargetRoutes(built, url_path, rooms);
+      applyScenePick(fixed.config, rooms);
       this._log(`rewrote ${fixed.rewritten} navigation route list(s)`);
+      const drift = this._importVerify(fixed.config);
+      if (drift) {
+        const named = drift.length ? drift.map((d) => "“" + d + "”").join(", ") : "This dashboard";
+        throw Object.assign(new Error("round trip differs: " + (drift.join(", ") || "top level")), {
+          reason: `${named} ${drift.length === 1 || !drift.length ? "has" : "have"} changes Hemma `
+            + "can't rebuild exactly, so editing here could alter them. Nothing was imported.",
+        });
+      }
+      prog.at(2);
 
-      await this._hass.callWS({
+      const made = await this._hass.callWS({
         type: "lovelace/dashboards/create",
         url_path, title, icon: "mdi:home",
         show_in_sidebar: true, require_admin: false,
       });
+      created.push({ url_path, id: made && made.id });
       await this._hass.callWS({
         type: "lovelace/config/save", url_path, config: fixed.config });
       this._log(`created "${url_path}"`, "ok");
+      prog.at(3);
 
-      // The phone half, if they have one. It extracts the same way, so import
-      // it rather than building a blank one and losing their sections.
-      const sib = (all || []).find(
-        (d) => d.kind === "mobile" && d.url_path === src.url_path + "-mobile");
       let paired = false;
       if (sib) {
         try {
@@ -7793,11 +9269,14 @@ class HemmaPanel extends HTMLElement {
           const mcfg = expandAny(
             { ...mex, surface: "mobile" },
             { extras: mextras, templates: bundle.templates });
-          await this._hass.callWS({
+          applyScenePick(mcfg, rooms);
+          if (this._importVerify(mcfg)) throw new Error("phone layout round trip differs");
+          const mmade = await this._hass.callWS({
             type: "lovelace/dashboards/create",
             url_path: url_path + "-mobile", title: title + " Mobile",
             icon: "mdi:cellphone", show_in_sidebar: false, require_admin: false,
           });
+          created.push({ url_path: url_path + "-mobile", id: mmade && mmade.id });
           await this._hass.callWS({ type: "lovelace/config/save",
             url_path: url_path + "-mobile", config: mcfg });
           this._log(`imported phone layout with `
@@ -7805,36 +9284,139 @@ class HemmaPanel extends HTMLElement {
           paired = true;
         } catch (e) {
           this._log("phone layout not imported: " + e.message, "warn");
+          phoneNote = "Your phone layout couldn't be copied exactly, so a new one was made "
+            + "from your rooms. Your phone YAML dashboard hasn't changed.";
         }
       }
       if (!paired) {
         paired = await this._createMobileSibling(url_path, title,
-          rooms.filter((r) => r.path !== "home").map((r) => r.name || r.path), bundle);
+          rooms.filter((r) => r.path !== "home").map((r) => r.name || r.path), bundle, rooms);
       }
+      prog.at(4);
 
-      this._status(`Imported ${rooms.length} room(s) into "${title}"`
-        + (paired ? " with its phone layout" : "")
-        + `. "${src.url_path}" is untouched.`, "ok");
-      await this._refreshDashboards(url_path);
+      await this._flowRelist();
+      this._flowDone({ url_path, title, rooms, paired, fromYaml: true, phoneNote,
+        phoneKept: !!sib && !phoneNote,
+        warnings: issues || this._importIssues(ex, src.cfg, false) });
     } catch (e) {
-      this._status("import failed: " + e.message, "err");
       this._log("import failed: " + e.message, "err");
-      const b = this.$("i_go");
-      if (b) b.disabled = false;
+      let leftover = [];
+      for (const c of created.reverse()) {
+        try {
+          if (!c.id) throw new Error("no id");
+          await this._hass.callWS({ type: "lovelace/dashboards/delete", dashboard_id: c.id });
+          this._log(`removed the partial dashboard "${c.url_path}"`, "ok");
+        } catch (e2) {
+          leftover.push(c.url_path);
+        }
+      }
+      await this._flowRelist();
+      this._importFailed(e, () => this._importForm(), {
+        reason: e.reason || this._plainError(e),
+        nothingSaved: !leftover.length,
+        leftover,
+      });
     }
+  }
+
+  _importFailed(e, retry, opts) {
+    opts = opts || {};
+    const tail = opts.leftover && opts.leftover.length
+      ? ` A partly created dashboard may be left in your sidebar at /${opts.leftover[0]}; `
+        + "you can delete it from the ••• menu."
+      : opts.nothingSaved === false ? "" : " Nothing was saved, and your YAML dashboard wasn't touched.";
+    const s = this._flowScreen({
+      icon: "alert", tone: "warn",
+      title: opts.title || "Import Didn't Finish",
+      lede: (opts.reason || this._plainError(e)) + tail,
+      back: opts.back,
+    });
+    const raw = String((e && e.message) || e || "");
+    if (raw) {
+      const list = this._flowGroup(s.body);
+      const detail = document.createElement("pre");
+      detail.className = "fdetail";
+      detail.hidden = true;
+      detail.textContent = raw;
+      const r = this._flowRow(list, {
+        icon: "doc", tint: FLOW_TINT.gray, title: "Details", chevron: true,
+        onTap: () => {
+          detail.hidden = !detail.hidden;
+          r.row.classList.toggle("open", !detail.hidden);
+        },
+      });
+      list.appendChild(detail);
+    }
+    this._flowCancel(s.acts);
+    if (retry) this._flowButton(s.acts, "Try Again", retry);
+  }
+
+  _plainError(e, fallback) {
+    const m = String((e && e.message) || e || "");
+    if (/no views/i.test(m)) return "This dashboard has no pages.";
+    if (/card\[1\] is/i.test(m)) return "Its pages aren't laid out the way Hemma arranges them.";
+    if (/already exists|url_path/i.test(m)) return "A dashboard with that address already exists.";
+    if (/unauthori[sz]ed|admin|permission/i.test(m)) return "Only an administrator can create dashboards.";
+    if (/^templates /i.test(m)) {
+      return "Hemma couldn't load its card templates. Reload the Hemma integration, then try again.";
+    }
+    if (/connection|timeout|socket|lost/i.test(m)) return "Hemma lost its connection to Home Assistant.";
+    return fallback || "Something went wrong while building your dashboard.";
+  }
+
+  // Shared by Create and Import: the same arrival and the same two ways on.
+  _flowDone(opts) {
+    const rooms = opts.rooms || [];
+    const s = this._flowScreen({
+      icon: "check", tone: "ok",
+      title: "Your Dashboard Is Ready",
+      lede: `“${opts.title}” is in the sidebar with `
+        + `${rooms.length} room${rooms.length === 1 ? "" : "s"}.`
+        + (opts.fromYaml ? " Your original dashboard hasn't changed." : ""),
+    });
+    const list = this._flowGroup(s.body);
+    this._flowRow(list, {
+      icon: "dashboard", tint: FLOW_TINT.gray, title: "Dashboard", detail: "/" + opts.url_path,
+    });
+    this._flowRow(list, {
+      icon: "phone", tint: FLOW_TINT.gray, title: "Phone Layout",
+      detail: !opts.paired ? "Not Added" : opts.phoneKept ? "Included" : "New",
+      sub: opts.paired && !opts.phoneKept ? "Made from your rooms" : null,
+    });
+    (opts.warnings || []).filter((i) => i.level === "skip" && i.path).forEach((i) => {
+      this._flowRow(list, {
+        mask: iconUrl(roomGlyph(i.room)), tint: FLOW_TINT.teal, title: i.room, dim: true,
+        detail: "Not Imported", detailTone: "warn", sub: i.short, subTone: "warn",
+      });
+    });
+    if (opts.phoneNote) {
+      const note = document.createElement("p");
+      note.className = "ffoot";
+      note.textContent = opts.phoneNote;
+      s.body.appendChild(note);
+    }
+
+    this._flowButton(s.acts, "Open Dashboard", () => this._flowLeave(() => {
+      this._remember(opts.url_path);
+      window.location.assign("/" + opts.url_path);
+    }), true);
+    this._flowButton(s.acts, "Start Editing", () => this._flowLeave(() => {
+      this._remember(opts.url_path);
+      this._refreshDashboards(opts.url_path);
+    }));
   }
 
   // ── load / save ───────────────────────────────────────────────────────────
 
-  // Registered resources are the honest test for a card: HA loads them lazily,
-  // so customElements.get is empty until something of that type has rendered.
   async _missingReqs() {
     let urls = [];
     try {
-      const res = await this._hass.callWS({ type: "lovelace/resources" });
+      const res = await this._ws({ type: "lovelace/resources" });
       urls = (res || []).map((r) => String(r.url || ""));
     } catch (e) {
-      urls = null;   // cannot tell; do not accuse
+      urls = null;
+      console.warn("Hemma: could not read the resource list;",
+        "card requirements were not checked", e);
     }
     const components = (this._hass && this._hass.config
       && this._hass.config.components) || [];
@@ -7845,15 +9427,26 @@ class HemmaPanel extends HTMLElement {
     });
   }
 
-  // Nothing Hemma can do about a missing card_mod, so say what to install and
-  // stop, rather than draw an editor whose preview cannot be trusted.
+  async _syncMods() {
+    let urls;
+    try {
+      urls = (await this._ws({ type: "lovelace/resources" }) || []).map((r) => String(r.url || ""));
+    } catch (e) {
+      console.warn("Hemma: could not read the resource list;",
+        "optional settings were left as they were", e);
+      return;
+    }
+    MODS.clear();
+    if (urls.some((u) => u.includes("kiosk-mode"))) MODS.add("kiosk-mode");
+  }
+
   async _gateOnReqs() {
     let missing = [];
     try { missing = await this._missingReqs(); } catch (e) { return false; }
     if (!missing.length) return false;
 
-    const blockers = missing.filter((r) => r.kind === "integration");
-    missing.filter((r) => r.kind === "card").forEach((r) => {
+    const blockers = missing.filter((r) => r.required);
+    missing.filter((r) => !r.required).forEach((r) => {
       this._log(`${r.label} is not installed - ${r.why}`, "warn");
     });
     if (!blockers.length) {
@@ -7863,25 +9456,33 @@ class HemmaPanel extends HTMLElement {
       return false;
     }
 
-    // my.home-assistant.io deep-links straight into the reader's own HACS.
-    const rows = blockers.map((r) => {
+    // Only an integration needs a restart; a card is a frontend resource.
+    const restart = blockers.some((r) => r.kind === "integration");
+    const one = blockers.length === 1;
+
+    const s = this._flowScreen({
+      full: true, icon: "get",
+      title: one ? "One More Thing to Install" : "A Few More Things to Install",
+      lede: `Hemma needs ${one ? "this" : "these"} from HACS before your dashboard `
+        + "can render. " + (restart ? "Restart Home Assistant once installed."
+          : "Come back here once installed."),
+    });
+    const list = this._flowGroup(s.body);
+    blockers.forEach((r) => {
+      // my.home-assistant.io deep-links straight into the reader's own HACS.
       const [owner, repository] = r.repo.split("/");
-      const link = "https://my.home-assistant.io/redirect/hacs_repository/?owner="
+      const row = this._flowRow(list, {
+        tag: "a", icon: "get", tint: FLOW_TINT.teal, title: r.label, sub: r.why, get: "Get",
+      }).row;
+      row.target = "_blank";
+      row.rel = "noreferrer";
+      row.href = "https://my.home-assistant.io/redirect/hacs_repository/?owner="
         + encodeURIComponent(owner) + "&repository=" + encodeURIComponent(repository);
-      return `
-      <li><strong>${r.label}</strong> - ${r.why}<br>
-        <code>${r.repo}</code><br>
-        <a href="${link}" target="_blank" rel="noreferrer">Open in HACS</a></li>`;
-    }).join("");
-    this.$("rooms").innerHTML = "";
-    this.$("tilespane").innerHTML = "";
-    this.$("pane").innerHTML = `
-      <div class="empty">
-        <h2>One thing to install first</h2>
-        <p>Hemma needs this before the dashboard can render:</p>
-        <ul style="text-align:left; display:inline-block; margin:1rem 0;">${rows}</ul>
-        <p>Add it in HACS, restart Home Assistant, then come back.</p>
-      </div>`;
+    });
+    this._flowButton(s.acts, "Check Again", () => {
+      this._saveBlocked = false;
+      this._load();
+    });
     this._saveBlocked = true;
     this._markDirty();
     return true;
@@ -7891,14 +9492,12 @@ class HemmaPanel extends HTMLElement {
     const url_path = this._dashUrl;
     if (!url_path) return;
     if (await this._gateOnReqs()) return;
+    await this._syncMods();
     this._clearLog();
     this._status("");
     try {
-      const cfg = await this._hass.callWS({ type: "lovelace/config", url_path });
+      const cfg = await this._ws({ type: "lovelace/config", url_path });
 
-      // A home is edited from its wide half, always. Landing on the phone half
-      // - a remembered choice, a stale link - used to leave you on a dashboard
-      // that told you to go somewhere else. Go there instead.
       if (isMobileConfig(cfg)) {
         const wide = this._widePathOf(url_path);
         if (wide) {
@@ -7910,18 +9509,11 @@ class HemmaPanel extends HTMLElement {
       }
 
       this._raw = cfg;
-      // Cleared before anything can throw: a stale pair from the last dashboard
-      // would mirror this one's edits into somebody else's phone layout.
       this._pair = null;
       this._state = extractAny(cfg);
       this._stateUrl = url_path;
-      // The wide dashboard and its phone half are one home. Loading both is
-      // what lets one edit reach every place either of them reads it.
       this._pair = await this._loadPair(url_path, cfg);
       if (this._pair) this._state = this._pair.desktop;
-      // The route was being stored and never read, so the panel always opened
-      // on the first room however you arrived. Consumed once: after that,
-      // switching rooms here should not be undone by a stale URL.
       this._room = this._roomFromRoute();
       this._routeUsed = true;
       this._log(`loaded "${url_path}"  ${JSON.stringify(cfg).length.toLocaleString()} bytes`);
@@ -7939,37 +9531,38 @@ class HemmaPanel extends HTMLElement {
         this._markDirty();
         this._paintDashes();
         this._renderReconcile();
-        // Two different readers: one picked somebody else's dashboard, the other's
-        // own has views the extractor could not read. "Not a Hemma dashboard" is
-        // a wrong answer to the second, and the panel knows which views failed.
-        const esc = (t) => String(t).replace(/[&<>]/g, (c) =>
-          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
         const damaged = skipped.length > 0;
-        this._status(damaged
-          ? `No room could be read from this dashboard (${skipped.length} view(s) skipped).`
-          : "Not a Hemma dashboard.", "warn");
-        this.$("rooms").innerHTML = "";
-        this.$("tilespane").innerHTML = "";
-        this.$("pane").innerHTML = damaged
-          ? `<div class="empty">
-               <h2>No rooms could be read</h2>
-               <p>This dashboard has views, but none of them look like a Hemma
-                  room. ${skipped.length === 1 ? "The one skipped" : "The " + skipped.length + " skipped"}:
-                  ${esc(skipped.slice(0, 6).join(", "))}${skipped.length > 6 ? "\u2026" : ""}.<br>
-                  ${isMobileConfig(cfg)
-                    ? "A section is a header card followed by a smart row."
-                    : "A room is a hero card, the nav, and a smart row, in that order."}
-                  The log below has the detail.</p>
-             </div>`
-          : `<div class="empty">
-               <h2>Not a Hemma dashboard</h2>
-               <p>Pick a Hemma dashboard above, or create a new one.</p>
-             </div>`;
-        // Reveal the window. Without this the panel stayed in its booting
-        // state - toolbar, rail, stage and inspector all at opacity 0 - so an
-        // unreadable dashboard looked like a black screen with one line of
-        // text, and there was nothing on it to pick a different one with.
-        requestAnimationFrame(() => this._playEntrance(true));
+        const shown = skipped.slice(0, 6).join(", ") + (skipped.length > 6 ? "…" : "");
+        const f = this._flowScreen({
+          full: true, icon: "alert", tone: "warn",
+          title: damaged ? "No Rooms Could Be Read" : "Not a Hemma Dashboard",
+          lede: damaged
+            ? "This dashboard has views, but none of them look like a Hemma room ("
+              + shown + "). " + (isMobileConfig(cfg)
+                ? "A section is a header card followed by a smart row."
+                : "A room is a hero card, the nav, and a smart row, in that order.")
+            : "Hemma can only edit dashboards it made. Open one of yours, "
+              + "or set up a new one.",
+        });
+        const others = (this._dashList || []).filter((d) => d.url_path !== url_path
+          && !/[-_]mobile$/i.test(d.url_path || ""));
+        if (others.length) {
+          const list = this._flowGroup(f.body, { header: "Your Dashboards" });
+          others.forEach((d) => this._flowRow(list, {
+            icon: "dashboard", tint: FLOW_TINT.gray, title: d.title || d.url_path,
+            sub: "/" + d.url_path, chevron: true,
+            onTap: () => {
+              this._setDash(d.url_path);
+              this._remember(d.url_path);
+              this._load();
+            },
+          }));
+        }
+        const back = () => this._load();
+        if (this._yamlCandidates().length) {
+          this._flowButton(f.acts, "Import from YAML", () => this._importForm({ back }), true);
+        }
+        this._flowButton(f.acts, "Create Dashboard", () => this._createForm({ back }));
         return;
       }
 
@@ -7997,35 +9590,34 @@ class HemmaPanel extends HTMLElement {
         this._status("");
       }
 
+      // After the round trip check, which compares the file as it was.
+      if (this._state.surface !== "mobile") {
+        seedScenePrefs(this._state.compact.rooms, [cfg, this._pair && this._pair.mobile]);
+      }
+      seedKiosk(this._state.compact.rooms, cfg);
+      this._exitFlow();
       this._paintDashes();
       this._syncSizeOpts();
-      this._reconcileOff = false;
-      this._reconcileSeen = false;
       this._renderReconcile();
       this._clean = this._print();
+      this._resetUndo(false);
       this._renderTabs();
       this._renderForm();
       requestAnimationFrame(() => this._playEntrance());
     } catch (e) {
-      // Without this a thrown load leaves the panel booting - a black screen with
-      // no way to pick a different dashboard. Forget the choice too, or every
-      // reload lands back in the same throw.
+      this._exitFlow();
       this._state = null;
       this._stateUrl = null;
-      this._forget(url_path);
+      if (e && e.message && e.code !== 3) this._forget(url_path);
       this._saveBlocked = true;
       this._markDirty();
-      this._status("load failed: " + e.message, "err");
+      this._status(this._plainError(e, "This dashboard couldn't be opened."), "err");
       this._log("load failed: " + e.message, "err");
-      try { this._paintDashes(); this._renderReconcile(); } catch (e2) { /* nothing left to paint */ }
+      try { this._paintDashes(); this._renderReconcile(); } catch (e2) {  }
       requestAnimationFrame(() => this._playEntrance(true));
     }
   }
 
-  // The phone half, when there is one to pair with. Returns null for a phone
-  // dashboard opened on its own, for a wide one with no sibling, and for any
-  // sibling that cannot be read - a pair that only half loaded would let a
-  // shared edit reach one dashboard and silently miss the other.
   async _loadPair(url_path, cfg) {
     // A phone dashboard opened on its own is not the wide half of anything.
     if (isMobileConfig(cfg)) return null;
@@ -8033,7 +9625,7 @@ class HemmaPanel extends HTMLElement {
     if (!(this._dashList || []).some((d) => d.url_path === mpath)) return null;
     let mcfg = null;
     try {
-      mcfg = await this._hass.callWS({ type: "lovelace/config", url_path: mpath });
+      mcfg = await this._ws({ type: "lovelace/config", url_path: mpath });
     } catch (e) {
       this._log(`phone layout "${mpath}" could not be read: ${e.message}`, "warn");
       return null;
@@ -8052,8 +9644,6 @@ class HemmaPanel extends HTMLElement {
     pair.mobileUrl = mpath;
     pair.mobileRaw = mcfg;
 
-    // Each half still has to rebuild exactly, or a save would rewrite the one
-    // the editor could not read.
     const back = expandPair(pair);
     pair.safe = stable(back.mobile) === stable(mcfg);
     this._log(`paired with "${mpath}"  round trip ${pair.safe ? "identical" : "DIFFERS"}`,
@@ -8085,199 +9675,108 @@ class HemmaPanel extends HTMLElement {
     return pair;
   }
 
-  // Is there a phone layout these edits can reach - either the one being
-  // edited, or the one paired with it?
   _phoneReachable() {
     if ((this._state || {}).surface === "mobile") return true;
     return !!(this._pair && this._pair.safe !== false);
   }
 
-  // A surface note used to live here, telling you the phone half was read-only.
-  // There is no phone half to land on now: _load sends you to the wide one, so
-  // there is nothing to explain and nothing to redirect.
   _renderSurfaceNote() {}
 
-  // The pair's disagreements as rows you can settle. Every button writes BOTH
-  // halves through pairWrite, so settling a row is the edit you would have made
-  // by hand.
   _widePathOf(url_path) {
     const stem = String(url_path || "").replace(/[-_]mobile$/i, "");
     if (stem === url_path) return null;
     return (this._dashList || []).some((d) => d.url_path === stem) ? stem : null;
   }
 
-  // Both notices are one object - glyph, title, sentence, optional dismiss, row
-  // of actions. Built separately they drifted.
-  _notice(opts) {
-    const box = this.$("reconcile");
-    box.hidden = false;
-    box.innerHTML = "";
-    // Keeps its space from the first frame so the preview is not shoved down a
-    // beat later, but stays invisible until the panel has finished arriving.
-    box.classList.toggle("pending", !this._entered);
-
-    const g = document.createElement("span");
-    g.className = "rglyph" + (opts.tone === "attention" ? " warn" : "");
-    g.style.setProperty("--i", "url('" + iconUrl(opts.glyph) + "')");
-    box.appendChild(g);
-
-    const h = document.createElement("h3");
-    h.textContent = opts.title;
-    box.appendChild(h);
-
-    const p = document.createElement("p");
-    p.textContent = opts.body;
-    box.appendChild(p);
-
-    if (opts.onClose) {
-      const x = document.createElement("button");
-      x.className = "rclose";
-      x.title = "Dismiss until next time";
-      x.setAttribute("aria-label", "Dismiss");
-      x.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-      x.onclick = opts.onClose;
-      box.appendChild(x);
-    }
-
-    const rows = document.createElement("div");
-    rows.className = "rrows";
-    box.appendChild(rows);
-    return rows;
-  }
-
-  // Buttons with no list above them, so no rule: see .ractions.
-  _noticeActions(rows, buttons) {
-    rows.className = "ractions";
-    (buttons || []).forEach(([text, fn]) => {
-      const b = document.createElement("button");
-      b.className = "ract";
-      b.textContent = text;
-      b.onclick = fn;
-      rows.appendChild(b);
-    });
-    return rows;
-  }
-
-  // One action row: a label that takes the slack, then its buttons.
-  _noticeRow(rows, label, buttons) {
-    const row = document.createElement("div");
-    row.className = "rrow";
-    const k = document.createElement("span");
-    k.className = "rkey";
-    if (typeof label === "string") k.textContent = label;
-    else if (label) k.appendChild(label);
-    row.appendChild(k);
-    (buttons || []).forEach(([text, fn]) => {
-      const b = document.createElement("button");
-      b.className = "ract";
-      b.textContent = text;
-      b.onclick = fn;
-      row.appendChild(b);
-    });
-    rows.appendChild(row);
-    return row;
-  }
-
   _renderReconcile() {
-    const box = this.$("reconcile");
-    if (!box) return;
+    const pill = this.$("diffs");
+    if (!pill) return;
+    const pair = this._pair;
+    const n = pair && pair.safe !== false ? (pair.conflicts || []).length : 0;
+    pill.hidden = !n;
+    if (n) {
+      pill.querySelector(".s-long").textContent = n + (n === 1 ? " Difference" : " Differences");
+      pill.querySelector(".s-short").textContent = String(n);
+      pill.title = "Your desktop and phone layouts don't match";
+      pill.onclick = () => this._reviewDifferences();
+    }
+    this._placeCanvasHead();
+  }
 
+  // Every difference, grouped by room, each with the choices that apply to it.
+  _reviewDifferences(quiet) {
     const pair = this._pair;
     const list = pair && pair.safe !== false ? (pair.conflicts || []) : [];
-    if (!list.length) { box.hidden = true; box.innerHTML = ""; return; }
-
-    // Dismissed for this session only. It carries work, so it must not be
-    // possible to lose it for good - a reload brings it back while anything is
-    // still unsettled, and settling everything removes it properly.
-    if (this._reconcileOff) { box.hidden = true; box.innerHTML = ""; return; }
-
-    const differs = list.filter((c) => c.kind === "differs");
-    const rows = this._notice({
-      glyph: "exclamation", tone: "attention",
-      // One title for both kinds: a value on one layout and not the other is a
-      // difference too. The rows carry the detail.
-      title: `${list.length} setting${list.length === 1 ? "" : "s"} differ`
-        + " between Desktop and Mobile",
-      body: "Choose which value to keep. It applies to both.",
-      onClose: () => { this._reconcileOff = true; this._closeReconcile(); },
-    });
-
-    // Four, not twelve: a tall notice pushes the preview off the screen, and
-    // the rest are in the log.
-    list.slice(0, 4).forEach((c) => {
-      const label = document.createElement("span");
-      label.appendChild(document.createTextNode((this._fieldLabelFor(c.key) || c.key) + ": "));
-      const em = document.createElement("em");
-      // Say what EACH layout has. "home-demo, wide layout only" left you to
-      // work out whether that named where the value is set or where it applies,
-      // and said it in a vocabulary the sidebar does not use.
-      const plain = (v) => (typeof v === "string" ? v : JSON.stringify(v));
-      // Written out rather than calling isSet: _renderForm declares its own
-      // isSet over a FIELD, and a name that means two things in one file is
-      // one refactor away from resolving to the wrong one.
-      const on = (v) => (v === undefined || v === null || v === "" ? "not set" : plain(v));
-      em.textContent = `${on(c.desktop)} on Desktop, ${on(c.mobile)} on Mobile`;
-      label.appendChild(em);
-
-      const settle = (value, why) => {
-        pairWrite(pair, c.room, c.key, value);
-        pair.conflicts = pairConflicts(pair);
-        this._log(`${c.key}: kept ${JSON.stringify(value)} (${why}) in both layouts`, "ok");
-        this._markDirty();
-        this._renderForm();
-        // The last one settled takes the whole notice with it, and the preview
-        // rises into the space rather than jumping into it.
-        if (!pair.conflicts.length) this._closeReconcile();
-        else this._renderReconcile();
-      };
-
-      const only = c.kind === "onlyDesktop" ? c.desktop : c.mobile;
-      // "Keep this" asked you to work out what "this" was. Name them.
-      this._noticeRow(rows, label, c.kind === "differs"
-        ? [["Keep Desktop", () => settle(c.desktop, "from Desktop")],
-           ["Keep Mobile", () => settle(c.mobile, "from Mobile")]]
-        : [["Use on both", () => settle(only, "the only value set")],
-           ["Clear", () => settle(undefined, "cleared")]]);
-    });
-
-    if (list.length > 4) {
-      const more = document.createElement("div");
-      more.className = "rrow rdone";
-      more.textContent = `and ${list.length - 4} more, listed in the log below`;
-      rows.appendChild(more);
+    if (!list.length) {
+      const done = this._flowScreen({
+        icon: "check", tone: "ok", quiet,
+        title: "Everything Matches",
+        lede: "Your desktop and phone layouts agree. Save to keep the changes.",
+      });
+      this._flowButton(done.acts, "Done", () => this._flowBack());
+      return;
     }
 
-    // Only once, and only if the panel is already up: on a fresh load the
-    // entrance owns the timing and calls _revealNotice when it is done.
-    if (this._entered && !this._reconcileSeen) {
-      this._reconcileSeen = true;
-      this._playNoticeIn();
-    }
+    const s = this._flowScreen({
+      icon: "alert", tone: "warn", quiet,
+      title: "Desktop and Phone Don't Match",
+      lede: "These settings are shared by your desktop and phone layouts, but "
+        + "they're set differently. Choose what to keep.",
+    });
+    const shown = (v) => (v === undefined || v === null || v === "" ? "Not set"
+      : typeof v === "string" ? this._prettyEntity(v) : JSON.stringify(v));
+    const apply = (c, value, why) => {
+      pairWrite(pair, c.room, c.key, value);
+      this._log(`${c.key}: kept ${JSON.stringify(value)} (${why}) on both layouts`, "ok");
+    };
+    const settled = () => {
+      pair.conflicts = pairConflicts(pair);
+      this._markDirty();
+      this._renderForm();
+      this._renderReconcile();
+      this._reviewDifferences(true);
+    };
+
+    const rooms = new Map();
+    list.forEach((c) => {
+      const room = c.roomName || "Home";
+      if (!rooms.has(room)) rooms.set(room, []);
+      rooms.get(room).push(c);
+    });
+    rooms.forEach((items, room) => {
+      const group = this._flowGroup(s.body, { header: room });
+      items.forEach((c) => {
+        const choices = c.kind === "differs"
+          ? [{ id: "desktop", label: "Use Desktop Value" }, { id: "mobile", label: "Use Phone Value" },
+             { id: "clear", label: "Remove From Both" }]
+          : [{ id: c.kind === "onlyDesktop" ? "desktop" : "mobile", label: "Use on Both" },
+             { id: "clear", label: c.kind === "onlyDesktop" ? "Remove From Desktop" : "Remove From Phone" }];
+        const r = this._flowRow(group, {
+          title: this._fieldLabelFor(c.key) || c.key,
+          sub: "Desktop: " + shown(c.desktop) + "   ·   Phone: " + shown(c.mobile),
+          chevron: true,
+          onTap: () => this._menuAt(r.row, choices, (id) => {
+            if (id === "desktop") apply(c, c.desktop, "from Desktop");
+            else if (id === "mobile") apply(c, c.mobile, "from Phone");
+            else apply(c, undefined, "removed");
+            settled();
+          }),
+        });
+      });
+    });
+    const note = document.createElement("p");
+    note.className = "ffoot";
+    note.textContent = "Use Desktop Settings keeps the desktop value wherever both are set, "
+      + "and fills in whichever layout is missing one.";
+    s.body.appendChild(note);
+
+    this._flowButton(s.acts, "Not Now", () => this._flowBack(), true);
+    this._flowButton(s.acts, "Use Desktop Settings", () => {
+      list.forEach((c) => apply(c, c.kind === "onlyMobile" ? c.mobile : c.desktop, "Use Desktop Settings"));
+      settled();
+    });
   }
 
-  _playNoticeIn() {
-    const box = this.$("reconcile");
-    if (!box || box.hidden) return;
-    box.classList.remove("pending");
-    box.classList.add("arriving");
-    box.addEventListener("animationend",
-      () => box.classList.remove("arriving"), { once: true });
-  }
-
-  // Last, after everything the panel drew for itself. Chained to the entrance's
-  // own animations rather than a matching delay, so it stays correct when the
-  // stagger changes.
-  _revealNotice(after) {
-    const box = this.$("reconcile");
-    if (!box || box.hidden) return;
-    this._reconcileSeen = true;
-    const go = () => this._playNoticeIn();
-    if (!after || !after.length) return go();
-    Promise.all(after.map((a) => a.finished.catch(() => {}))).then(go, go);
-  }
-
-  // Every key the form actually offers a control for, repeats expanded. A
-  // conflict the panel cannot edit is not something to put a button next to.
   _editableKeys() {
     if (this._editKeys) return this._editKeys;
     const out = new Set();
@@ -8286,58 +9785,6 @@ class HemmaPanel extends HTMLElement {
     return out;
   }
 
-  // Collapse it and let the preview rise into the space, the same way a section
-  // folds. box-sizing is pinned to border-box: offsetHeight IS the border box,
-  // and animating it on a content-box element overshoots by the padding.
-  _closeReconcile() {
-    const box = this.$("reconcile");
-    if (!box || box.hidden) return;
-    const gone = () => {
-      box.hidden = true;
-      box.innerHTML = "";
-      box.style.overflow = "";
-      box.style.boxSizing = "";
-    };
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return gone();
-    const from = box.offsetHeight;
-    const mb = getComputedStyle(box).marginBottom;
-    box.style.boxSizing = "border-box";
-    box.style.overflow = "clip";
-    const a = box.animate(
-      [{ height: from + "px", marginBottom: mb, opacity: 1 },
-       { height: "0px", marginBottom: "0px", opacity: 0 }],
-      { duration: RT(300), easing: EASE }
-    );
-    a.finished.then(gone, gone);
-  }
-
-  // Collapse it and let the preview rise into the space, the same way a section
-  // folds. box-sizing is pinned to border-box: offsetHeight IS the border box,
-  // and animating it on a content-box element overshoots by the padding.
-  _closeReconcile() {
-    const box = this.$("reconcile");
-    if (!box || box.hidden) return;
-    const gone = () => {
-      box.hidden = true;
-      box.innerHTML = "";
-      box.style.overflow = "";
-      box.style.boxSizing = "";
-    };
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return gone();
-    const from = box.offsetHeight;
-    const mb = getComputedStyle(box).marginBottom;
-    box.style.boxSizing = "border-box";
-    box.style.overflow = "clip";
-    const a = box.animate(
-      [{ height: from + "px", marginBottom: mb, opacity: 1 },
-       { height: "0px", marginBottom: "0px", opacity: 0 }],
-      { duration: RT(300), easing: EASE }
-    );
-    a.finished.then(gone, gone);
-  }
-
-  // The label the form gives a key, so a row reads like the field it is about
-  // rather than like a variable name.
   _fieldLabelFor(key) {
     for (const sec of SECTIONS) {
       const f = sectionFields(sec).find((x) => x.key === key);
@@ -8346,8 +9793,6 @@ class HemmaPanel extends HTMLElement {
     return null;
   }
 
-  // Where a shared field goes on the phone half. The wide room is already
-  // written by the time this runs.
   _mirrorToPair(key, value, rooms) {
     const pair = this._pair;
     if (!pair || pair.safe === false) return 0;
@@ -8389,10 +9834,9 @@ class HemmaPanel extends HTMLElement {
         this._log(`left ${r.foreign.length} template(s) alone, not Hemma's: `
           + r.foreign.join(", "));
       }
-      // The nav card lives in the scaffold, not in button_card_templates, so
-      // refreshTemplates never reached it and a fix sat in the bundle forever.
       const bnav = s.surface !== "mobile" && bundle.scaffold && bundle.scaffold.nav;
-      if (bnav && stable(withoutRoutes(bnav)) !== stable(withoutRoutes(s.scaffold.nav))) {
+      if (bnav && stable(withoutRoutes(omit(bnav, SCENE_KEYS)))
+        !== stable(withoutRoutes(omit(s.scaffold.nav, SCENE_KEYS)))) {
         scaffold = { ...s.scaffold, nav: clone(bnav) };
         this._log("refreshed the navigation card", "ok");
       }
@@ -8400,9 +9844,6 @@ class HemmaPanel extends HTMLElement {
       this._log("could not refresh templates: " + e.message, "warn");
     }
 
-    // Before the build, so the derived slots are real config: they round-trip,
-    // they show up in the panel, and you can edit or clear them like anything
-    // else you set yourself.
     const mobile = s.surface === "mobile";
 
     if (!mobile) {
@@ -8415,8 +9856,6 @@ class HemmaPanel extends HTMLElement {
 
     const built = expandAny(s, { scaffold, extras, templates });
 
-    // Nav routes are derived from the rooms, so re-deriving them on every save
-    // repairs dashboards written before the whole-config retarget existed.
     let cfg = built;
     if (!mobile) {
       const scenes = (this._navNode() || { routes: [] }).routes
@@ -8425,22 +9864,19 @@ class HemmaPanel extends HTMLElement {
       const fixed = retargetRoutes(built, url_path, s.compact.rooms, scenes);
       cfg = fixed.config;
       applyScenePick(cfg, s.compact.rooms);
-      applyKiosk(cfg, s.compact.rooms);
     }
-    // Marks this dashboard as the one the panel manages. hemma_room shows its
-    // settings button only where this is set, so the YAML dashboard - which
-    // loads the same shared templates straight off disk - never gets one.
+    applyKiosk(cfg, s.compact.rooms);
     if (!mobile) {
       (s.compact.rooms || []).forEach((r) => { r.variables.hemma_ui_managed = true; });
       (cfg.views || []).forEach((v) => {
         const hero = (v.cards || [])[0];
         if (hero && hero.variables) hero.variables.hemma_ui_managed = true;
       });
+    } else {
+      // A phone layout opened on its own, rather than as the half of a pair.
+      markPhoneManaged(cfg);
     }
 
-    // Fingerprint as SAVED, not as bundled: the retarget above rewrites nav
-    // routes, so an earlier print describes a value never on disk and the
-    // template then looks hand-edited forever.
     if (adopted.length && cfg[FINGERPRINT_KEY]) {
       const saved = cfg.button_card_templates || {};
       adopted.forEach((k) => {
@@ -8451,9 +9887,6 @@ class HemmaPanel extends HTMLElement {
       : (JSON.stringify(built).match(/\/dashboard-hemma\//g) || []).length;
     if (stale) this._log(`repaired ${stale} navigation link(s) pointing elsewhere`, "warn");
 
-    // The phone half, rebuilt from the same state the mirrored edits went into
-    // and given the same refreshed templates. Built BEFORE either write: a
-    // failure here must not leave one dashboard saved and the other not.
     const pair = this._pair;
     let mcfg = null;
     if (pair && pair.safe !== false) {
@@ -8461,24 +9894,28 @@ class HemmaPanel extends HTMLElement {
         const st = syncPairTiles(pair);
         if (st.synced) this._log(`phone layout: ${st.synced} tile(s) kept in step`, "ok");
         if (st.added) this._log(`phone layout: ${st.added} tile(s) copied across`, "ok");
+        if (st.moved) this._log(`phone layout: ${st.moved} section(s) reordered to match`, "ok");
         if (st.dropped) this._log(
           `phone layout: ${st.dropped} tile(s) with nothing configured here removed`, "ok");
+        const nOff = syncBadgeSwitches(pair);
+        if (nOff) this._log(`phone badges: ${nOff} hidden`, "ok");
+        const nChips = syncRoomChips(pair);
+        if (nChips) this._log(`phone room popups: sensor badges for ${nChips} room(s)`, "ok");
         const np = syncPresenceOverlay(pair);
         if (np) this._log(`phone People popup: ${np} person card(s)`, "ok");
-        // Scenes is a nav route on the wide half and three cards on the phone,
-        // so the switch has to build or remove them rather than just being read.
         const scOn = this._scenesOn();
         syncScenesMobile(pair, scOn);
         this._log(`phone Scenes: ${scOn ? "on" : "off"}`, "ok");
-        // Cameras have no tile unless something makes one, and without a tile
-        // the Security filter has nothing to show for them.
         const nc = syncCamerasMobile(pair, this._hass);
         if (nc) this._log(`phone Cameras tile: ${nc} camera(s)`, "ok");
         st.unmatched.slice(0, 6).forEach((u) => this._log(
           `phone tile "${u.tile}" in ${u.section} has no match here - left as it is`, "warn"));
         const mextras = { ...clone(pair.mobile.extras) };
         mextras[FINGERPRINT_KEY] = extras[FINGERPRINT_KEY];
-        mcfg = expandAny(pair.mobile, { extras: mextras, templates });
+        mcfg = markPhoneManaged(
+          expandAny(pair.mobile, { extras: mextras, templates }), bellOnFor(pair), assistOnFor(pair));
+        applyScenePick(mcfg, s.compact.rooms);
+        applyKiosk(mcfg, s.compact.rooms);
       } catch (e) {
         this._status("phone layout could not be rebuilt: " + e.message, "err");
         this._log("phone layout not saved: " + e.message, "err");
@@ -8500,6 +9937,7 @@ class HemmaPanel extends HTMLElement {
         this._log(`saved phone layout  ${JSON.stringify(mcfg).length.toLocaleString()} bytes`, "ok");
       }
       this._clean = this._print();
+      this._resetUndo(true);
       this._markDirty();
       this._status("");
       this._saveFlash();
@@ -8510,16 +9948,37 @@ class HemmaPanel extends HTMLElement {
     }
     this._saving = false;
     this._markDirty();
+    if (ok) await this._syncFilterOptions();
     return ok;
+  }
+
+  // filter-overlay.js derives this key from the room name, so Hemma owns the list.
+  async _syncFilterOptions() {
+    const ent = "input_select.hemma_mobile_filter";
+    const cur = ((this._hass || {}).states || {})[ent];
+    if (!cur) return;
+    const have = (cur.attributes || {}).options || [];
+    const keys = (((this._state || {}).compact || {}).rooms || [])
+      .map((r) => r && r.name).filter(Boolean)
+      .filter((n) => n !== MOBILE_FAVORITES)
+      .map(roomKeyOf);
+    // room_scenes is a category that happens to share the prefix, never a room.
+    const kept = have.filter((o) => o === "room_scenes" || !/^room_/.test(o));
+    const next = kept.concat(keys.filter((k) => kept.indexOf(k) < 0));
+    if (next.length === have.length && next.every((o, i) => o === have[i])) return;
+    try {
+      await this._hass.callService("input_select", "set_options",
+        { entity_id: ent, options: next });
+      this._log(`phone filter: ${keys.length} room(s)`, "ok");
+    } catch (e) {
+      this._log("phone filter options not updated: " + e.message, "err");
+    }
   }
 
   _isDirty() {
     return !!this._clean && this._print() !== this._clean;
   }
 
-  // The way out of edit mode, and the counterpart to the dashboard's own
-  // "Edit dashboard". Commits first so nothing is lost crossing over, and
-  // stays put if the write failed - the log already says why.
   async _done() {
     const btn = this.$("donebtn");
     if (btn && btn.disabled) return;
@@ -8534,37 +9993,73 @@ class HemmaPanel extends HTMLElement {
 
   // ── forms ─────────────────────────────────────────────────────────────────
 
-  // What "unsaved" means. Templates are only ever refreshed inside _save, so
-  // they cannot drift while editing and stay out of a per-keystroke print.
   _print() {
     const s = this._state;
     if (!s) return "";
     const p = this._pair;
-    // The phone SCAFFOLD as well as its rooms and chrome: the background card
-    // is the view's shell and lives there, so without it setting the hero photo
-    // wrote the state, left Save grayed out, and lost the change on reload.
     return stable([s.compact, s.scaffold, s.extras, s.chrome,
       p && p.safe !== false
         ? [p.mobile.compact, p.mobile.chrome, p.mobile.scaffold] : null]);
   }
 
-  // A Save with nothing to do is disabled, not pressable-and-silent. The blue
-  // .dirty state and the enabled state are one fact, so one place owns both.
-  // Two things outrank dirtiness: a save in flight, and a dashboard judged
-  // unsafe to write.
+  _snap() {
+    const s = this._state;
+    const p = this._pair;
+    return {
+      s: [s.compact, s.scaffold, s.extras, s.chrome].map(clone),
+      m: p && p.safe !== false ? [p.mobile.compact, p.mobile.chrome, p.mobile.scaffold].map(clone) : null,
+    };
+  }
+
+  // A fresh history, taken wherever _clean is: a load starts over, a save keeps going.
+  _resetUndo(keep) {
+    if (!keep) this._undoStack = [];
+    this._lastPrint = this._print();
+    this._shadow = this._state ? this._snap() : null;
+  }
+
+  _undo() {
+    const snap = (this._undoStack || []).pop();
+    const s = this._state;
+    if (!snap || !s) return;
+    if (this._openCombo) this._openCombo();
+    const room = s.compact.rooms[this._room];
+    const tileIdx = this._sel && this._sel.group === "tiles" && room
+      ? (room.tiles || []).findIndex((t) => this._tileKey(t) === this._sel.key) : -1;
+    [s.compact, s.scaffold, s.extras, s.chrome] = snap.s;
+    const p = this._pair;
+    if (snap.m && p && p.safe !== false) [p.mobile.compact, p.mobile.chrome, p.mobile.scaffold] = snap.m;
+    this._room = Math.max(0, Math.min(this._room, s.compact.rooms.length - 1));
+    const now = s.compact.rooms[this._room];
+    if (tileIdx >= 0 && now && (now.tiles || [])[tileIdx]) this._sel.key = this._tileKey(now.tiles[tileIdx]);
+    this._lastPrint = this._print();
+    this._shadow = this._snap();
+    this._renderTabs();
+    this._renderForm();
+    this._syncPreview();
+  }
+
   _markDirty() {
     const b = this.$("save");
     if (!b) return;
+    if (this._state && this._shadow && this._lastPrint !== undefined) {
+      const print = this._print();
+      if (print !== this._lastPrint) {
+        this._undoStack = (this._undoStack || []).concat([this._shadow]).slice(-50);
+        this._shadow = this._snap();
+        this._lastPrint = print;
+          }
+    }
+    const u = this.$("undo");
+    if (u) u.disabled = !(this._undoStack || []).length;
     const dirty = !!this._clean && this._print() !== this._clean;
     b.classList.toggle("dirty", dirty);
     b.disabled = !!this._saveBlocked || !!this._saving || !dirty;
   }
 
-  // The rail's head and the toolbar are halves of one titlebar, so the burger
-  // and wordmark belong to whichever exists. MOVED, not rebuilt: every pill's
-  // drag handler is a closure and the morph animates from where they are.
   _placeRooms(strip) {
-    if (strip === undefined) strip = isNarrow(this);
+    if (strip === undefined) strip = this.classList.contains("flow");
+    const barBurger = strip || panelW(this) < PANEL_COMPACT || this.classList.contains("split");
     const root = this.shadowRoot;
     const rooms = this.$("rooms");
     const rail = root.querySelector(".rail");
@@ -8572,20 +10067,25 @@ class HemmaPanel extends HTMLElement {
     const bar = root.querySelector(".toprow");
     const burger = root.querySelector(".burger");
     if (!rooms || !rail || !head || !bar || !burger) return;
-    const want = strip ? "bar" : "rail";
+    const side = this.classList.contains("split") && !this.classList.contains("narrow")
+      && !this.classList.contains("flow") && !strip;
+    const want = (side ? "side" : strip ? "bar" : "rail") + (barBurger ? "+burger" : "");
     if (this._chromeAt === want) return;
     this._chromeAt = want;
-    if (strip) {
-      const spacer = bar.querySelector(".spacer");
-      bar.insertBefore(burger, bar.firstChild);
-      bar.insertBefore(rooms, spacer);
-    } else {
-      head.appendChild(burger);
-      // Back above the Dashboards group, not appended past it.
+    if (barBurger) bar.insertBefore(burger, bar.firstChild);
+    else head.appendChild(burger);
+    const gRooms = root.getElementById("g-rooms");
+    const nav = root.getElementById("sidelist");
+    if (side && nav) {
+      nav.insertBefore(gRooms, nav.firstChild);
+      nav.insertBefore(rooms, gRooms.nextSibling);
+    } else if (strip) bar.insertBefore(rooms, bar.querySelector(".spacer"));
+    // Back above the Dashboards group, not appended past it.
+    else {
+      rail.insertBefore(gRooms, root.getElementById("g-dashes"));
       rail.insertBefore(rooms, root.getElementById("g-dashes"));
     }
-    // The toolbar just gained or lost a row, and every column's top offset is
-    // measured off it.
+    if (!strip && !barBurger) this._toggleRail(false);
     if (this._syncTop) this._syncTop();
   }
 
@@ -8602,8 +10102,6 @@ class HemmaPanel extends HTMLElement {
       t.className = "tab" + (i === this._room ? " on" : "");
       t.dataset.k = "room-" + r.path;
 
-      // Home draws one warm glyph for every room: it says "a room", not which
-      // one. Hidden in the strip, where the pills have no width to spare.
       const ico = document.createElement("span");
       ico.className = "roomglyph";
       ico.style.setProperty("--i", "url('" + iconUrl(roomGlyph(r.name, r)) + "')");
@@ -8614,26 +10112,21 @@ class HemmaPanel extends HTMLElement {
       label.textContent = r.name || r.path;
       t.appendChild(label);
 
-      // On every room, not just the selected one. In the rail it is invisible
-      // until the pointer arrives, so any room can be renamed without being
-      // selected first; the strip parks it on the selected pill as before.
       const caret = document.createElement("span");
       caret.className = "caret";
-      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor">'
+        + '<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/>'
+        + '<circle cx="19" cy="12" r="2"/></svg>';
       caret.onpointerdown = (ev) => ev.stopPropagation();
-      caret.onclick = (ev) => { ev.stopPropagation(); this._roomMenu(t, i); };
+      caret.onclick = (ev) => { ev.stopPropagation();
+        this._roomMenu(caret.getBoundingClientRect().width ? caret : t, i); };
       t.appendChild(caret);
       t.appendChild(this._minusFor(() => this._roomMenuAction("delete", i)));
-      // Anchored to the ROW: the chevron no longer renders, so anchoring to it
-      // put the menu in the window's top-left corner.
       t.oncontextmenu = (ev) => { ev.preventDefault(); this._roomMenu(t, i); };
 
       // Drag to reorder. A press that never moves is treated as a tap.
       t.onpointerdown = (ev) => {
         if (ev.button) return;
-        // The row scrolls sideways and the browser takes the pointer to do it, so
-        // touch drags on a hold instead. A swipe still scrolls: it moves before
-        // the hold fires.
         const touch = ev.pointerType === "touch" && isPhone(this);
         let canDrag = !touch;
         let lifted = false, holdTimer = 0;
@@ -8645,8 +10138,6 @@ class HemmaPanel extends HTMLElement {
         let last = ev[ax.client];
         let moved = false, target = i, shown = i;
 
-        // One track only. A wrapped strip - or a rail somehow showing two
-        // columns - has nothing single to slide along.
         const lanes = new Set(rects.map((r) => Math.round(r[ax.cross])));
         const gap = rects.length > 1
           ? Math.max(0, rects[1][ax.pos] - (rects[0][ax.pos] + rects[0][ax.size]))
@@ -8664,9 +10155,6 @@ class HemmaPanel extends HTMLElement {
           });
         };
 
-        // touch-action is latched when the finger lands, so the scroll can only
-        // be called off by preventing the move itself. Nothing has scrolled yet -
-        // the finger was still through the hold - so this is still allowed.
         const eatTouch = (e3) => { if (lifted && e3.cancelable) e3.preventDefault(); };
 
         if (touch) {
@@ -8703,8 +10191,6 @@ class HemmaPanel extends HTMLElement {
           shiftTo(target);
         };
 
-        // The scroller taking over ends the gesture with a cancel, not an up:
-        // clean up without treating it as a tap.
         const unbind = () => {
           if (holdTimer) { clearTimeout(holdTimer); holdTimer = 0; }
           window.removeEventListener("pointermove", onMove);
@@ -8724,16 +10210,13 @@ class HemmaPanel extends HTMLElement {
           unbind();
 
           if (!moved) {
-            // A hold that lifted and went nowhere is a canceled reorder, not a
-            // tap - switching rooms on release would be a surprise.
+            if (!wasLifted && !this._editing("rooms")) this._toggleRail(false);
             if (!wasLifted && i !== this._room) {
               this._room = i; this._renderTabs(); this._renderForm();
             }
             return;
           }
 
-          // Measure with the shifts still applied, so the rebuild starts from
-          // the gap instead of snapping back first.
           const before = this._tabRects();
           tabs.forEach((p2) => { p2.style.transition = ""; p2.style.transform = ""; });
 
@@ -8765,18 +10248,10 @@ class HemmaPanel extends HTMLElement {
     const host = this.$("rooms");
     const old = host.querySelector(".tabs");
     if (old) old.replaceWith(el); else host.prepend(el);
-    // A sibling of the list, not the last thing in it: the rail pins it to its
-    // foot while the rooms above scroll, and in the strip both sit in one
-    // scroller so it travels with the pills.
     const oldAdd = host.querySelector(".tabadd");
     if (oldAdd) oldAdd.replaceWith(add); else host.appendChild(add);
 
-    // Selecting a room grows its tab by the caret's width; grow into it rather
-    // than snapping, and slide the rest along.
     if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches && before.size) {
-      // The pill's width animates for real. Stretching it with scaleX distorted
-      // its rounded ends and needed the label counter-scaled, and those two
-      // never quite cancel - that is what read as jerky.
       const spring = { duration: RT(340), easing: "cubic-bezier(.34,1.32,.5,1)" };
       el.querySelectorAll(".tab[data-k]").forEach((t) => {
         const b = before.get(t.dataset.k);
@@ -8795,8 +10270,7 @@ class HemmaPanel extends HTMLElement {
       });
     }
     this._prevSel = this._room;
-    // The bar's height comes from these pills, so the offset is only knowable
-    // once they exist. Settle it before the form measures anything.
+    this._syncTitles();
     if (this._syncTop) this._syncTop();
   }
 
@@ -8834,20 +10308,36 @@ class HemmaPanel extends HTMLElement {
 
   async _addRoom() {
     const rooms = this._state.compact.rooms;
-    const name = await this._ask({ title: "New room", value: "", placeholder: "Kitchen", confirmLabel: "Add" });
-    if (!name) return;
+    const picked = await this._ask({
+      title: "New room", value: "", placeholder: "Kitchen", confirmLabel: "Add", icons: true,
+      message: "A room is its own page on desktop and tablet, and a section further down the page on the phone.",
+    });
+    if (!picked) return;
+    const name = picked.value;
     const path = slug(name);
     if (rooms.some((r) => r.path === path)) {
       return this._status('a room with path "' + path + '" already exists', "err");
     }
     rooms.push(blankRoom(name.trim(), path, "home-demo"));
+    const fresh = rooms[rooms.length - 1];
+    if (picked.icon) {
+      fresh.variables = fresh.variables || {};
+      fresh.variables.room_icon = picked.icon;
+    }
+    const src = rooms.find((r) => r !== fresh && r.variables && Object.keys(r.variables).length);
+    if (src) {
+      dashScopedKeys().forEach((k) => {
+        const v = src.variables[k];
+        if (v === undefined) return;
+        fresh.variables = fresh.variables || {};
+        if (fresh.variables[k] === undefined) fresh.variables[k] = clone(v);
+      });
+    }
     this._room = rooms.length - 1;
     this._renderTabs();
     this._renderForm();
   }
 
-  // The rename and delete a room row offers. Shared with the Rooms section
-  // menu, so the two cannot come to disagree about what deleting means.
   async _roomMenuAction(id, i) {
     const rooms = this._state.compact.rooms;
       const r = rooms[i];
@@ -8860,8 +10350,6 @@ class HemmaPanel extends HTMLElement {
         return;
       }
       if (id === "delete") {
-        // Belt and braces - the menu already dims this, but the guard is what
-        // makes zero rooms unreachable rather than merely unoffered.
         if (rooms.length < 2) return;
         const yes = await this._ask({
           title: 'Delete "' + (r.name || r.path) + '"?',
@@ -8880,8 +10368,6 @@ class HemmaPanel extends HTMLElement {
         const tab = this.shadowRoot.querySelector('.tab[data-k="room-' + r.path + '"]');
         if (!tab || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return done();
 
-        // Collapse to nothing, so the rooms after it close the gap - along
-        // the rail, or across the strip.
         const down = !!(tab.closest && tab.closest(".rail"));
         tab.style.transformOrigin = down ? "center top" : "left center";
         tab.style.overflow = "hidden";
@@ -8898,8 +10384,6 @@ class HemmaPanel extends HTMLElement {
       }
   }
 
-  // Auto is the ABSENCE of a value, so picking it clears the key and the icon
-  // follows the name again. Storing the resolved name freezes it on a rename.
   _roomIconMenu(anchor, i) {
     const r = this._state.compact.rooms[i];
     const chosen = (r.variables || {}).room_icon || "";
@@ -8908,13 +10392,11 @@ class HemmaPanel extends HTMLElement {
       { id: "", label: "Automatic", glyph: auto, checked: !chosen, group: null },
       ...ROOM_ICON_CHOICES.map((g) => ({
         id: g, label: roomIconLabel(g), glyph: g, checked: chosen === g,
-        group: "Icons",
+        group: "Icons", quiet: true,
       })),
     ], (id) => {
       if (!id) {
         if (r.variables) delete r.variables.room_icon;
-        // An empty variables object is not the same as none. Leaving {} behind
-        // writes a key the file never carried and fails the round trip.
         if (r.variables && !Object.keys(r.variables).length) delete r.variables;
       } else {
         if (!r.variables) r.variables = {};
@@ -8923,6 +10405,240 @@ class HemmaPanel extends HTMLElement {
       this._renderTabs();
       this._renderForm();
     });
+  }
+
+  _placeCanvasHead() {
+    const head = this.shadowRoot.querySelector(".canvashead");
+    const row = this.shadowRoot.querySelector(".toprow");
+    const canvas = this.shadowRoot.querySelector(".canvas");
+    if (!head || !row || !canvas) return;
+    const toCanvas = () => {
+      const tail = row.querySelector(".spacer.tail");
+      if (tail) tail.remove();
+      head.classList.remove("pinned");
+      this.classList.add("headdrop");
+      head.style.removeProperty("--headx");
+      if (head.parentNode !== canvas) canvas.insertBefore(head, canvas.firstChild);
+    };
+    const wide = this.classList.contains("split") && !this.classList.contains("narrow")
+      && !this.classList.contains("flow") && !this.classList.contains("compact");
+    if (!wide) { this._headFit = null; return toCanvas(); }
+    const cs = getComputedStyle(this);
+    const cols = (parseFloat(cs.getPropertyValue("--side-w")) || 0)
+      + (parseFloat(cs.getPropertyValue("--insp-w")) || 0);
+    const pill = this.$("diffs");
+    // The pill is measured whether or not it is showing: its arrival must not move the preview.
+    let reserve = 0;
+    if (pill && pill.hidden) {
+      const long = pill.querySelector(".s-long"), short = pill.querySelector(".s-short");
+      const lt = long ? long.textContent : "", st = short ? short.textContent : "";
+      if (long && !lt) long.textContent = "88 Differences";
+      if (short && !st) short.textContent = "88";
+      pill.hidden = false;
+      reserve = pill.getBoundingClientRect().width + 14;
+      pill.hidden = true;
+      if (long && !lt) long.textContent = lt;
+      if (short && !st) short.textContent = st;
+    }
+    const sig = Math.round(panelW(this)) + ":" + Math.round(cols) + ":" + Math.round(reserve);
+    if (this._headFit && this._headFit.sig === sig) {
+      if (!this._headFit.ok) return toCanvas();
+    }
+    const anchor = row.querySelector("#diffs") || row.querySelector(".navpill");
+    if (head.parentNode !== row) row.insertBefore(head, anchor);
+    const tail = row.querySelector(".spacer.tail");
+    if (tail) tail.remove();
+    const rowBox = row.getBoundingClientRect();
+    const plinth = this.shadowRoot.querySelector(".plinth");
+    const usePlinth = !!plinth && plinth.getBoundingClientRect().width > 1;
+    const box = (usePlinth ? plinth : canvas).getBoundingClientRect();
+    // A column with no width yet is not a measurement.
+    if (box.width < 1) { this._headFit = null; return toCanvas(); }
+    const inset = usePlinth ? parseFloat(getComputedStyle(plinth).paddingLeft || 0) : 0;
+    const want = Math.round(box.left + inset - rowBox.left);
+    head.classList.add("pinned");
+    this.classList.remove("headdrop");
+    head.style.setProperty("--headx", want + "px");
+    const hw = head.getBoundingClientRect().width;
+    let start = 0, stop = rowBox.width;
+    // display:contents on the button cluster means ITS children are the row's items.
+    const items = [];
+    const collect = (parent) => {
+      [...parent.children].forEach((k) => {
+        if (k === head || k.classList.contains("spacer")) return;
+        if (getComputedStyle(k).display === "contents") return collect(k);
+        items.push(k);
+      });
+    };
+    collect(row);
+    items.forEach((k) => {
+      const r = k.getBoundingClientRect();
+      if (r.width < 1) return;
+      const l = r.left - rowBox.left;
+      if (l >= want) stop = Math.min(stop, l);
+      else start = Math.max(start, r.right - rowBox.left);
+    });
+    stop -= reserve;
+    const left = Math.min(want, Math.round(stop - hw - 14));
+    if (left !== want) head.style.setProperty("--headx", left + "px");
+    const ok = left >= Math.max(start + 14, cols - 1);
+    this._headFit = { sig, ok };
+    if (!ok) toCanvas();
+  }
+
+  _alignCanvas() {
+    const canvas = this.shadowRoot.querySelector(".canvas");
+    const row = this.shadowRoot.querySelector(".toprow > .canvashead");
+    if (!canvas) return;
+    if (!row) { this._alignSig = null; canvas.style.paddingTop = ""; return; }
+    const sig = Math.round(panelW(this)) + ":" + Math.round(window.innerHeight)
+      + ":" + (this.$("pane") ? this.$("pane").childElementCount : 0);
+    if (this._alignSig === sig) return;
+    this._alignSig = sig;
+    const stage = canvas.parentElement;
+    const sheet = this.shadowRoot.querySelector(".inspector .sheet");
+    const band = sheet && (sheet.querySelector(".band:not([style*='display: none'])")
+      || sheet.querySelector(".band"));
+    if (!stage || !band) return;
+    let first = [...band.querySelectorAll(".col > .card, .col > .grouphead, .col > .badgebar,"
+      + " .tilegrid > .sortstrip, .tilegrid > .addrowbar, .tilewrap > .grouphead")]
+      .find((el) => el.getBoundingClientRect().height > 1);
+    if (first && first.classList.contains("grouped")) {
+      first = first.querySelector(".subcard") || first;
+    }
+    if (!first) return;
+    const want = Math.round(first.getBoundingClientRect().top
+      - stage.getBoundingClientRect().top);
+    // A number taken before the column is laid out is not a measurement.
+    if (!(want >= 20 && want <= 240)) return;
+    canvas.style.paddingTop = want + "px";
+  }
+
+  _sideWidth(px) {
+    const w = Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(px)));
+    this.style.setProperty("--side-w", w + "px");
+    return w;
+  }
+
+  _wireSideGrip() {
+    const grip = this.$("sidegrip");
+    if (!grip || this._gripWired) return;
+    this._gripWired = true;
+    try {
+      const saved = parseFloat(localStorage.getItem(SIDE_W_KEY));
+      if (saved >= SIDE_MIN && saved <= SIDE_MAX) this._sideWidth(saved);
+    } catch (e) { /* private mode */ }
+    grip.onpointerdown = (ev) => {
+      if (ev.button) return;
+      ev.preventDefault();
+      const start = ev.clientX;
+      const from = parseFloat(getComputedStyle(this).getPropertyValue("--side-w")) || 236;
+      grip.setPointerCapture(ev.pointerId);
+      this.classList.add("resizing");
+      let w = from;
+      const move = (e) => {
+        w = this._sideWidth(from + (e.clientX - start));
+        if (this._applyMapSize) this._applyMapSize();
+        this._placeCanvasHead();
+      };
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+        this.classList.remove("resizing");
+        try { localStorage.setItem(SIDE_W_KEY, String(w)); } catch (e) { /* private mode */ }
+        // The columns moved, so the two things measured against them are stale.
+        this._placeCanvasHead();
+        this._alignSig = null;
+        this._alignCanvas();
+        if (this._applyMapSize) this._applyMapSize();
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+    };
+    // Back to the width it ships with, the way a Mac divider resets.
+    grip.ondblclick = () => {
+      this.style.removeProperty("--side-w");
+      try { localStorage.removeItem(SIDE_W_KEY); } catch (e) { /* private mode */ }
+      this._placeCanvasHead();
+      this._alignSig = null;
+      this._alignCanvas();
+      if (this._applyMapSize) this._applyMapSize();
+    };
+  }
+
+  _toggleRail(on) {
+    const open = on === undefined ? !this.classList.contains("railopen") : !!on;
+    this.classList.toggle("railopen", open);
+    const btn = this.$("railbtn");
+    if (btn) {
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Hide rooms" : "Show rooms");
+    }
+  }
+
+  _syncTitles() {
+    const room = this._state && this._state.compact.rooms[this._room];
+    const name = room ? (room.name || room.path) : "";
+    const big = this.$("bigtitle");
+    const nav = this.$("navtitle");
+    const bar = this.$("roomtitle");
+    if (bar) {
+      const sideRooms = this.classList.contains("split") && !this.classList.contains("narrow")
+        && !this.classList.contains("flow");
+      const dash = (this._dashList || []).find((d) => d.url_path === this._dashUrl);
+      const label = sideRooms ? ((dash && dash.title) || this._dashUrl || name) : name;
+      bar.querySelector(".rt-label").textContent = label;
+      bar.setAttribute("aria-label", sideRooms ? label : label + ", change room");
+    }
+    if (big) {
+      big.querySelector(".bt-label").textContent = name;
+      big.setAttribute("aria-label", name + ", change room");
+    }
+    if (nav) {
+      nav.querySelector(".nt-label").textContent = name;
+      nav.setAttribute("aria-label", name + ", change room");
+    }
+  }
+
+  _roomTitleMenu(anchor) {
+    const rooms = this._state.compact.rooms;
+    this._menuAt(anchor, [
+      ...rooms.map((r, i) => ({
+        id: "go:" + i, label: r.name || r.path, glyph: roomGlyph(r.name, r), plainGlyph: true,
+        checked: i === this._room, group: "Rooms", quiet: true,
+      })),
+      { id: "add", label: "Add Room\u2026", icon: "plus", group: "Rooms", quiet: true },
+      { id: "rename", label: "Rename\u2026", icon: "pencil", group: "This Room", quiet: true },
+      { id: "icon", label: "Change Icon\u2026", icon: "grid", group: "This Room", quiet: true },
+      { id: "delete", label: "Delete Room", icon: "trash", danger: true, group: "This Room", quiet: true,
+        disabled: rooms.length < 2,
+        why: "A dashboard needs at least one room." },
+    ], (id) => {
+      if (id.indexOf("go:") === 0) {
+        const i = +id.slice(3);
+        if (i === this._room) return;
+        this._room = i;
+        this._renderTabs();
+        this._renderForm();
+        return;
+      }
+      if (id === "add") return this._addRoom();
+      if (id === "icon") {
+        return requestAnimationFrame(() => this._roomIconMenu(anchor, this._room));
+      }
+      return this._roomMenuAction(id, this._room);
+    });
+  }
+
+  _syncCollapse() {
+    const big = this.$("bigtitle");
+    const bar = this.shadowRoot.querySelector(".top");
+    if (!big || !bar) return;
+    if (!isPhone(this)) { this.classList.remove("collapsed"); return; }
+    const on = big.getBoundingClientRect().bottom <= bar.getBoundingClientRect().bottom;
+    this.classList.toggle("collapsed", on);
   }
 
   _roomMenu(anchor, i) {
@@ -8934,18 +10650,16 @@ class HemmaPanel extends HTMLElement {
         disabled: rooms.length < 2,
         why: "A dashboard needs at least one room." },
     ], async (id) => {
-      // The picker replaces this menu rather than nesting inside it, so it
-      // opens on the next frame - _menuAt closes whatever is open first, and
-      // opening the new one in the same tick would close it again.
       if (id === "icon") return requestAnimationFrame(() => this._roomIconMenu(anchor, i));
       return this._roomMenuAction(id, i);
     });
   }
 
-  // Above PANEL_NARROW the form column scrolls. Below it the column is overflow:visible
-  // and the page scrolls instead - and the page is outside this shadow root, so
-  // pane.scrollTop there reads 0 and writes nothing.
   _scroller() {
+    if (this.classList.contains("phone")) {
+      const shell = this.shadowRoot.querySelector(".shell");
+      if (shell) return shell;
+    }
     const pane = this.$("pane");
     const own = getComputedStyle(pane).overflowY;
     if (own === "auto" || own === "scroll") return pane;
@@ -8957,9 +10671,6 @@ class HemmaPanel extends HTMLElement {
     return document.scrollingElement || document.documentElement;
   }
 
-  // scrollIntoView scrolls EVERY scrollable ancestor, including whatever HA
-  // wraps this panel in - which slides the panel up under its own fixed header
-  // and leaves a strip of nothing below it. Move our own scroller only.
   _scrollTo(el, center) {
     const sc = this._scroller();
     const root = document.scrollingElement || document.documentElement;
@@ -8971,48 +10682,124 @@ class HemmaPanel extends HTMLElement {
     sc.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
   }
 
+  _diag() {
+    if (this._diagEl) return;
+    const out = document.createElement("pre");
+    out.style.cssText = "position:fixed;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom, 0px));"
+      + "z-index:99;margin:0;padding:6px 10px;border-radius:12px;background:rgba(0,0,0,.72);color:#7CFC9A;"
+      + "font:10px/1.3 ui-monospace,Menlo,monospace;white-space:pre-wrap;pointer-events:auto;"
+      + "max-height:4.2em;overflow:hidden";
+    // Collapsed to the last few events so it never covers the form; a tap shows everything.
+    let full = false;
+    out.addEventListener("click", () => { full = !full; out.style.maxHeight = full ? "70vh" : "4.2em"; });
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;top:0;left:0;width:1px;height:env(safe-area-inset-top, 0px);"
+      + "visibility:hidden;pointer-events:none";
+    this.shadowRoot.append(probe, out);
+    this._diagEl = out;
+    const q = (s) => this.shadowRoot.querySelector(s);
+    const R = (el) => {
+      if (!el) return "-";
+      const r = el.getBoundingClientRect();
+      return Math.round(r.top) + ".." + Math.round(r.bottom);
+    };
+    const up = (n) => n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+    const tick = () => {
+      const vv = window.visualViewport;
+      const chain = [];
+      for (let n = up(this); n; n = up(n)) {
+        const cs = getComputedStyle(n);
+        const bits = ["transform", "filter", "perspective", "contain", "willChange", "backdropFilter"]
+          .filter((k) => cs[k] && !["none", "auto", "normal"].includes(cs[k]))
+          .map((k) => k + "=" + cs[k]);
+        if (cs.overflowY !== "visible") bits.push("ovY=" + cs.overflowY);
+        if (n.offsetHeight > window.innerHeight) bits.push("h=" + n.offsetHeight + " minH=" + cs.minHeight + " H=" + cs.height);
+        if (n.scrollTop) bits.push("SCROLLED " + n.scrollTop);
+        if (bits.length) chain.push(n.tagName.toLowerCase() + " " + R(n) + " " + bits.join(" "));
+      }
+      const lines = [
+        "vh " + innerHeight + "  vv " + (vv ? Math.round(vv.height) + "@" + Math.round(vv.offsetTop) : "-")
+          + "  safe " + Math.round(probe.getBoundingClientRect().height)
+          + "  scrollY " + Math.round(window.scrollY) + "  docH " + document.documentElement.scrollHeight
+          + "  bodyH " + (document.body ? document.body.scrollHeight : "-"),
+        "host " + R(this) + "  slot " + R(this.parentElement) + "  top " + R(q(".top")) + "  body " + R(q(".body")),
+        "bgwrap " + R(q(".bgwrap")) + "  bg " + R(q(".bg")) + "  tint " + R(q(".bgtint")) + "  shell " + R(q(".shell")),
+        "cls " + this.className,
+      ].concat(chain.slice(0, 8), this._traceLog || []);
+      out.textContent = (full ? lines : lines.slice(-3)).join("\n");
+      setTimeout(() => requestAnimationFrame(tick), 300);
+    };
+    tick();
+  }
+
+  _fitSlot() {
+    const slot = this.parentElement;
+    if (!slot || slot.nodeType !== 1) return;
+    if (!isNarrow(this)) {
+      if (this._slotFitted) {
+        ["padding-top", "padding-bottom", "min-height", "margin-top", "margin-bottom"]
+          .forEach((p) => slot.style.removeProperty(p));
+        [document.documentElement, document.body].forEach((el) => {
+          if (!el) return;
+          el.style.removeProperty("overscroll-behavior-y");
+          el.style.removeProperty("overflow-x");
+        });
+        this._slotFitted = false;
+      }
+      return;
+    }
+    // important: the inset is HA's own rule on its own element, not ours.
+    ["padding-top", "padding-bottom", "margin-top", "margin-bottom"]
+      .forEach((p) => slot.style.setProperty(p, "0px", "important"));
+    slot.style.setProperty("min-height", "0", "important");
+    const root = document.documentElement;
+    if (root) root.style.setProperty("overscroll-behavior-y", "contain", "important");
+    if (document.body) document.body.style.setProperty("overscroll-behavior-y", "contain", "important");
+    [root, document.body].forEach((el) => el && el.style.setProperty("overflow-x", "hidden", "important"));
+    this._slotFitted = true;
+  }
+
   _renderForm() {
     this._disarmRow();
     const room = this._state && this._state.compact.rooms[this._room];
     this._markDirty();
     if (!room) return;
 
-    // The photo list is fetched after the first paint. Without this the preview
-    // renders with no room photo until something else redraws it, which is why
-    // it only appeared after switching rooms and back.
     if (!this._imgsLoaded && !this._imgsRedraw) {
       this._imgsRedraw = true;
       this._images().then(() => this._renderForm()).catch(() => {});
     }
     const pane = this.$("pane");
     const beforeRects = this._captureCards();
-    // Rebuilding the column resets the scroll. Adding a field should never
-    // throw you back to the top - but switching room is a new subject, so that
-    // one starts at the top on purpose.
+    const roomSwap = this._cardsRoom !== this._room;
+    this._cardsRoom = this._room;
     this._switches = [];
-    // Opening one closes the rest, which needs the ELEMENTS, not just the keys -
-    // sections without a switch are not in _switches, and tiles never were.
     this._foldables = new Map();
     if (!this._folded) {
       this._folded = new Set();
       this._foldBoot = true;
     }
-    // Every card starts folded, so the panel opens as a scannable list. Every
-    // room is seeded at once, so switching room does not spill the previous
-    // room's open cards into it.
     if (this._foldBoot && this._state) {
       this._foldBoot = false;
       (this._state.compact.rooms || []).forEach((r) => {
         this._foldKeys(r).forEach((k) => this._folded.add(k));
       });
     }
+    if (this.classList.contains("split") && !this.classList.contains("flow")
+      && (this._group || GROUPS[0].id) === "rooms" && !this._sel) {
+      const first = SECTIONS.find((x) => x.group === "rooms");
+      if (first) this._sel = { group: "rooms", key: first.label, label: first.label };
+    }
     const sc = this._scroller();
     const sameRoom = this._scrollRoom === room.path;
     this._scrollRoom = room.path;
-    const keepScroll = sameRoom ? sc.scrollTop : 0;
-    // On a phone the page is the scroller, so emptying the column collapses the
-    // document, the browser clamps the scroll to the new height, and restoring
-    // it afterwards is already too late. Hold the height across the rebuild.
+    let keepScroll = sameRoom ? sc.scrollTop : 0;
+    if (this._toLevelTop) { this._listScroll = keepScroll; keepScroll = 0; }
+    else if (this._toListScroll) keepScroll = this._listScroll || 0;
+    else if (this._toPageTop) keepScroll = 0;
+    this._toLevelTop = false;
+    this._toListScroll = false;
+    this._toPageTop = false;
     const floor = sc === pane ? 0 : pane.offsetHeight;
     if (floor) pane.style.minHeight = floor + "px";
     pane.innerHTML = "";
@@ -9020,34 +10807,26 @@ class HemmaPanel extends HTMLElement {
     this._setBackdrop();
     const ids = Object.keys(this._hass.states);
 
-    // A field shows when it holds a value, when it is part of the room's
-    // identity, or when it was revealed with the section's + button.
     const isSet = (f) => {
+      if (f.key === "__extras") return !!(room._extraCards || []).length;
       const v = f.key === "__name" ? room.name : room.variables[f.key];
       return v !== undefined && v !== "" && !(Array.isArray(v) && !v.length);
     };
-    // A unit shows when any of its fields holds a value, or when it was
-    // revealed with +, so an entity and its label always appear together.
     const unitLive = (u) => u.fields.some((f) => f.always || isSet(f))
       || this._revealed.has(room.path + "|" + u.id);
-    // A unit made entirely of automatic fields (a Unit picker) or entirely of
-    // optional overrides is never something you "add" - it follows the group.
     const autoUnit = (u) => u.fields.every((f) => f.auto);
     const advUnit = (u) => u.fields.every((f) => f.advanced);
     const addable = (u) => !autoUnit(u) && !advUnit(u);
-    // Some units only make sense once another one exists. The test is whether
-    // that unit is on the card, not whether it has a value yet - you add a lock
-    // group before you have picked any locks. Gating the offer rather than the
-    // row means anything already set still shows.
     const met = (u, units) => u.fields.every((f) => {
       if (!f.needs) return true;
       const owner = units.find((x) => x.id === f.needs);
       return owner ? unitLive(owner) : isSet({ key: f.needs });
     });
-    const sectionLive = (sec) => unitsOf(sec).some((u) => addable(u) && unitLive(u));
+    const sectionLive = (sec) => {
+      const units = unitsOf(sec);
+      return !units.some(addable) || units.some((u) => addable(u) && unitLive(u));
+    };
     const ordOf = (f) => (f.ord === undefined ? 50 : f.ord);
-    // A multi-kind slot names what it holds: the kind chosen when it was added,
-    // or failing that the domain of whatever entity is in it.
     const kindLabel = (f) => {
       if (!f.repeatKinds || !f.domains) return null;   // the entity row, not its label
       const pinned = this._slotKind.get(room.path + "|" + unitOf(f));
@@ -9064,7 +10843,7 @@ class HemmaPanel extends HTMLElement {
         .filter((u) => unitLive(u) || (on && autoUnit(u)))
         .map((u) => u.id));
       return sectionFields(sec)
-        .filter((f) => live.has(unitOf(f)))
+        .filter((f) => live.has(unitOf(f)) && modAvail(f))
         .map((f, i) => [f, i])
         .sort((a, b) => (ordOf(a[0]) - ordOf(b[0])) || (a[1] - b[1]))
         .map(([f]) => f);
@@ -9072,34 +10851,21 @@ class HemmaPanel extends HTMLElement {
 
     const sheet = pane;
     const mount = this.$("mapmount");
-    // Rebuilding the preview is what you see flicker, so only do it when
-    // something it draws from has actually changed.
     const sig = JSON.stringify([
       room.path, room.name, room.variables, room.tiles,
-      // The phone filter changes what the mock DRAWS, so a change to it has to
-      // count as the preview being out of date. Without it the tap rebuilt by
-      // hand and _select rebuilt again a moment later, over the top.
       this._phoneFilter || null,
-      // Scenes is a nav route, not a room variable - without it here the switch
-      // changed the form and the preview kept drawing the old tab.
       this._scenesOn(), this._miniSize, (this._imgs || []).length,
     ]);
-    if (mount && !isPhone(this) && this._mapSig !== sig) {
+    if (mount && !isPhone(this) && !(this.classList.contains("split") && this.classList.contains("narrow"))
+      && this._mapSig !== sig) {
       this._mapSig = sig;
       // Measures on commit, rather than waiting a frame with it hidden.
       this._swapMap(mount, room);
     }
 
-    // The inspector shows ONE group. Three stacked panels, each folding, each
-    // holding rows that fold again, was three levels of disclosure; Keynote's
-    // inspector has one. The switcher replaces the outermost level, and unlike
-    // a fold it never scrolls away.
     if (!this._group || !GROUPS.some((g) => g.id === this._group)) {
       this._group = GROUPS[0].id;
     }
-    // Built ONCE and re-attached: the traveling pill needs the control to survive
-    // its own pick, and a rebuild leaves the animation on an element that is gone
-    // a frame later.
     if (!this._navEl) {
       const seg0 = document.createElement("div");
       seg0.className = "seg groupseg";
@@ -9114,9 +10880,6 @@ class HemmaPanel extends HTMLElement {
         b.textContent = g.label;
         seg0.appendChild(b);
       });
-      // One nav row, holding the switcher OR the back bar - never both, and
-      // never one above the other. Opening a section used to insert a bar above
-      // the group and push the whole list down a row.
       const nav0 = document.createElement("div");
       nav0.className = "navrow";
       nav0.appendChild(seg0);
@@ -9129,13 +10892,12 @@ class HemmaPanel extends HTMLElement {
         // A selection belongs to the group it came from.
         this._sel = null;
         this._navDir = forward ? 1 : -1;
+        this._toPageTop = true;
         this._renderForm();
       });
     }
     const nav = this._navEl;
     const seg = this._segEl;
-    // The head is outside the pane, so emptying the pane no longer detaches
-    // it - it is mounted once and simply stays there.
     const insphead = this.shadowRoot.querySelector(".insphead");
     if (insphead && nav.parentNode !== insphead) insphead.appendChild(nav);
     [...nav.querySelectorAll(".detailbar")].forEach((b) => b.remove());
@@ -9151,12 +10913,8 @@ class HemmaPanel extends HTMLElement {
       const band = document.createElement("div");
       band.className = "band";
       band.id = "band-" + g.id;
-      // Built either way: the tiles renderer, the fold keys and the preview's
-      // jump targets all reach for these by id. Only the chosen one is shown.
       if (g.id !== this._group) band.style.display = "none";
 
-      // The group's header. One place to say what a badge or a tile actually
-      // IS, which nothing in the panel said before.
       const H = this._headFor(g, room);
       if (H.blurb || H.label) {
         const gh = document.createElement("div");
@@ -9171,9 +10929,6 @@ class HemmaPanel extends HTMLElement {
         const gt = document.createElement("h3");
         gt.textContent = H.label;
         gh.appendChild(gt);
-        // Only when there is one. A section pushed into has none now, and an
-        // empty <p> still takes its line height - the icon would sit centered
-        // against a row that is not there.
         if (H.blurb) {
           const gp = document.createElement("p");
           gp.textContent = H.blurb;
@@ -9186,10 +10941,6 @@ class HemmaPanel extends HTMLElement {
       head.className = "bandhead";
       head.style.display = "none";
 
-      // Smart sort belongs to the row card, not to a room variable, so it goes
-      // on the Tiles heading rather than into SECTIONS. hemma-smart-row already
-      // reads `sort` - this only exposes it. It rides on room._row, which the
-      // extractor preserves wholesale, so it round-trips with no schema change.
       if (g.id === "tiles") {
         const on = !(room._row && room._row.sort === false);
         const sw = document.createElement("button");
@@ -9204,9 +10955,6 @@ class HemmaPanel extends HTMLElement {
         const lab = document.createElement("span");
         lab.className = "bandtog";
         lab.textContent = "Smart Sort";
-        // In place, never a rebuild: re-rendering swaps the button out from under
-        // the press, so the transition has no old value and the :active widen is
-        // stranded on the element being replaced.
         sw.onclick = () => {
           room._row = room._row || { type: "custom:hemma-smart-row" };
           const next = room._row.sort === false;
@@ -9215,19 +10963,11 @@ class HemmaPanel extends HTMLElement {
           sw.title = next
             ? "Active tiles move to the front"
             : "Tiles stay in the order you set";
-          // The preview answers immediately, the way the row does when the
-          // card is rebuilt with the new setting.
           this._applyMiniSort(true);
           this._markDirty();
         };
-        // The heading it used to float on is gone, and a heading was never a
-        // place for a control anyway. It rides above the tile list instead.
-        // A setting ABOUT the list, so it follows the list rather than pushing
-        // it down: its own group at the foot, with a line saying what it does.
         const strip = document.createElement("div");
         strip.className = "sortstrip";
-        // No icon: in this list an icon identifies a TILE, so one here files the
-        // setting among the things it governs.
         strip.appendChild(lab);
         const note = document.createElement("p");
         note.className = "sortnote";
@@ -9246,8 +10986,6 @@ class HemmaPanel extends HTMLElement {
       cols.className = "cols";
       const a = document.createElement("div"); a.className = "col";
       cols.appendChild(a);
-      // Beside the canvas there is only room for one column, so a section's
-      // column preference collapses and SECTIONS order is the reading order.
       const b = a;
       body.appendChild(cols);
 
@@ -9257,17 +10995,12 @@ class HemmaPanel extends HTMLElement {
       bandFor[g.id] = { colA: a, colB: b, wA: 0, wB: 0, head: bandFor_head[g.id] };
     });
 
-    // Columns alternate in declaration order and never move. Balancing by
-    // content weight meant adding one field could throw a card into the other
-    // column mid-edit; reading left-to-right now matches the dashboard order.
     const side = new Map();
     GROUPS.forEach((g) => {
       const slot = bandFor[g.id];
       let n = 0;
       SECTIONS.filter((sec) => sec.group === g.id).forEach((sec) => {
         if (sec.col) { side.set(sec, sec.col === "b" ? slot.colB : slot.colA); return; }
-        // ORDERED, so one column like the tiles: alternating across two made
-        // reading order and drag order two different things.
         if (g.id === "badges") { side.set(sec, slot.colA); return; }
         const i = n++;
         side.set(sec, g.lead ? (i ? slot.colB : slot.colA) : (i % 2 ? slot.colB : slot.colA));
@@ -9303,13 +11036,8 @@ class HemmaPanel extends HTMLElement {
         head.appendChild(p);
       }
 
-      // A reading preference, not config: session-lived, never written. Keyed on
-      // the CARD, not room + card, or changing rooms re-collapses what you just
-      // opened.
       const foldKey = sec.label;
       head.appendChild(this._foldButton(foldKey, head, fs, sec.label));
-      // Only where the count can change: a fixed-slot section counts fields you
-      // cannot add or remove. Those are exactly the ones with no `repeats`.
       const setCount = units.filter(unitLive).length;
       const showCount = setCount && sec.repeats && sec.repeats.length;
       if (showCount || sec.toggle) {
@@ -9322,8 +11050,6 @@ class HemmaPanel extends HTMLElement {
         this._countFor = this._countFor || new Map();
         this._countFor.set(sec.label, { el: c, set: showCount ? setCount + " set" : "" });
       }
-      // Only the next free slot of a repeat is offered, so ten light slots read
-      // as one "Light" entry. Both + buttons go through this.
       const offersFrom = (from) => {
         const out = [];
         const seenRepeat = new Set();
@@ -9350,9 +11076,6 @@ class HemmaPanel extends HTMLElement {
             });
           }
         });
-        // Ungrouped first: the menu prints a heading when the group changes, so a
-        // grouped entry sorting above an ungrouped one swallows everything below
-        // it into that heading.
         return out.sort((x, y) =>
           (!!x.group - !!y.group) || (x.ord - y.ord) || (x.seq - y.seq));
       };
@@ -9369,16 +11092,11 @@ class HemmaPanel extends HTMLElement {
         get: () => this._scenesOn(),
         set: () => {
           const on = !this._scenesOn();
-          // Collapse it out of the preview first: the rebuild that follows is
-          // what removes the elements, so an exit animation has to happen while
-          // they are still there. Coming back is armed for the next build.
           if (!on) this._collapsePhoneScenes();
           else this._phoneScenesIn = true;
           this._setScenes(on);
         },
       } : (sec.toggleFn === "nowplaying" ? {
-        // show_media is the master for the whole media subsystem, so a panel
-        // switched on with it off would report on and render nothing.
         get: () => room.variables.show_media !== false && !!room.variables.show_now_playing,
         set: () => {
           if (room.variables.show_now_playing && room.variables.show_media !== false) {
@@ -9399,24 +11117,14 @@ class HemmaPanel extends HTMLElement {
         sw.setAttribute("aria-checked", on ? "true" : "false");
         sw.setAttribute("aria-label", "Show " + sec.label + " on the dashboard");
         sw.title = on ? "Shown on the dashboard" : "Hidden on the dashboard";
-        // In place, not a rebuild. Rebuilding gave the card a brand new
-        // element, and a fresh element starts at its final computed value -
-        // which is why the .off transitions declared below never once ran.
         sw.onclick = () => { toggle.set(); this._syncSwitches(); };
         head.appendChild(sw);
         fs.classList.toggle("off", !on);
-        // The switch is not on the row any more, so the summary carries the
-        // state: "Off", or what is set. Nothing is lost from the list.
         const cnt = (this._countFor || new Map()).get(sec.label);
         if (cnt) cnt.el.textContent = on ? cnt.set : "Off";
-        // Off is DISABLED, not folded: .card.off dims the rows already, and
-        // shutting it too left the fold key set so the content never came back.
         if (this._folded.has(foldKey)) fs.classList.add("shut");
         this._switches.push({ fs, sw, get: toggle.get, foldKey });
       }
-      // A push list is a list: every card in it is shut, and the one you
-      // pushed into is opened by the detail pass. Reading _folded here is what
-      // left a section standing open in the list after you backed out of it.
       fs.classList.add("shut");
 
       const reveal = (raw) => {
@@ -9438,13 +11146,9 @@ class HemmaPanel extends HTMLElement {
         add.title = "Add a field";
         add.setAttribute("aria-label", "Add a field");
         add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
-        // Tracked with the switch so it can be disabled in place: pointer-events
-        // alone leaves it tabbable and still firing on Enter.
         const rec = this._switches[this._switches.length - 1];
         if (rec && rec.fs === fs) { rec.add = add; add.disabled = !rec.get(); }
         add.onclick = () => {
-          // Shown even for one entry: the menu is the disclosure, and adding a
-          // field without naming it leaves you working out what appeared.
           this._menuAt(add, offered, reveal);
         };
         head.appendChild(add);
@@ -9453,8 +11157,12 @@ class HemmaPanel extends HTMLElement {
 
       if (sec.scope === "dashboard") {
         const rooms = this._state.compact.rooms;
-        const drifted = sec.fields.filter((f) =>
-          new Set(rooms.map((r) => JSON.stringify(r.variables[f.key] ?? null))).size > 1);
+        const drifted = sec.fields.filter((f) => {
+          const set = rooms
+            .map((r) => (r.variables || {})[f.key])
+            .filter((v) => v !== undefined && v !== null && v !== "");
+          return new Set(set.map((v) => JSON.stringify(v))).size > 1;
+        });
         if (drifted.length) {
           const w = document.createElement("div");
           w.className = "cdesc drift";
@@ -9471,14 +11179,19 @@ class HemmaPanel extends HTMLElement {
         fs.appendChild(n);
       }
 
-      // Dashboard-scoped writes go to EVERY room so nothing can drift between
-      // views; reads come from the room on screen. A single field can be
-      // dashboard-wide even where its section is not.
       const targets = (f) => ((sec.scope === "dashboard" || (f && f.scope === "dashboard"))
         ? this._state.compact.rooms : [room]);
-      // Touching any energy sub-badge slot by hand hands the list over to you:
-      // the derivation stops regenerating it, so your edit survives every later
-      // save. Until then the list follows the rooms.
+      // A dashboard-wide setting is written to every room, but an imported one
+      // can carry it on a single room: read whichever room has it, or the field
+      // shows empty here while the dashboard still draws it.
+      const anyRoom = (f) => {
+        if (!(sec.scope === "dashboard" || (f && f.scope === "dashboard"))) return undefined;
+        const hit = this._state.compact.rooms.find((r) => {
+          const v = (r.variables || {})[f.key];
+          return v !== undefined && v !== null && v !== "";
+        });
+        return hit ? hit.variables[f.key] : undefined;
+      };
       const ENERGY_SLOT = /^energy_(entity|label|unit|cost)_[1-6]$/;
       const setVar = (key, value, f) => {
         const rooms = targets(f);
@@ -9487,8 +11200,6 @@ class HemmaPanel extends HTMLElement {
           if (value === undefined || value === "" || (Array.isArray(value) && !value.length)) delete r.variables[key];
           else r.variables[key] = value;
         });
-        // Single entry. Set a source once and it lands in every place either
-        // dashboard reads it, which is the whole point of loading a pair.
         this._mirrorToPair(key, value, rooms);
       };
 
@@ -9511,6 +11222,22 @@ class HemmaPanel extends HTMLElement {
           });
         };
         row.appendChild(cell);
+        if (row.addEventListener) {
+          row.addEventListener("touchstart", (ev) => {
+            const t = ev.touches && ev.touches[0];
+            row._swipe = t ? [t.clientX, t.clientY] : null;
+          }, { passive: true });
+          row.addEventListener("touchend", (ev) => {
+            const s = row._swipe;
+            const t = ev.changedTouches && ev.changedTouches[0];
+            row._swipe = null;
+            if (!s || !t || !isPhone(this)) return;
+            const dx = t.clientX - s[0];
+            if (Math.abs(t.clientY - s[1]) > 30 || Math.abs(dx) < 40) return;
+            if (dx < 0 && this._armedRow !== row) cell.onclick();
+            else if (dx > 0 && this._armedRow === row) this._disarmRow();
+          }, { passive: true });
+        }
       };
 
       const renderField = (f, fs) => {
@@ -9518,28 +11245,50 @@ class HemmaPanel extends HTMLElement {
         row.className = "row";
         const lab = document.createElement("label");
         lab.textContent = kindLabel(f) || f.label;
+        if (f.glyph) {
+          const gi = document.createElement("span");
+          gi.className = "sicon rowicon";
+          gi.style.setProperty("--i", "url('" + iconUrl(f.glyph) + "')");
+          if (f.tone) gi.style.setProperty("--sc", f.tone);
+          lab.insertBefore(gi, lab.firstChild);
+          lab.classList.add("haslead");
+        }
         row.appendChild(lab);
 
-        const cur = f.key === "__name" ? (room.name ?? "") : (room.variables[f.key] ?? "");
+        const cur = f.key === "__name" ? (room.name ?? "")
+          : (room.variables[f.key] ?? anyRoom(f) ?? "");
         let input;
-        // EVERY branch must call this. The entity picker and the select did not,
-        // so seven fields carried a hint that had never been on screen.
+        // Every branch has to call this.
+        let hintEl = null;
+        let faultEl = null;
         const addHint = () => {
           if (!f.hint) return;
           const h = document.createElement("div");
           h.className = "hint"; h.textContent = f.hint;
+          hintEl = h;
           fs.appendChild(h);
         };
         const addFault = (val) => {
+          if (faultEl) { faultEl.remove(); faultEl = null; }
           const why = fieldFault(f, val, this._hass);
           if (!why) return;
           const w = document.createElement("div");
           w.className = "fieldwarn"; w.textContent = why;
-          fs.appendChild(w);
+          faultEl = w;
+          const after = hintEl && hintEl.parentNode ? hintEl
+            : (row.parentNode ? row : null);
+          if (after && after.parentNode) after.parentNode.insertBefore(w, after.nextSibling);
+          else fs.appendChild(w);
         };
 
         if (f.type === "image") {
           this._imageField(room, row, fs, pane);
+          return;
+        }
+
+        if (f.type === "extras") {
+          row.remove();
+          this._extrasField(room, fs, f);
           return;
         }
 
@@ -9558,10 +11307,7 @@ class HemmaPanel extends HTMLElement {
           const over = (room.variables[f.over] || []).filter(Boolean);
           const raw = room.variables[f.key];
           const map = (raw && typeof raw === "object" && !Array.isArray(raw)) ? raw : {};
-          // One member: the ROW is the field, since a heading and a member name
-          // saying the same word is two lines for one thing. Several: the field
-          // heads them and each row names its member.
-          const many = over.length !== 1;
+          const many = over.length > 1;
           if (many) {
             const head = document.createElement("div");
             head.className = "subhead";
@@ -9584,9 +11330,6 @@ class HemmaPanel extends HTMLElement {
               ? ((st && st.attributes.friendly_name) || id)
               : f.label;
             r.appendChild(l);
-            // Every kind writes { member_id: value }, so only the control differs.
-            // An empty value DELETES the key: the popup reads
-            // `overrides[id] || <default>` and would take "" as an answer.
             const write = (v) => {
               const next = {};
               over.forEach((k) => { if (map[k]) next[k] = map[k]; });
@@ -9636,11 +11379,10 @@ class HemmaPanel extends HTMLElement {
           const kind = pinned && f.repeatKinds.find((k) => k.id === pinned);
           const doms = (kind && kind.domains) || f.domains;
           const c = this._combo(cur, this._entityList(doms, f.classes),
-            // The domain hint reads as "fill this in". A field that is genuinely
-            // optional can say so instead.
             f.placeholder || doms.map((d) => d + ".").join(" / "),
             (v) => {
               setVar(f.key, v, f);
+              addFault(v);
               this._syncPreview();
             });
           row.appendChild(c.wrap);
@@ -9652,8 +11394,6 @@ class HemmaPanel extends HTMLElement {
         } else {
           input = document.createElement("input");
           input.value = String(cur);
-          // A default belongs in the empty field, grayed, where you look when
-          // deciding whether to type - not in a line of prose underneath.
           if (f.placeholder) input.placeholder = f.placeholder;
         }
 
@@ -9661,8 +11401,6 @@ class HemmaPanel extends HTMLElement {
           const v = input.value.trim();
           if (f.key === "__name") {
             room.name = v;
-            // Popups read room_name, which has no fallback to the card's name,
-            // so keep it in step rather than making people set a heading twice.
             setVar("room_name", v);
             this._renderTabs();
             this._syncPreview();
@@ -9678,7 +11416,35 @@ class HemmaPanel extends HTMLElement {
         addHint();
       };
 
-      visible.filter((f) => !f.advanced).forEach((f) => renderField(f, fs));
+      const plain = visible.filter((f) => !f.advanced);
+      if (sec.subs) {
+        fs.classList.add("grouped");
+        sec.subs.forEach((sub) => {
+          const mine = plain.filter((f) => (f.sub || sec.subs[0].id) === sub.id);
+          if (!mine.length) return;
+          if (sub.label) {
+            const t = document.createElement("div");
+            t.className = "subtitle";
+            t.textContent = sub.label;
+            fs.appendChild(t);
+          }
+          const box = document.createElement("div");
+          box.className = "subcard";
+          mine.forEach((f) => renderField(f, box));
+          const notes = [...box.children].filter((n) => n.classList.contains("hint"));
+          notes.forEach((n) => n.remove());
+          fs.appendChild(box);
+          const said = new Set();
+          notes.forEach((n) => {
+            const t = n.textContent;
+            if (said.has(t)) return;
+            said.add(t);
+            fs.appendChild(n);
+          });
+        });
+      } else {
+        plain.forEach((f) => renderField(f, fs));
+      }
 
       const advanced = visible.filter((f) => f.advanced);
       const advOffer = offersFrom(units.filter((u) => !unitLive(u) && advUnit(u)
@@ -9732,9 +11498,6 @@ class HemmaPanel extends HTMLElement {
       if (sec.group === "badges" && sec.bid) fs.dataset.bid = sec.bid;
     });
 
-    // Badges reorder exactly the way tiles do: the cards themselves, by their
-    // grip, in one column. Run after every badge card is built, because the
-    // order is a property of the list rather than of any one card.
     this._orderBadgeCards(room, bandFor.badges && bandFor.badges.colA);
     // Inside the Scenes card, under its own fields.
     this._renderSceneColors(room,
@@ -9742,8 +11505,6 @@ class HemmaPanel extends HTMLElement {
     this._renderTiles(room, bandFor.tiles.colA, bandFor.tiles.head);
     this._wireInspector();
 
-    // Applied AFTER every card is built, not by building one: the siblings step
-    // out rather than there being a second render path.
     if (this._sel && this._sel.group === this._group) {
       const band = this.$("pane").querySelector("#band-" + this._group);
       const hit = band && band.querySelector('[data-k="' + CSS.escape(this._sel.key) + '"]');
@@ -9751,59 +11512,240 @@ class HemmaPanel extends HTMLElement {
         this._sel = null;                       // it was removed under us
       } else {
         band.classList.add("detail");
+        band.querySelectorAll(".grouphead").forEach((n) => n.remove());
         hit.classList.add("sel");
         // A thing you asked to see is not also folded.
         hit.classList.remove("shut");
         const bar = document.createElement("div");
-        bar.className = "detailbar";
+        bar.className = "detailbar"
+          + (this._sel.group === "rooms" ? " rootlevel" : "");
         const back = document.createElement("button");
-        back.className = "mini icon back";
+        back.className = "back";
         back.type = "button";
         const home = (GROUPS.find((x) => x.id === this._sel.group) || {}).label
           || "the list";
         back.title = "Back to " + home;
         back.setAttribute("aria-label", "Back to " + home);
         back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
-          + ' stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
-          + '<path d="m14 6-6 6 6 6"/></svg>';
+          + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'
+          + '<path d="m15 5-7 7 7 7"/></svg>';
         back.onclick = () => this._popRow();
-        // Where BACK goes, not where you are - the pane's header already names
-        // the thing you pushed into.
+        const grp = GROUPS.find((x) => x.id === this._sel.group);
         const h3 = document.createElement("h3");
-        h3.textContent = home;
+        h3.textContent = (grp && this._headFor(grp, room).label) || this._sel.label || home;
         bar.appendChild(back);
         bar.appendChild(h3);
-        // The controls the row no longer carries: they belong to this one
-        // thing, so they sit with its name rather than being repeated in a
-        // head underneath it.
         const ownHead = hit.querySelector(".chead, .thead");
         if (ownHead) {
-          // The controls belong to this one thing, so they sit with its name in
-          // the bar rather than being repeated inside the card as well.
-          ownHead.querySelectorAll(".plus, .sw, .rowmenu")
-            .forEach((c) => bar.appendChild(c));
+          const sw = ownHead.querySelector(".sw");
+          ownHead.querySelectorAll(".plus").forEach((c) => bar.appendChild(c));
+          if (sw) bar.appendChild(sw);
+          ownHead.querySelectorAll(".rowmenu").forEach((c) => bar.appendChild(c));
         }
         // The SAME slot the switcher lives in. Swapped, not stacked.
         seg.remove();
         nav.appendChild(bar);
       }
     }
+    if (!this._sel && this.classList.contains("split")
+      && !this.classList.contains("flow") && !nav.querySelector(".detailbar")) {
+      const grp = GROUPS.find((x) => x.id === this._group);
+      const bar = document.createElement("div");
+      bar.className = "detailbar rootlevel listbar";
+      const h3 = document.createElement("h3");
+      h3.textContent = (grp && grp.label) || "";
+      bar.appendChild(h3);
+      nav.appendChild(bar);
+    }
 
+    this._renderSidebar();
+    this._focusPreview();
     sc.scrollTop = keepScroll;
     const navDir = this._navDir;
-    // The nav row's contents changed if we crossed between list and detail.
+    // The nav row's contents change when the list and the detail swap.
     const navSwapped = this._navWasSel !== !!this._sel;
     this._navWasSel = !!this._sel;
     this._navDir = 0;
+    const instant = this._instantNav;
+    this._instantNav = false;
     requestAnimationFrame(() => {
       // Again after layout: the rebuilt column may be a different height.
       if (floor) pane.style.minHeight = "";
       sc.scrollTop = keepScroll;
-      // One or the other, never both: a level change is a push, and the card
-      // FLIP is for cards that MOVED within a level. Running them together is
-      // what made every transition read as noise.
       if (navDir) this._playNav(navDir, navSwapped);
-      else this._playCards(beforeRects);
+      else if (!instant && !roomSwap) this._playCards(beforeRects);
+    });
+  }
+
+  _renderSidebar() {
+    const nav = this.$("sidelist");
+    if (!nav) return;
+    nav.onscroll = () => this.classList.toggle("sidescrolled", nav.scrollTop > 2);
+    if (!this.classList.contains("split") || this.classList.contains("flow")) {
+      const own = nav.querySelector("#sidesections");
+      if (own) own.replaceChildren();
+      return;
+    }
+    const pane = this.$("pane");
+    const keep = nav.scrollTop;
+    let host = nav.querySelector("#sidesections");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "sidesections";
+      nav.appendChild(host);
+    }
+    host.replaceChildren();
+    const mkRow = (label, glyph, on, onPick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "siderow" + (on ? " on" : "");
+      if (on) b.setAttribute("aria-current", "page");
+      if (glyph) b.appendChild(glyph);
+      const l = document.createElement("span");
+      l.className = "sidelabel";
+      l.textContent = label;
+      b.appendChild(l);
+      b.onclick = () => { if (!on) onPick(); };
+      host.appendChild(b);
+      return b;
+    };
+    const gap = () => host.appendChild(Object.assign(document.createElement("div"),
+      { className: "sidegap" }));
+    const row = (group, key, label, glyph, off, anySel) => {
+      const on = this._group === group
+        && (anySel ? true : (key ? !!this._sel && this._sel.key === key : !this._sel));
+      const b = mkRow(label, glyph, on, () => {
+        this._group = group;
+        this._sel = key ? { group, key, label } : null;
+        this._navDir = 0;
+        this._toPageTop = true;
+        this._instantNav = true;
+        this._renderForm();
+      });
+      if (off) b.classList.add("off");
+    };
+
+    gap();
+    const groupIcon = (g) => {
+      const gi = document.createElement("span");
+      gi.className = "sicon";
+      gi.style.setProperty("--i", "url('" + iconUrl(g.icon) + "')");
+      if (g.iconColor) gi.style.setProperty("--sc", g.iconColor);
+      return gi;
+    };
+    const head = (text) => {
+      const h = document.createElement("h2");
+      h.className = "sidehead";
+      h.textContent = text;
+      host.appendChild(h);
+    };
+    const dashWide = (label) => {
+      const sec = SECTIONS.find((x) => x.group === "rooms" && x.label === label);
+      return !!(sec && sec.scope === "dashboard");
+    };
+    const roomRows = [];
+    const dashRows = [];
+    GROUPS.forEach((g) => {
+      const band = pane && pane.querySelector("#band-" + g.id);
+      if (!band) return;
+      if (g.id === "rooms") {
+        band.querySelectorAll(".col > .card[data-k]").forEach((c) => {
+          const ch = c.querySelector(".chead, .thead");
+          const si = ch && ch.querySelector(".sicon");
+          const k = c.dataset.k;
+          const off = c.classList.contains("off");
+          const glyph = si ? si.cloneNode(true) : null;
+          (dashWide(k) ? dashRows : roomRows).push(() => row(g.id, k, k, glyph, off));
+        });
+        return;
+      }
+      roomRows.push(() => row(g.id, null, g.label, groupIcon(g), false, true));
+    });
+    const room = this._state && this._state.compact.rooms[this._room];
+    if (roomRows.length) {
+      head((room && (room.name || room.path)) || "Room");
+      roomRows.forEach((f) => f());
+    }
+    if (dashRows.length) {
+      head("Dashboard");
+      dashRows.forEach((f) => f());
+    }
+    nav.scrollTop = keep;
+  }
+
+  _focusPreview() {
+    const room = this.shadowRoot.querySelector(".miniroom");
+    if (!room) return;
+    const zone = this._group === "badges" ? "badges"
+      : this._group === "tiles" ? "tiles"
+      : (this._sel && this._sel.group === "rooms" && this._sel.key === "Now Playing"
+        ? "Now Playing" : null);
+    const zones = [...room.querySelectorAll(".mz")];
+    const hit = zone ? zones.filter((z) => z.dataset.jump === zone) : [];
+    const want = !!hit.length;
+    zones.forEach((z) => z.classList.toggle("infocus", hit.indexOf(z) >= 0));
+    // The sub badges belong to the badge row and dim with it or not at all.
+    const subs = room.querySelector(".mini-subs");
+    if (subs) subs.classList.toggle("infocus", zone === "badges");
+    const was = this._focusOn ? 1 : 0;
+    const now = want ? 1 : 0;
+    this._focusRoom = room;
+    this._focusOn = want;
+    room.classList.toggle("focusing", want);
+    const scrim = room.querySelector(".mzscrim");
+    if (!scrim) return;
+    if (Math.abs(was - now) < 0.01) { scrim.style.opacity = String(now); return; }
+    scrim.style.transition = "none";
+    scrim.style.opacity = String(was);
+    void scrim.offsetWidth;
+    scrim.style.transition = "opacity .28s " + EASE;
+    scrim.style.opacity = String(now);
+  }
+
+  _groupTileBody(box, body) {
+    const kids = [...body.children];
+    const opts = kids.filter((n) => n.dataset && n.dataset.opt);
+    if (!opts.length) return;
+    const adv = kids.filter((n) => n.classList.contains("adv"));
+    const main = kids.filter((n) => opts.indexOf(n) < 0 && adv.indexOf(n) < 0);
+    if (!main.length) return;
+    const card = (nodes) => {
+      const d = document.createElement("div");
+      d.className = "subcard";
+      nodes.forEach((n) => d.appendChild(n));
+      return d;
+    };
+    const title = document.createElement("div");
+    title.className = "subtitle";
+    title.textContent = "Options";
+    const first = card(main);
+    const second = card(opts);
+    body.replaceChildren(first, title, second, ...adv);
+    box.classList.add("grouped");
+  }
+
+  _moveTileMenu(anchor, room, tile) {
+    const rooms = (this._state && this._state.compact.rooms) || [];
+    const items = rooms.filter((r) => r !== room).map((r) => ({
+      id: r.path,
+      label: r.name || r.path,
+      glyph: (r.variables || {}).room_icon || autoRoomGlyph(r.name),
+    }));
+    if (!items.length) return;
+    this._menuAt(anchor, items, (path) => {
+      const to = rooms.find((r) => r.path === path);
+      const list = room.tiles || [];
+      const at = list.indexOf(tile);
+      if (!to || at < 0) return;
+      list.splice(at, 1);
+      to.tiles = to.tiles || [];
+      to.tiles.push(tile);
+      // A tile you are standing inside has just left the room.
+      this._sel = null;
+      this._markDirty();
+      this._renderTabs();
+      this._renderForm();
+      this._status("Moved to " + (to.name || to.path), "ok");
     });
   }
 
@@ -9811,10 +11753,13 @@ class HemmaPanel extends HTMLElement {
   _menuAt(anchor, items, onPick) {
     // Pressing the same control again should shut the menu, not reopen it.
     if (this._openAnchor === anchor) { this._openCombo(); return; }
+    this._trace("menu before");
     if (this._openCombo) this._openCombo();
 
     const menu = document.createElement("div");
     menu.className = "combo-menu";
+    const askHost = anchor && anchor.closest ? anchor.closest(".askpane") : null;
+    if (askHost) menu.style.zIndex = "400";
 
     const close = () => {
       document.removeEventListener("mousedown", away, true);
@@ -9823,26 +11768,31 @@ class HemmaPanel extends HTMLElement {
       if (this._openCombo === close) this._openCombo = null;
       if (this._openAnchor === anchor) this._openAnchor = null;
       closeMenu(menu);
+      this._trace("menu close");
+      setTimeout(() => this._trace("menu close+600ms"), 600);
     };
-    // Ignore presses on the anchor, so its own click handler can do the toggle
-    // rather than this closing first and the click reopening.
     const away = (ev) => {
       const t = ev.composedPath ? ev.composedPath()[0] : ev.target;
       if (menu.contains(t) || anchor.contains(t) || anchor === t) return;
       close();
     };
 
-    if (!items.some((it) => typeof it !== "string" && it.checked)) menu.classList.add("noticks");
+    if (!items.some((it) => typeof it !== "string" && "checked" in it)) {
+      menu.classList.add("noticks");
+    }
     let lastGroup;
     items.forEach((it) => {
       const item = typeof it === "string" ? { id: it, label: it, group: null } : it;
 
       if (item.group !== lastGroup && item.group) {
         if (lastGroup !== undefined) menu.appendChild(Object.assign(document.createElement("div"), { className: "combo-sep" }));
-        const h = document.createElement("div");
-        h.className = "combo-head";
-        h.textContent = item.group;
-        menu.appendChild(h);
+        // Apple's menus divide groups with a rule and title one only when the items cannot say it.
+        if (!item.quiet) {
+          const h = document.createElement("div");
+          h.className = "combo-head";
+          h.textContent = item.group;
+          menu.appendChild(h);
+        }
       }
       lastGroup = item.group;
 
@@ -9850,6 +11800,7 @@ class HemmaPanel extends HTMLElement {
       d.className = "combo-opt";
       const tick = document.createElement("span");
       tick.className = "tick";
+      tick.textContent = "\u2713";
       const t = document.createElement("span");
       t.className = "lbl";
       t.textContent = item.label;
@@ -9862,16 +11813,30 @@ class HemmaPanel extends HTMLElement {
       }
       if (item.glyph) {
         const g = document.createElement("span");
-        g.className = "roomglyph menuglyph";
+        g.className = "roomglyph menuglyph" + (item.plainGlyph ? " plain" : "");
         g.style.setProperty("--i", "url('" + iconUrl(item.glyph) + "')");
         d.appendChild(g);
+      } else if (item.haIcon) {
+        const g = document.createElement("ha-icon");
+        g.className = "menuicon";
+        g.setAttribute("icon", item.haIcon);
+        d.appendChild(g);
+      } else if (item.icon && MENU_ICONS[item.icon]) {
+        const g = document.createElement("span");
+        g.className = "menuicon";
+        g.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"'
+          + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + MENU_ICONS[item.icon] + "</svg>";
+        d.appendChild(g);
       }
+      if (item.danger) d.classList.add("danger");
       d.appendChild(t);
-      // .sel is what reveals the tick. Without this `checked` only reserved
-      // the column and every item still rendered blank.
+      if (item.shortcut && !isPhone(this)) {
+        const k = document.createElement("span");
+        k.className = "kbd";
+        k.textContent = item.shortcut;
+        d.appendChild(k);
+      }
       if (item.checked) d.classList.add("sel");
-      // Dimmed, not armed and then refused: a control that cannot succeed should
-      // say so before you reach for it.
       if (item.disabled) {
         d.classList.add("off");
         d.setAttribute("aria-disabled", "true");
@@ -9889,7 +11854,13 @@ class HemmaPanel extends HTMLElement {
 
     this._openCombo = close;
     this._openAnchor = anchor;
-    this.$("overlay").appendChild(menu);
+    (askHost || this.$("overlay")).appendChild(menu);
+    const firstGlyph = menu.querySelector(".combo-opt .menuicon, .combo-opt .menuglyph");
+    const firstLabel = firstGlyph && firstGlyph.parentElement.querySelector(".lbl");
+    if (firstLabel) {
+      const padL = parseFloat(getComputedStyle(menu).paddingLeft) || 0;
+      menu.style.setProperty("--sep-left", Math.max(0, firstLabel.offsetLeft - padL) + "px");
+    }
 
     const r = anchor.getBoundingClientRect();
     const below = window.innerHeight - r.bottom - 12;
@@ -9897,24 +11868,282 @@ class HemmaPanel extends HTMLElement {
     const drop = below >= 180 || below >= above;
     // Sized to its content, so a single "Remove tile" is not 240px wide.
     menu.style.width = "auto";
-    menu.style.minWidth = "148px";
+    const phone = isPhone(this);
+    menu.style.minWidth = phone ? "170px" : "148px";
     menu.style.maxWidth = "320px";
     const width = Math.ceil(menu.getBoundingClientRect().width);
-    const left = Math.max(16, Math.min(r.right - width, window.innerWidth - width - 16));
+    const inSide = !!(anchor && anchor.closest
+      && (anchor.closest(".sidelist") || anchor.closest(".inspector")));
+    const lead = !inSide && r.left + r.width / 2 < window.innerWidth / 2;
+    const want = lead ? r.left : r.right - width;
+    const left = Math.max(16, Math.min(want, window.innerWidth - width - 16));
     menu.style.left = left + "px";
-    menu.style.maxHeight = Math.max(120, Math.min(320, drop ? below : above)) + "px";
+    menu.style.maxHeight = Math.max(120, Math.min(phone ? 600 : 560, drop ? below : above)) + "px";
     if (drop) { menu.style.top = r.bottom + 10 + "px"; menu.style.bottom = "auto"; }
     else { menu.style.bottom = window.innerHeight - r.top + 10 + "px"; menu.style.top = "auto"; }
-    playMenuIn(menu, drop, left + width > r.right - 2);
+    playMenuIn(menu, drop, !lead && left + width > r.right - 2);
+    this._trace("menu open");
+    setTimeout(() => this._trace("menu open+500ms"), 500);
 
     setTimeout(() => document.addEventListener("mousedown", away, true), 0);
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", close);
   }
 
-  // One switch can move another - Now Playing clears an explicit
-  // show_media:false - so they ALL re-read rather than the pressed one updating
-  // itself.
+  _pickSheet({ title, list, current, onPick, glyph, label, free }) {
+    if (this._openCombo) this._openCombo();
+    this._trace("before");
+    const snap = this._scrollSnap();
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const sheet = document.createElement("div");
+    sheet.className = "psheet";
+    const scrim = document.createElement("div");
+    scrim.className = "psheet-scrim";
+    const panel = document.createElement("div");
+    panel.className = "psheet-panel";
+    panel.setAttribute("role", "dialog");
+    const head = document.createElement("div");
+    head.className = "psheet-head";
+    const h = document.createElement("span");
+    h.className = "psheet-title";
+    h.textContent = title;
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "psheet-cancel";
+    cancel.textContent = "Cancel";
+    head.appendChild(h);
+    head.appendChild(cancel);
+    const search = document.createElement("label");
+    search.className = "psheet-search";
+    search.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
+      + ' stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>';
+    const q = document.createElement("input");
+    q.type = "text";
+    q.placeholder = "Search";
+    q.setAttribute("autocomplete", "off");
+    q.setAttribute("autocapitalize", "off");
+    q.setAttribute("autocorrect", "off");
+    q.spellcheck = false;
+    search.appendChild(q);
+    const listEl = document.createElement("div");
+    listEl.className = "psheet-list";
+    panel.appendChild(head);
+    panel.appendChild(search);
+    panel.appendChild(listEl);
+    sheet.appendChild(scrim);
+    sheet.appendChild(panel);
+
+    const name = (o) => (label ? label(o) : this._prettyEntity(o));
+    const row = (value, text, sub, checked) => {
+      const r = document.createElement("div");
+      r.className = "psheet-row";
+      r.setAttribute("role", "option");
+      const st = !glyph && this._hass && this._hass.states[value];
+      if (glyph) {
+        const ic = document.createElement("span");
+        ic.className = "psheet-icon";
+        const g = document.createElement("span");
+        g.className = "glyph";
+        g.style.setProperty("--i", "url('" + glyph(value) + "')");
+        ic.appendChild(g);
+        r.appendChild(ic);
+      } else if (st) {
+        const ic = document.createElement("span");
+        ic.className = "psheet-icon";
+        ic.appendChild(entityIconEl(this._hass, st));
+        r.appendChild(ic);
+      }
+      const l = document.createElement("span");
+      l.className = "lbl";
+      l.textContent = text;
+      if (sub) {
+        const s = document.createElement("span");
+        s.className = "sub";
+        s.textContent = sub;
+        l.appendChild(s);
+      }
+      r.appendChild(l);
+      const t = document.createElement("span");
+      t.className = "tick";
+      t.textContent = checked ? "\u2713" : "";
+      r.appendChild(t);
+      r.onclick = () => { done(); onPick(value); };
+      return r;
+    };
+    const draw = () => {
+      const needle = q.value.trim().toLowerCase();
+      const hits = (list || []).filter((o) => !needle || String(o).toLowerCase().includes(needle)
+        || String(name(o)).toLowerCase().includes(needle));
+      listEl.innerHTML = "";
+      const typed = q.value.trim();
+      hits.slice(0, 300).forEach((o) => {
+        const nm = name(o);
+        listEl.appendChild(row(o, nm, nm !== o && !label ? o : null, o === current));
+      });
+      if (free !== false && typed && !(list || []).includes(typed) && (!hits.length || typed.includes("."))) {
+        listEl.appendChild(row(typed, "Use \u201c" + typed + "\u201d", null, false));
+      }
+      if (!hits.length && !typed) {
+        const e = document.createElement("div");
+        e.className = "psheet-empty";
+        e.textContent = "Nothing to choose";
+        listEl.appendChild(e);
+      }
+    };
+
+    const fit = () => {
+      const vv = window.visualViewport;
+      const top = panel.getBoundingClientRect().top;
+      const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+      panel.style.height = Math.max(220, Math.round(bottom - top - 8)) + "px";
+    };
+    let closed = false;
+    const onKey = (ev) => { if (ev.key === "Escape") done(); };
+    const hold = (ev) => {
+      const sc = ev.target && ev.target.closest ? ev.target.closest(".psheet-list") : null;
+      if (!sc || sc.scrollHeight <= sc.clientHeight + 1) ev.preventDefault();
+    };
+    const done = () => {
+      if (closed) return;
+      closed = true;
+      if (this._openCombo === done) this._openCombo = null;
+      q.blur();
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", fit);
+        window.visualViewport.removeEventListener("scroll", fit);
+      }
+      document.removeEventListener("keydown", onKey, true);
+      this._restoreScroll(snap);
+      this._trace("close");
+      setTimeout(() => this._trace("close+600ms"), 600);
+      const gone = () => sheet.remove();
+      if (still) return gone();
+      panel.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-10px) scale(.98)" }],
+        { duration: 180, easing: "cubic-bezier(.4,0,1,1)", fill: "forwards" });
+      scrim.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180, fill: "forwards" })
+        .finished.then(gone, gone);
+    };
+    cancel.onclick = done;
+    scrim.onclick = done;
+    q.oninput = draw;
+    q.onkeydown = (ev) => {
+      if (ev.key !== "Enter") return;
+      const first = listEl.querySelector(".psheet-row");
+      if (first) first.click();
+    };
+    sheet.addEventListener("touchmove", hold, { passive: false });
+    // iOS search lists drop the keyboard on drag, so the list gets the height back.
+    listEl.addEventListener("touchmove", () => {
+      if (this.shadowRoot.activeElement === q) q.blur();
+    }, { passive: true });
+
+    draw();
+    this.$("overlay").appendChild(sheet);
+    this._openCombo = done;
+    fit();
+    // Synchronously, inside the tap: iOS only raises the keyboard for a focus the gesture made.
+    if (!isPhone(this)) q.focus({ preventScroll: true });
+    this._restoreScroll(snap);
+    this._trace("open");
+    setTimeout(() => this._trace("open+500ms"), 500);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", fit);
+      window.visualViewport.addEventListener("scroll", fit);
+    }
+    document.addEventListener("keydown", onKey, true);
+    const sel = listEl.querySelector(".psheet-row .tick:not(:empty)");
+    // Never scrollIntoView: it also scrolls HA's wrapper, which cannot be scrolled back by hand.
+    if (sel) {
+      const r = sel.parentElement;
+      listEl.scrollTop = Math.max(0, r.offsetTop - (listEl.clientHeight - r.offsetHeight) / 2);
+    }
+    if (!still) {
+      panel.animate([{ opacity: 0, transform: "translateY(-12px) scale(.98)" }, { opacity: 1, transform: "none" }],
+        { duration: 260, easing: "cubic-bezier(.32,.72,0,1)" });
+      scrim.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220 });
+    }
+  }
+
+  _scrollSnap() {
+    const out = [];
+    const se = document.scrollingElement || document.documentElement;
+    const from = this.shadowRoot.querySelector(".bigtitle") || this;
+    for (let n = from; n; n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null) {
+      if (n !== se && n.nodeType === 1) out.push([n, n.scrollTop]);
+    }
+    out.push([se, se.scrollTop]);
+    return out;
+  }
+
+  // ?hemmadiag=1 only: what moved around the picker sheet, kept on screen for a screenshot.
+  _trace(label) {
+    if (!this._diagEl) return;
+    const big = this.shadowRoot.querySelector(".bigtitle");
+    const vv = window.visualViewport;
+    const moved = this._scrollSnap().filter(([el, y]) => y)
+      .map(([el, y]) => (el.id ? "#" + el.id : el.tagName.toLowerCase()
+        + (el.className && typeof el.className === "string" ? "." + el.className.split(" ")[0] : "")) + "=" + Math.round(y));
+    const sc = this._scroller();
+    const tag = (el) => (el.id ? "#" + el.id : el.tagName.toLowerCase()
+      + (el.className && typeof el.className === "string" ? "." + el.className.split(" ")[0] : ""));
+    const line = label + ": title " + (big ? Math.round(big.getBoundingClientRect().top) : "-")
+      + " scrollY " + Math.round(window.scrollY) + " vv@" + (vv ? Math.round(vv.offsetTop) + "/" + Math.round(vv.height) : "-")
+      + " host " + Math.round(this.getBoundingClientRect().top)
+      + " sc " + tag(sc) + "=" + Math.round(sc.scrollTop)
+      + " ov " + getComputedStyle(document.documentElement).overflowY + "/" + (document.body ? getComputedStyle(document.body).overflowY : "-")
+      + " moved[" + moved.join(" ") + "]";
+    this._traceLog = (this._traceLog || []).concat([line]).slice(-10);
+  }
+
+  _pinAncestors() {
+    if (this._pinWatch) return;
+    this._pinWatch = new WeakSet();
+    const up = (n) => n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+    const typing = () => {
+      const a = this.shadowRoot.activeElement;
+      return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
+    };
+    let queued = false;
+    const settle = () => {
+      queued = false;
+      if (!this.isConnected || !isPhone(this) || typing()) return;
+      const sc = this._scroller();
+      const from = this.shadowRoot.querySelector(".bigtitle") || this;
+      for (let n = up(from); n; n = up(n)) {
+        if (n.nodeType !== 1 || n === sc || n === document.body || n === document.documentElement) continue;
+        if (!this._pinWatch.has(n)) {
+          this._pinWatch.add(n);
+          n.addEventListener("scroll", later, { passive: true });
+        }
+        const ov = getComputedStyle(n).overflowY;
+        if (ov === "auto" || ov === "scroll") continue;
+        if (n.scrollTop && this._diagEl) this._trace("pin reset " + n.tagName.toLowerCase() + "=" + Math.round(n.scrollTop));
+        if (n.scrollTop) n.scrollTop = 0;
+        if (n.scrollLeft) n.scrollLeft = 0;
+      }
+    };
+    const later = (ev) => {
+      if (this._diagEl && ev && ev.type === "scroll") {
+        const t = ev.target === document ? document.scrollingElement : ev.target;
+        if (t && t.tagName) this._trace("scroll " + t.tagName.toLowerCase() + "=" + Math.round(t.scrollTop || window.scrollY));
+      }
+      if (!queued) { queued = true; requestAnimationFrame(settle); }
+    };
+    const afterKeyboard = () => [0, 160, 450, 900].forEach((ms) => setTimeout(later, ms));
+    this.shadowRoot.addEventListener("focusout", afterKeyboard);
+    window.addEventListener("scroll", later, { passive: true });
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", afterKeyboard);
+    later();
+  }
+
+  _restoreScroll(snap) {
+    const put = () => snap.forEach(([el, y]) => { if (el.scrollTop !== y) el.scrollTop = y; });
+    put();
+    requestAnimationFrame(put);
+    setTimeout(put, 120);
+    setTimeout(put, 400);
+  }
+
   _syncSwitches() {
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     (this._switches || []).forEach((s) => {
@@ -9924,30 +12153,23 @@ class HemmaPanel extends HTMLElement {
       s.sw.title = on ? "Shown on the dashboard" : "Hidden on the dashboard";
       s.fs.classList.toggle("off", !on);
       if (s.add) s.add.disabled = !on;
-      // The card you are pushed into is open because you opened it; a switch
-      // inside its own header must not close it under you.
       if (!s.fs.classList.contains("sel")) {
         this._shutCard(s.fs, this._folded.has(s.foldKey), !still);
       }
     });
     this._syncPreview();
+    this._renderSidebar();
   }
 
-  // Both segmented controls travel the same way, so the pill is written once
-  // and told which data attribute names its options and what a pick means.
   _wireSeg(seg, attr, initial, onPick, opts) {
     const thumb = seg.querySelector(".segthumb");
-    // Measured from the live buttons, so it holds whatever the label or font. A
-    // transition cannot deform mid-flight, so the final state is committed at
-    // once and keyframes play over it. Carried across rebuilds, or a recreated
-    // control has no previous geometry and never travels.
     const carry = opts && opts.carry;
     const seed = carry && this._segCarry && this._segCarry[carry];
     let curX = seed ? seed.x : 0, curW = seed ? seed.w : 0;
     const moveThumb = (animate) => {
       const on = seg.querySelector(".segopt.on");
       if (!on || !on.offsetWidth) return;
-      const toX = on.offsetLeft - 2;
+      const toX = on.offsetLeft - (parseFloat(getComputedStyle(thumb).left) || 0);
       const toW = on.offsetWidth;
       const fromX = curX, fromW = curW;
       thumb.style.transform = "translateX(" + toX + "px)";
@@ -9960,10 +12182,6 @@ class HemmaPanel extends HTMLElement {
       if (!animate || !fromW) return;
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-      // Critically damped: eases in from rest, eases out, never passes its
-      // destination. What is left is 6% of stretch at the widest jump with a 2%
-      // squash, so the pill reads as physical. The middle keyframe INHERITS the
-      // outer easing - a curve of its own breaks the motion and finishes twice.
       const dist = Math.abs(toX - fromX);
       const stretch = 1 + Math.min(0.06, dist / 2200);
       thumb.animate(
@@ -9976,7 +12194,7 @@ class HemmaPanel extends HTMLElement {
           },
           { transform: `translateX(${toX}px) scaleX(1) scaleY(1)`, width: toW + "px" },
         ],
-        { duration: SEG_MS, easing: SEG_EASE }
+        { duration: 260, easing: "cubic-bezier(.25,.8,.25,1)" }
       );
     };
     let val = initial;
@@ -9990,23 +12208,23 @@ class HemmaPanel extends HTMLElement {
       onPick(val);
     };
     if (opts && opts.toggle) {
-      // Two mutually exclusive options, and a small target: the whole pill
-      // flips it rather than asking you to land on the correct half. Tapping
-      // the inactive side still selects that side, which is the same result.
       seg.onclick = () => pick(choices.find((b) => !b.classList.contains("on")));
     } else {
       choices.forEach((b) => { b.onclick = () => pick(b); });
     }
     requestAnimationFrame(() => moveThumb(false));
+    seg._moveThumb = moveThumb;
+    if (window.ResizeObserver) {
+      if (seg._thumbRO) seg._thumbRO.disconnect();
+      seg._thumbRO = new ResizeObserver(() => moveThumb(false));
+      seg._thumbRO.observe(seg);
+    }
     // Inter loads after first paint and the labels change width with it.
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => moveThumb(false)).catch(() => {});
     }
   }
 
-  // Switched off, a card is just its heading. Measured shut but animated open:
-  // the rows have to stay in flow to be clipped by the closing card and to fade
-  // while it closes over them.
   _shutCard(fs, shut, animate) {
     const seq = (fs._shutSeq = (fs._shutSeq || 0) + 1);
     this._folding = (this._folding || 0) + 1;
@@ -10014,9 +12232,6 @@ class HemmaPanel extends HTMLElement {
       this._folding = Math.max(0, (this._folding || 1) - 1);
       if (!this._folding && this._applyMapSize) this._applyMapSize();
     };
-    // `.shut` cannot be applied until the height animation ends - the rows have
-    // to stay in flow to be clipped by the closing card. The summary should not
-    // wait that long, so it rides its own class, set the moment the fold starts.
     fs.classList.toggle("counting", shut);
     if (!animate) { fs.classList.toggle("shut", shut); unfold(); return; }
 
@@ -10033,8 +12248,6 @@ class HemmaPanel extends HTMLElement {
     );
     const done = () => {
       unfold();
-      // A newer fold owns the card now, but this one still has to put back the
-      // clip it set - bailing before that left overflow:clip stuck on the card.
       fs.style.overflow = "";
       if (seq !== fs._shutSeq) return;
       fs.classList.toggle("shut", shut);
@@ -10042,10 +12255,6 @@ class HemmaPanel extends HTMLElement {
     a.finished.then(done, done);
   }
 
-  // The minus used to wipe a field on one tap. The tile list already asks
-  // twice - the row slides aside and Delete comes in from the trailing edge -
-  // so every other minus does the same rather than being the one place where a
-  // mis-tap is final. One row is armed at a time, panel-wide.
   _armRow(row, label, remove) {
     if (this._armedRow === row) { this._disarmRow(); return; }
     this._disarmRow();
@@ -10065,8 +12274,6 @@ class HemmaPanel extends HTMLElement {
     row.classList.add("arming");
     this._armedRow = row;
     this._armedDel = del;
-    // A frame between the clip landing and the slide starting, or the button
-    // has no parked position to travel from and simply appears in place.
     const go = () => { if (this._armedRow === row) row.classList.add("armed"); };
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(go);
     else go();
@@ -10093,8 +12300,6 @@ class HemmaPanel extends HTMLElement {
       row._awayHandler = null;
     }
     row.classList.remove("armed");
-    // The clip and the button come off only once the slide back has finished,
-    // or the row snaps to its resting shape halfway through it.
     const settle = () => {
       row.classList.remove("arming");
       if (del && del.parentNode) del.parentNode.removeChild(del);
@@ -10103,8 +12308,6 @@ class HemmaPanel extends HTMLElement {
     else settle();
   }
 
-  // A drawer opens under the fold, so opening it has to end with it on screen.
-  // The height morph is the same measure-toggle-measure the cards fold with.
   _openAdv(det, sum, open, animate) {
     const seq = (det._advSeq = (det._advSeq || 0) + 1);
     const body = det.querySelector && det.querySelector(".advbody");
@@ -10115,15 +12318,9 @@ class HemmaPanel extends HTMLElement {
     const still = !animate || !det.animate
       || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (still || from === to) { if (open) this._revealAdv(det, still); return; }
-    // .adv is content-box. It has no vertical padding today so the two boxes
-    // agree, but offsetHeight is the BORDER box - the day anyone gives this a
-    // padding it would animate to that much too tall and snap back, which is
-    // exactly what the hints caption did. Free to rule out now.
     const hadBox = det.style.boxSizing;
     det.style.boxSizing = "border-box";
     det.style.overflow = "clip";
-    // Revealed by the drawer growing over it, not by appearing on top of the
-    // rows below - which is what a bare display swap looks like.
     if (open && body && body.animate) {
       body.animate([{ opacity: 0 }, { opacity: 1 }],
         { duration: RT(200), delay: RT(60), fill: "backwards", easing: EASE });
@@ -10139,9 +12336,6 @@ class HemmaPanel extends HTMLElement {
     a.finished.then(done, done);
   }
 
-  // Only as far as the drawer's foot, never past its own summary, so the heading
-  // you tapped stays on screen. AFTER the height animation: the scroll range is
-  // still growing while the drawer expands.
   _revealAdv(det, still) {
     const pane = this.$("pane");
     if (!pane || !pane.scrollBy || !det.getBoundingClientRect) return;
@@ -10153,17 +12347,11 @@ class HemmaPanel extends HTMLElement {
     pane.scrollBy({ top: Math.min(over, room), behavior: still ? "auto" : "smooth" });
   }
 
-  // Smart Sort, as the row itself does it. `sort: false` on the room's
-  // hemma-smart-row is the off switch; absent is on.
   _smartSortOn() {
     const room = this._state && this._state.compact.rooms[this._room];
     return !(room && room._row && room._row.sort === false);
   }
 
-  // hemma-smart-row's _applyOrder, its numbers included: active first, each group
-  // in config order, applied with flex `order` and then a FLIP. `row` is passed
-  // because the new .mini-tiles is still detached - a shadowRoot lookup would
-  // find the OUTGOING card's row.
   _applyMiniSort(animate, row) {
     row = row || (this.shadowRoot && this.shadowRoot.querySelector(".mini-tiles"));
     if (!row) return;
@@ -10188,9 +12376,6 @@ class HemmaPanel extends HTMLElement {
     const first = tiles.map((t) => t.getBoundingClientRect());
     place();
     const last = tiles.map((t) => t.getBoundingClientRect());
-    // The row never wraps, so only x can change. Screen pixels have to be
-    // divided back down before they go on an element inside the scaled card -
-    // the same correction the preview's own drag makes.
     const k = (this._mapVis && this._mapVis.scale) || 1;
     const dx = tiles.map((_, i) => (first[i].left - last[i].left) / k);
 
@@ -10199,8 +12384,6 @@ class HemmaPanel extends HTMLElement {
       t.style.transition = "none";
       t.style.transform = "translate(" + dx[i] + "px,0)";
     });
-    // Two frames: one for the inverted transform to be committed, one for the
-    // transition to have something to run from.
     requestAnimationFrame(() => requestAnimationFrame(() => {
       tiles.forEach((t, i) => {
         if (Math.abs(dx[i]) < 0.5) return;
@@ -10216,8 +12399,6 @@ class HemmaPanel extends HTMLElement {
     if (row.scrollLeft > 10) row.scrollTo({ left: 0, behavior: "smooth" });
   }
 
-  // One section open at a time: any number of open cards has no predictable
-  // shape, and opening a nine-row section pushes the rest a screenful away.
   _closeOthers(keep, head) {
     if (!this._foldables) return;
     const others = [];
@@ -10229,25 +12410,17 @@ class HemmaPanel extends HTMLElement {
       others.push([k, entry]);
     });
     if (!others.length) return;
-    // Keep the row you tapped where your finger left it. Collapsing a card
-    // ABOVE it pulls everything below up by the difference, so measure the head
-    // either side of the change and hand the scroller the delta back.
     const sc = this._scroller();
     const before = head.getBoundingClientRect().top;
     others.forEach(([k, entry]) => {
       this._folded.add(k);
       entry.paint();
-      // Instant, not animated. You are looking at the card you just opened, and
-      // animating a collapse somewhere else while the page slides underneath it
       this._shutCard(entry.body, true, false);
     });
     const delta = head.getBoundingClientRect().top - before;
     if (delta && sc) sc.scrollTop += delta;
   }
 
-  // One caret for both card kinds. `body` is the element that collapses and
-  // `head` the row that toggles it; the section card and the tile card differ
-  // only in those two and in which siblings the shut class hides.
   _foldButton(key, head, body, label) {
     const fold = document.createElement("button");
     fold.type = "button";
@@ -10264,33 +12437,18 @@ class HemmaPanel extends HTMLElement {
     paint();
     if (this._foldables) this._foldables.set(key, { body, paint });
     const toggle = (ev) => {
-      // Every other control in these heads is a button; the caret is the one
-      // button that is also the fold.
       if (ev && ev.target && ev.target.closest && ev.target.closest("button:not(.fold)")) return;
-      // A row is a way in, not a disclosure. Pressing it shows that one thing
-      // with a way back, the way the preview does when you click an object -
-      // both ends of the same gesture. The fold machinery stays because a card
-      // still opens and closes; it is just no longer what a press means.
       if (this._pushRow && !head._dragged) {
         const hit = this._pushRow(key, head, label);
         if (hit) { if (ev) ev.stopPropagation(); return; }
       }
-      // Inside a section a header press does nothing: a press is a way IN now,
-      // so collapsing the one thing being shown leaves the pane empty. _pushRow
-      // returns false because there is nowhere further to go.
       if (this._sel) { if (ev) ev.stopPropagation(); return; }
-      // A reorder that lands back in its own slot never rebuilds the card, so
-      // the pointerup is followed by a real click on a head that still exists.
-      // Without this, dragging a tile and dropping it where it started folded
-      // it instead.
       if (head._dragged) { head._dragged = false; return; }
       if (ev) ev.stopPropagation();
       const opening = this._folded.has(key);
       if (opening) this._folded.delete(key);
       else this._folded.add(key);
       paint();
-      // A card switched off is already shut; folding it changes nothing to
-      // animate, and unfolding it must not open a card that is off.
       if (body.classList.contains("off")) return;
       if (opening) this._closeOthers(key, head);
       this._shutCard(body, this._folded.has(key),
@@ -10310,18 +12468,11 @@ class HemmaPanel extends HTMLElement {
     return out;
   }
 
-  // A chosen entity reads as its name. Menus, and any field while you are
-  // typing in it, stay on entity ids - that is what you search by and what
-  // actually gets written. Anything that is not a live entity id (an icon name,
-  // a room, a fixed option) passes straight through.
   _prettyEntity(v) {
     const e = v && String(v).includes(".") && this._hass && this._hass.states[v];
     return (e && e.attributes && e.attributes.friendly_name) || v;
   }
 
-  // On or off: a tri-state select offered a "Default" nothing on screen resolved.
-  // The switch sits at the template's resting position, and returning it there
-  // DELETES the key rather than writing the default back.
   _boolSwitch(cur, boolDefault, onChange, label) {
     const def = !!boolDefault;
     const on = cur === undefined || cur === "" || cur === null ? def : !!cur;
@@ -10340,11 +12491,6 @@ class HemmaPanel extends HTMLElement {
     return sw;
   }
 
-  // A plant and its readings share one device, so picking the plant fills the
-  // popup in. Seeds an EMPTY list only; a hand-picked set is never overwritten.
-  // The twin swaps the LAST occurrence and keeps the rest of the id byte for
-  // byte: a router publishes both `..._wan_download_speed` and a bare
-  // `..._wan_download`, and searching for "upload" pairs the wrong two.
   _twinOf(id, from, to) {
     const H = this._hass || {};
     const src = String(id || "");
@@ -10354,8 +12500,6 @@ class HemmaPanel extends HTMLElement {
     if (!(H.states || {})[twin]) return null;
     const dev = (x) => ((H.entities || {})[x] || {}).device_id;
     const own = dev(src);
-    // Only enforced when the source IS registered to a device; a template
-    // sensor has none, and refusing there would help nobody.
     if (own && dev(twin) !== own) return null;
     return twin;
   }
@@ -10378,32 +12522,18 @@ class HemmaPanel extends HTMLElement {
     return out;
   }
 
-  // Point at a thing, and the inspector becomes about it. Switching group is
-  // part of the move: clicking a tile while the switcher is on Badges has to
-  // take you to Tiles, or the selection would render into a hidden band.
   _select(pick) {
     if (!pick) return;
-    // A tile picked from the PREVIEW arrives with no label: selKeyOf has only
-    // the mk string to go on, and cannot see the room. The bar fell back to
-    // this._sel.key, which is the internal key - "tile-22".
     if (pick.group === "tiles" && !pick.label) {
       pick = { group: pick.group, key: pick.key, label: this._tileLabelFor(pick.key) };
     }
-    // Switching group is a sideways move, not a push; only going INTO something
-    // travels forward.
     this._navDir = this._sel ? 0 : 1;
     this._sel = pick;
     this._group = pick.group;
+    this._toLevelTop = true;
     this._renderForm();
-    // The card it landed on may be below the fold in a long list.
-    requestAnimationFrame(() => {
-      const hit = this.$("pane").querySelector(".card.sel, .tile.sel");
-      if (hit) this._scrollTo(hit, false);
-    });
   }
 
-  // Names the level you are in - the group in a list, the thing itself once
-  // pushed into. REPLACES the card's inline header rather than duplicating it.
   _headFor(g, room) {
     const grp = { icon: g.icon, color: g.iconColor, label: g.label, blurb: g.blurb };
     const sel = this._sel;
@@ -10417,9 +12547,6 @@ class HemmaPanel extends HTMLElement {
         icon: TILE_ICON[type.id] || grp.icon,
         color: TILE_COLOR[type.id] || TILE_TINT,
         label: (tile.name && tile.name.trim()) || type.label,
-        // No fallback to the group. Pushed into a tile, the header names the
-        // tile; repeating "The cards along the bottom of the room" over every
-        // one of them says nothing about the one you opened.
         blurb: type.blurb,
       };
     }
@@ -10434,8 +12561,6 @@ class HemmaPanel extends HTMLElement {
     };
   }
 
-  // What a tile is called, from its key alone. The same expression the list
-  // row and the push both use, so all three ways in agree.
   _tileLabelFor(key) {
     const room = this._state && this._state.compact.rooms[this._room];
     const tile = ((room && room.tiles) || []).find((t) => this._tileKey(t) === key);
@@ -10453,8 +12578,6 @@ class HemmaPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".linked")
       .forEach((n) => n.classList.remove("linked"));
     if (!key) return;
-    // Only the FAR side lights: lighting the one under the cursor is just a
-    // hover fill, which macOS does not put in a list with separators.
     if (from !== "row") {
       const esc = CSS.escape(key);
       const card = this.$("pane").querySelector('[data-k="' + esc + '"]');
@@ -10468,11 +12591,6 @@ class HemmaPanel extends HTMLElement {
     }
   }
 
-  // Returns false when the head is not something the inspector can show on its
-  // own, so the caller falls back to folding.
-  // Two things move on a push: the nav row cross-slides and the band's content
-  // travels a SHORT distance - iOS moves an incoming pane a fraction of its
-  // width, not the whole way.
   _playNav(dir, swapped) {
     if (!dir) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -10480,27 +12598,21 @@ class HemmaPanel extends HTMLElement {
     if (!pane) return;
     const band = pane.querySelector(".band:not([style*='display: none'])")
       || pane.querySelector(".band");
-    // Everything below the group header. The header names the level you are in,
-    // so it stays put while its contents travel - fading it out and back in
-    // made the whole column look like it was being replaced.
     const moving = band && band.querySelector(".bandbody");
     const dx = dir > 0 ? 26 : -26;
-    if (moving) {
-      moving.animate(
+    const root = moving || band;
+    if (root) {
+      // Opacity or transform on an ANCESTOR of a backdrop-filter drops its blur until the animation ends.
+      const glass = [...root.querySelectorAll(".col, .tilegrid")]
+        .filter((g) => g.offsetParent !== null);
+      const targets = glass.length
+        ? glass.filter((g) => !glass.some((o) => o !== g && o.contains(g)))
+        : [root];
+      targets.forEach((t) => t.animate(
         [{ opacity: 0, transform: "translateX(" + dx + "px)" },
          { opacity: 1, transform: "none" }],
-        { duration: 360, easing: SEG_EASE, fill: "backwards" });
-    } else if (band) {
-      band.animate(
-        [{ opacity: 0, transform: "translateX(" + dx + "px)" },
-         { opacity: 1, transform: "none" }],
-        // Raw, not RT: a push is a response to a press, not part of the
-        // room-switch morph. Through the dial this was 459ms and read as slow.
-        { duration: 360, easing: SEG_EASE, fill: "backwards" });
+        { duration: 360, easing: SEG_EASE, fill: "backwards" }));
     }
-    // Only when the row's CONTENTS changed. Switching Room to Badges leaves the
-    // switcher exactly where it was, so animating it there made the chrome
-    // travel with the content it is supposed to stand still behind.
     if (!swapped) return;
     const nav = pane.querySelector(".navrow > *");
     if (nav) {
@@ -10511,19 +12623,16 @@ class HemmaPanel extends HTMLElement {
     }
   }
 
-  // Leaving a section is a pop, and it has to be the same code path as the back
-  // button or the two would drift.
   _popRow() {
     if (!this._sel) return;
     this._sel = null;
     this._navDir = -1;
+    this._toListScroll = true;
     this._renderForm();
   }
 
   _pushRow(key, head, label) {
     if (this._sel) return false;                 // already showing one thing
-    // Editing is not browsing. While the list is in edit mode a row press does
-    // nothing: the minus and Delete are the only live targets on it.
     if (this._editTiles && head.closest && head.closest(".tilegrid")) return true;
     const card = head.closest && head.closest("[data-k]");
     if (!card) return false;
@@ -10543,9 +12652,6 @@ class HemmaPanel extends HTMLElement {
     const draw = () => {
       wrap.innerHTML = "";
 
-      // No default empty note: an empty field already reads as empty, and
-      // "None yet" under every picker was noise. Only a field that has
-      // something worth saying passes `empty`.
       let none = null;
       if (!list.length) {
         if (emptyText) {
@@ -10574,8 +12680,6 @@ class HemmaPanel extends HTMLElement {
         wrap.appendChild(chips);
       }
 
-      // A bare domain offers every sensor in the house, which is no help at
-      // all when the field wants one kind of them. The field already knows.
       const options = this._entityList(domains, opts && opts.classes)
         .filter((e) => !list.includes(e));
       const ph = (opts && opts.placeholder)
@@ -10598,16 +12702,26 @@ class HemmaPanel extends HTMLElement {
   // A styled stand-in for prompt() and confirm(), which cannot be themed.
   _ask(opts) {
     return new Promise((resolve) => {
+      const pane = document.createElement("div");
+      pane.className = "askpane";
       const scrim = document.createElement("div");
-      scrim.className = "scrim";
+      scrim.className = "fscrim";
+      const stack = document.createElement("div");
+      stack.className = "askstack";
+      const frost = document.createElement("div");
+      frost.className = "fglass";
       const box = document.createElement("div");
-      box.className = "dialog";
-      scrim.appendChild(box);
+      box.className = "askcard";
+      box.setAttribute("role", "alertdialog");
+      box.setAttribute("aria-modal", "true");
+      stack.appendChild(frost);
+      stack.appendChild(box);
+      pane.appendChild(scrim);
+      pane.appendChild(stack);
 
       const h = document.createElement("h3");
       h.textContent = opts.title;
       box.appendChild(h);
-
       if (opts.message) {
         const m = document.createElement("p");
         m.textContent = opts.message;
@@ -10615,15 +12729,56 @@ class HemmaPanel extends HTMLElement {
       }
 
       let input = null;
+      let icon = opts.icon || "";
       if (opts.value !== undefined) {
+        const list = document.createElement("div");
+        list.className = "flist";
+        const row = document.createElement("div");
+        row.className = "frow field";
         input = document.createElement("input");
+        input.className = "fin lead";
         input.value = opts.value || "";
+        input.spellcheck = false;
         if (opts.placeholder) input.placeholder = opts.placeholder;
-        box.appendChild(input);
+        row.appendChild(input);
+        list.appendChild(row);
+        // The icon is part of naming a room, not something to go and find after.
+        if (opts.icons) {
+          const irow = document.createElement("button");
+          irow.type = "button";
+          irow.className = "frow field askicon";
+          const lab = document.createElement("span");
+          lab.className = "asklabel";
+          lab.textContent = "Icon";
+          const val = document.createElement("span");
+          val.className = "askvalue";
+          const g = document.createElement("span");
+          g.className = "roomglyph";
+          const t = document.createElement("span");
+          val.appendChild(g); val.appendChild(t);
+          irow.appendChild(lab); irow.appendChild(val);
+          const paintIcon = () => {
+            const shown = icon || autoRoomGlyph(input.value);
+            g.style.setProperty("--i", "url('" + iconUrl(shown) + "')");
+            t.textContent = icon ? roomIconLabel(icon) : "Automatic";
+          };
+          paintIcon();
+          input.addEventListener("input", () => { if (!icon) paintIcon(); });
+          irow.onclick = () => {
+            this._menuAt(irow, [
+              { id: "", label: "Automatic", glyph: autoRoomGlyph(input.value),
+                checked: !icon, group: null },
+              ...ROOM_ICON_CHOICES.map((x) => ({ id: x, label: roomIconLabel(x), glyph: x,
+                checked: icon === x, group: "Icons", quiet: true })),
+            ], (id) => { icon = id; paintIcon(); });
+          };
+          list.appendChild(irow);
+        }
+        box.appendChild(list);
       }
 
       const acts = document.createElement("div");
-      acts.className = "acts";
+      acts.className = "askacts";
       const cancel = document.createElement("button");
       cancel.className = "ghost";
       cancel.textContent = "Cancel";
@@ -10639,10 +12794,11 @@ class HemmaPanel extends HTMLElement {
         if (settled) return;
         settled = true;
         document.removeEventListener("keydown", onKey, true);
-        const done = () => { if (scrim.parentNode) scrim.parentNode.removeChild(scrim); resolve(result); };
-        if (menuStill()) return done();
-        scrim.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, easing: "ease-in" })
-          .finished.then(done, done);
+        this._surfaceOut(scrim, [frost, box], false, () => {
+          if (pane.parentNode) pane.parentNode.removeChild(pane);
+          this._flowLockScroll(false);
+          resolve(result);
+        });
       };
 
       const onKey = (ev) => {
@@ -10655,19 +12811,15 @@ class HemmaPanel extends HTMLElement {
         if (!input) return finish(true);
         const v = input.value.trim();
         if (!v) { input.focus(); return; }
-        finish(v);
+        finish(opts.icons ? { value: v, icon: icon } : v);
       };
-      scrim.onmousedown = (ev) => { if (ev.target === scrim) finish(null); };
+      scrim.onclick = () => finish(null);
       document.addEventListener("keydown", onKey, true);
+      this._blockDrag(pane);
+      this._flowLockScroll(true);
 
-      this.shadowRoot.appendChild(scrim);
-      if (!menuStill()) {
-        scrim.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: "ease-out" });
-        box.animate(
-          [{ opacity: 0, transform: "scale(0.94)" }, { opacity: 1, transform: "none" }],
-          { duration: 220, easing: EASE }
-        );
-      }
+      this.shadowRoot.appendChild(pane);
+      this._surfaceIn(scrim, [frost, box], false);
       if (input) setTimeout(() => { input.focus(); input.select(); }, 30);
     });
   }
@@ -10676,18 +12828,11 @@ class HemmaPanel extends HTMLElement {
 
   _combo(value, list, placeholder, onChange, opts) {
     const iconMode = !!(opts && opts.icon);
-    // What the card draws when the field is empty. iconUrl("") resolves to the
-    // question-mark `default` artwork, so an unset Open icon used to read as
-    // "no icon" when the cover is in fact drawing a curtain.
     const iconFallback = (opts && opts.iconFallback) || null;
     // A fixed list is a chooser, not a text field: no typing, no filtering.
     const fixed = !!(opts && opts.fixed);
     const labels = (opts && opts.labels) || null;
     const show = (v) => (labels && labels[v] !== undefined ? labels[v] : v);
-    // Two entities can share a friendly name, and once the field shows only the
-    // name they are the same word - picking the wrong one looks like the card
-    // being broken. A shared name carries its id; an unambiguous one stays
-    // clean.
     const nameSeen = new Map();
     (list || []).forEach((o) => {
       const nm = this._prettyEntity(o);
@@ -10695,7 +12840,7 @@ class HemmaPanel extends HTMLElement {
     });
     const pretty = (v) => {
       const nm = this._prettyEntity(v);
-      return nameSeen.get(nm) > 1 ? nm + " (" + v + ")" : nm;
+      return nameSeen.get(nm) > 1 && !isPhone(this) ? nm + " (" + v + ")" : nm;
     };
     const wrap = document.createElement("div");
     wrap.className = "combo" + (iconMode ? " hasicon" : "");
@@ -10706,6 +12851,7 @@ class HemmaPanel extends HTMLElement {
     const menu = document.createElement("div");
     menu.className = "combo-menu";
     wrap.appendChild(input);
+    const entityish = !fixed && !iconMode && (list || []).some((o) => String(o).indexOf(".") > 0);
 
     let shown = [];
     let active = -1;
@@ -10719,11 +12865,11 @@ class HemmaPanel extends HTMLElement {
 
     const place = () => {
       const r = input.getBoundingClientRect();
-      const below = window.innerHeight - r.bottom - 12;
+      const vv = window.visualViewport;
+      const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+      const below = viewBottom - r.bottom - 12;
       const above = r.top - 12;
       const drop = below >= 180 || below >= above;
-      // Entity ids run far wider than the field they sit under, so the menu
-      // grows past the input rather than cutting its own rows off.
       menu.style.width = "auto";
       menu.style.minWidth = r.width + "px";
       menu.style.maxWidth = Math.max(r.width, Math.min(560, window.innerWidth - 20)) + "px";
@@ -10735,11 +12881,26 @@ class HemmaPanel extends HTMLElement {
       return drop;
     };
 
+    if (entityish) {
+      const lead = document.createElement("span");
+      lead.className = "entglyph";
+      wrap.classList.add("hasent");
+      wrap.insertBefore(lead, input);
+      wrap._paintEnt = () => {
+        lead.innerHTML = "";
+        const st = current && this._hass && this._hass.states[current];
+        wrap.classList.toggle("noent", !st);
+        if (st) lead.appendChild(entityIconEl(this._hass, st));
+      };
+      wrap._paintEnt();
+    }
+
     const commit = (v) => {
       current = v;
       input.value = v === ICON_DEFAULT ? "" : pretty(show(v));
       onChange(v === ICON_DEFAULT ? "" : v);
       if (wrap._paintLead) wrap._paintLead();
+      if (wrap._paintEnt) wrap._paintEnt();
       close();
     };
 
@@ -10748,13 +12909,19 @@ class HemmaPanel extends HTMLElement {
         if (el.classList.contains("combo-opt")) el.classList.toggle("active", i === active);
       });
       if (active >= 0 && menu.children[active]) {
-        menu.children[active].scrollIntoView({ block: "nearest" });
+        const r = menu.children[active];
+        if (r.offsetTop < menu.scrollTop) menu.scrollTop = r.offsetTop;
+        else if (r.offsetTop + r.offsetHeight > menu.scrollTop + menu.clientHeight) {
+          menu.scrollTop = r.offsetTop + r.offsetHeight - menu.clientHeight;
+        }
       }
     };
 
     const open = () => {
       const q = fixed ? "" : input.value.trim().toLowerCase();
-      shown = list.filter((o) => !q || String(o).toLowerCase().includes(q));
+      const named = !fixed && !iconMode && isPhone(this);
+      shown = list.filter((o) => !q || String(o).toLowerCase().includes(q)
+        || (named && String(this._prettyEntity(o)).toLowerCase().includes(q)));
       menu.innerHTML = "";
 
       if (!shown.length) {
@@ -10787,7 +12954,16 @@ class HemmaPanel extends HTMLElement {
         }
         const label = document.createElement("span");
         label.className = "lbl";
-        label.textContent = show(o);
+        const nm = named ? this._prettyEntity(o) : o;
+        if (named && nm !== o) {
+          label.textContent = nm;
+          const sub = document.createElement("span");
+          sub.className = "sub";
+          sub.textContent = o;
+          label.appendChild(sub);
+        } else {
+          label.textContent = show(o);
+        }
         d.appendChild(label);
         // mousedown, because blur would close the menu before a click lands.
         d.onmousedown = (ev) => { ev.preventDefault(); commit(o); };
@@ -10819,27 +12995,56 @@ class HemmaPanel extends HTMLElement {
       wrap._paintLead = paintLead;
     }
 
+    const rowLabel = () => {
+      const lab = wrap.parentElement && wrap.parentElement.querySelector("label");
+      return (lab && lab.textContent) || "";
+    };
     if (fixed) {
       input.readOnly = true;
       input.style.cursor = "pointer";
       input.value = show(current);
-      input.onfocus = open;
-      input.onclick = open;
-      input.onblur = () => setTimeout(close, 120);
+      input.onfocus = () => { if (isPhone(this)) input.blur(); else open(); };
+      input.onclick = () => {
+        if (!isPhone(this)) { open(); return; }
+        this._menuAt(wrap, list.map((o) => ({ id: o, label: show(o), checked: o === current })), (v) => commit(v));
+      };
+      input.onblur = () => { if (!isPhone(this)) setTimeout(close, 120); };
     } else {
       input.value = pretty(current);
-      // Focus puts the id back before the menu opens, so the filter still runs
-      // against ids and the caret is on the text you are about to edit.
-      input.onfocus = () => { input.value = current; open(); };
+      if (isPhone(this)) input.readOnly = true;
+      input.onfocus = () => {
+        if (isPhone(this)) { input.blur(); return; }
+        input.readOnly = false;
+        input.value = current;
+        open();
+      };
+      input.onclick = () => {
+        if (!isPhone(this)) return;
+        this._pickSheet(iconMode ? {
+          title: rowLabel(), list, current, free: false, label: show,
+          glyph: (o) => iconUrl(o === ICON_DEFAULT && iconFallback ? iconFallback : o),
+          onPick: (v) => commit(v),
+        } : {
+          title: rowLabel(), list, current,
+          onPick: (v) => commit(v),
+        });
+      };
       input.oninput = () => { open(); active = -1; paint(); };
       input.onblur = () => {
         setTimeout(close, 120);
+        input.placeholder = placeholder || "";
         const typed = input.value.trim();
-        // Picking from the menu leaves the NAME in a still-focused field, so a
-        // blur that matches either form is not an edit.
+        if (!typed && current && isPhone(this)) { input.value = pretty(current); return; }
         if (typed !== current && typed !== pretty(current)) commit(typed);
         else input.value = pretty(current);
       };
+    }
+
+    if (isPhone(this)) {
+      input.tabIndex = -1;
+      input.style.pointerEvents = "none";
+      wrap.style.cursor = "pointer";
+      wrap.addEventListener("click", () => { if (input.onclick) input.onclick(); });
     }
 
     input.onkeydown = (ev) => {
@@ -10862,17 +13067,18 @@ class HemmaPanel extends HTMLElement {
     };
 
     // A fixed menu would drift away from its input, so dismiss on scroll.
-    const dismiss = () => { if (menu.parentNode) close(); };
+    const dismiss = () => {
+      if (!menu.parentNode) return;
+      // The iOS keyboard scrolls and resizes the page as the field focuses; follow it instead of closing.
+      if (this.shadowRoot.activeElement === input) { place(); return; }
+      close();
+    };
     window.addEventListener("scroll", dismiss, true);
     window.addEventListener("resize", dismiss);
 
     return { wrap, input };
   }
 
-  // Domain alone is far too wide - power, energy and cost all say sensor. The
-  // rule EXCLUDES a conflicting device_class rather than requiring a matching
-  // one: plenty of template sensors carry none, and hiding an entity someone
-  // needs is worse than offering one they do not.
   _entityList(domains, classes) {
     const want = classes && classes.length ? classes : null;
     return Object.keys(this._hass.states)
@@ -10901,8 +13107,6 @@ class HemmaPanel extends HTMLElement {
     bg.dataset.src = url;
     bg.classList.remove("on");
     warmPhoto(url);
-    // Without this a single failed fetch left the backdrop off for good:
-    // nothing re-runs this until the room or the theme changes.
     bg.onerror = () => {
       if (bg.dataset.retried === url) return;
       bg.dataset.retried = url;
@@ -10910,8 +13114,6 @@ class HemmaPanel extends HTMLElement {
     };
     bg.onload = () => {
       const go = () => {
-        // First paint gets no fade: this is the backdrop the entrance happens
-        // against, so it must be fully there before anything moves.
         if (!this._entered) {
           bg.style.transition = "none";
           bg.classList.add("on");
@@ -10950,6 +13152,71 @@ class HemmaPanel extends HTMLElement {
     return this._imgs;
   }
 
+  // Cards the import found after the smart row. Hemma cannot edit an
+  // arbitrary card, so the only verb is Remove - the alternative was the raw
+  // config editor.
+  _extrasField(room, fs, f) {
+    const cards = room._extraCards || [];
+    if (!cards.length) return;
+    // "custom:mushroom-title-card" reads as "Mushroom title card".
+    const label = (c) => {
+      const raw = String((c && c.type) || "card").replace(/^custom:/, "").replace(/[-_]+/g, " ").trim();
+      return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Card";
+    };
+    const summary = (c) => {
+      const o = c || {};
+      const v = o.content || o.title || o.name || o.entity || o.camera_image
+        || (Array.isArray(o.entities) && o.entities.length ? o.entities.length + " entities" : "");
+      const t = String(v || "").replace(/\s+/g, " ").trim();
+      return t.length > 52 ? t.slice(0, 52) + "\u2026" : t;
+    };
+    const title = document.createElement("div");
+    title.className = "subtitle";
+    title.textContent = (f && f.label) || "Other cards";
+    fs.appendChild(title);
+    cards.forEach((card, i) => {
+      const row = document.createElement("div");
+      row.className = "row extrarow";
+      const lab = document.createElement("label");
+      lab.textContent = label(card);
+      row.appendChild(lab);
+      const sub = summary(card);
+      if (sub) {
+        const s = document.createElement("span");
+        s.className = "extrasub";
+        s.textContent = sub;
+        row.appendChild(s);
+      }
+      const dots = document.createElement("button");
+      dots.className = "mini icon rowmenu";
+      dots.title = "More";
+      dots.setAttribute("aria-label", "More");
+      dots.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
+      dots.onpointerdown = (ev) => ev.stopPropagation();
+      dots.onclick = () => this._menuAt(dots, [{ id: "remove", label: "Remove card", destructive: true }], async (id) => {
+        if (id !== "remove") return;
+        const yes = await this._ask({
+          title: "Remove this card?",
+          message: "It came from the dashboard you imported and is not part of Hemma. This cannot be undone.",
+          confirmLabel: "Remove", destructive: true,
+        });
+        if (!yes) return;
+        room._extraCards.splice(i, 1);
+        this._markDirty();
+        this._renderForm();
+        this._status("Card removed", "ok");
+      });
+      row.appendChild(dots);
+      fs.appendChild(row);
+    });
+    if (f && f.hint) {
+      const h = document.createElement("div");
+      h.className = "hint";
+      h.textContent = f.hint;
+      fs.appendChild(h);
+    }
+  }
+
   _imageField(room, row, fs, pane) {
     const sel = document.createElement("div");
     row.appendChild(sel);
@@ -10961,7 +13228,7 @@ class HemmaPanel extends HTMLElement {
 
     const hint = document.createElement("div");
     hint.className = "shothint";
-    hint.textContent = "Click a slot to choose a photo, or drop one onto it.";
+    hint.textContent = "Choose a photo, or drop one onto a slot.";
     fs.appendChild(hint);
 
     const preview = () => {
@@ -10987,8 +13254,6 @@ class HemmaPanel extends HTMLElement {
           };
           shots.appendChild(w);
         });
-      // Same photo as the preview tile, so it arrives the same way: on a room
-      // change only, never when you are picking an image inside one room.
       if (this._shotRoom !== room.path
           && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         shots.animate(ROOM_FADE, { duration: ROOM_FADE_MS, easing: EASE });
@@ -11006,7 +13271,7 @@ class HemmaPanel extends HTMLElement {
       const cur = room.variables.image || "";
       if (cur && !names.includes(cur)) {
         names.unshift(cur);
-        // Only call it missing once we know what is actually on disk.
+        // Only call it missing once what is on disk is known.
         labels[cur] = cur + (this._imgsLoaded ? "   not on disk" : "");
       }
 
@@ -11074,9 +13339,6 @@ class HemmaPanel extends HTMLElement {
       });
   }
 
-  // Presentational, so nothing re-renders: the class is the switch. The motion
-  // is measure-toggle-measure on each BLOCK, not on the bands holding them -
-  // animating the band while the prose snapped read as no animation at all.
   _setHints(on, animate) {
     on = !!on;
     this._hints = on;
@@ -11086,8 +13348,6 @@ class HemmaPanel extends HTMLElement {
       || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (still) { this.classList.toggle("nohints", !on); return; }
 
-    // One motion per box: a caption and the paragraph inside it both match, so
-    // both animated at once and the two compounded into an overshoot.
     const all = [...pane.querySelectorAll(HINT_BLOCKS)].filter((el) => el.animate);
     const blocks = all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
     const from = blocks.map((el) => el.offsetHeight);
@@ -11096,9 +13356,6 @@ class HemmaPanel extends HTMLElement {
 
     blocks.forEach((el, i) => {
       if (from[i] === to[i]) return;
-      // offsetHeight is the BORDER box, so on a content-box element it adds the
-      // padding again. Pinned to border-box for the duration, the number
-      // measured and the number animated to are the same box.
       const had = el.style.overflow;
       const hadBox = el.style.boxSizing;
       el.style.overflow = "hidden";
@@ -11121,10 +13378,7 @@ class HemmaPanel extends HTMLElement {
     const html = b.innerHTML;
     b.style.width = b.offsetWidth + "px";
     b.classList.add("ok");
-    // The tick is DRAWN: dashed to its own length with the offset animated to
-    // zero, which reveals it from the start of the path - so the path has to run
-    // the way a hand writes one, short arm first.
-    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.8"'
+    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"'
       + ' stroke-linecap="round" stroke-linejoin="round">'
       + '<path d="M4 12l5 5L20 6" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"/></svg>';
     b.animate(
@@ -11146,17 +13400,9 @@ class HemmaPanel extends HTMLElement {
     }, 1600);
   }
 
-  // What the room's badges will actually read, live: each group yields the pill
-  // plus the sub badges its expanded row would.
-  // Mirrors SC.list in hemma_scene_core.yaml - the explicit list, else every
-  // scene the registry shows minus the excluded, by name then scene_order.
-  // isActive is NOT mirrored: it needs configs this panel never fetches, so no
-  // row is marked active rather than guessing.
   _sceneList() {
     const states = (this._hass && this._hass.states) || {};
     const reg = (this._hass && this._hass.entities) || {};
-    // Scenes is dashboard-scoped: the same values are written to every room,
-    // and reads come from the room on screen, exactly as the form does.
     const room = this._state && this._state.compact.rooms[this._room];
     const v = (room && room.variables) || {};
     const excl = new Set(Array.isArray(v.scene_exclude) ? v.scene_exclude : []);
@@ -11166,9 +13412,6 @@ class HemmaPanel extends HTMLElement {
       : Object.keys(states)
           .filter((id) => id.startsWith("scene.") && !id.startsWith("scene.hemma"))
           .filter((id) => {
-            // A registry entry is REQUIRED, exactly as SC.list has it: a scene
-            // with no entry is not shown on the dashboard, so it is not shown
-            // here either.
             const re = reg[id];
             return !!re && !(re.hidden || re.hidden_by || re.disabled || re.disabled_by);
           });
@@ -11187,15 +13430,62 @@ class HemmaPanel extends HTMLElement {
         return 0;
       });
     }
-    return ids.map((id) => ({
-      id,
-      label: nameOf(id),
-      icon: (states[id].attributes && states[id].attributes.icon) || "mdi:layers",
-    }));
+    const sets = (typeof window !== "undefined" && window.customIcons) || {};
+    const usable = (ic) => !!ic && (ic.indexOf("mdi:") === 0
+      || Object.prototype.hasOwnProperty.call(sets, ic.split(":")[0]));
+    return ids.map((id) => {
+      const ic = (states[id].attributes && states[id].attributes.icon) || "";
+      return { id, label: nameOf(id), icon: usable(ic) ? ic : "mdi:layers" };
+    });
   }
 
-  // The real menu closes on an outside click; the chip's own handler stops
-  // propagation, so this never fires for the tap that opened it.
+  _sceneListForRoom(name) {
+    const all = this._sceneList();
+    const H = this._hass || {};
+    const want = String(name || "").trim().toLowerCase();
+    const areas = H.areas || {};
+    const areaIds = new Set(Object.keys(areas)
+      .filter((id) => String((areas[id] || {}).name || "").trim().toLowerCase() === want));
+    if (!want || !areaIds.size) return all;
+    const devices = H.devices || {};
+    const ents = H.entities || {};
+    const inRoom = new Set();
+    Object.keys(ents).forEach((eid) => {
+      const e = ents[eid] || {};
+      const aid = e.area_id || (e.device_id ? (devices[e.device_id] || {}).area_id : null);
+      if (aid && areaIds.has(aid)) inRoom.add(eid);
+    });
+    if (!inRoom.size) return all;
+    const states = H.states || {};
+    const leaves = (eid, seen) => {
+      if (!eid || seen.has(eid)) return [];
+      seen.add(eid);
+      const m = ((states[eid] || {}).attributes || {}).entity_id;
+      return Array.isArray(m) ? m.flatMap((x) => leaves(x, seen)) : [eid];
+    };
+    return all.filter((sc) => {
+      const targets = ((states[sc.id] || {}).attributes || {}).entity_id;
+      return Array.isArray(targets) && targets.some((t) => typeof t === "string"
+        && (inRoom.has(t) || leaves(t, new Set()).some((l) => inRoom.has(l))));
+    });
+  }
+
+  _sceneCatalog() {
+    const states = (this._hass && this._hass.states) || {};
+    const reg = (this._hass && this._hass.entities) || {};
+    const nameOf = (id) => (states[id] && states[id].attributes
+      && states[id].attributes.friendly_name) || id.replace("scene.", "").replace(/_/g, " ");
+    return Object.keys(states)
+      .filter((id) => id.startsWith("scene.") && !id.startsWith("scene.hemma"))
+      .filter((id) => {
+        const re = reg[id];
+        return !!re && !(re.hidden || re.hidden_by || re.disabled || re.disabled_by);
+      })
+      .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+      .map((id) => ({ id, label: nameOf(id),
+        icon: (states[id].attributes && states[id].attributes.icon) || "mdi:layers" }));
+  }
+
   _armSceneMenuDismiss() {
     if (this._sceneDismiss) return;
     this._sceneDismiss = () => this._closeSceneMenu();
@@ -11209,8 +13499,6 @@ class HemmaPanel extends HTMLElement {
     if (m) m.remove();
   }
 
-  // Anchored inside the preview card, so it scales and clips with it exactly
-  // as the real menu sits over the dashboard.
   _openSceneMenu(chip) {
     this._closeSceneMenu();
     const card = chip.closest(".card.map");
@@ -11236,8 +13524,6 @@ class HemmaPanel extends HTMLElement {
       menu.appendChild(row);
     });
     card.appendChild(menu);
-    // Center under the chip, then pull back inside the card if it would hang
-    // off either edge - the card clips, so an overhanging menu loses rows.
     const cr = card.getBoundingClientRect();
     const br = chip.getBoundingClientRect();
     const scale = cr.width && card.offsetWidth ? cr.width / card.offsetWidth : 1;
@@ -11254,9 +13540,6 @@ class HemmaPanel extends HTMLElement {
     this._armSceneMenuDismiss();
   }
 
-  // opts.phone differs in exactly ONE way: its Media pill is always_visible, a
-  // filter you can always reach rather than a readout. Everything else is
-  // identical, which is why this is a flag and not a second model.
   _miniModel(room, opts) {
     const forPhone = !!(opts && opts.phone);
     const V = room.variables || {};
@@ -11282,8 +13565,6 @@ class HemmaPanel extends HTMLElement {
       const e = st(id);
       return (e && e.attributes && e.attributes.friendly_name) || String(id || "").split(".").pop().replace(/_/g, " ");
     };
-    // Room light groups are all registered as a bare "Lights", so a group shows
-    // its area instead. Mirrors the name expression in hemma_badge_light.yaml.
     const areaOf = (id) => {
       const H = this._hass || {};
       const reg = (H.entities || {})[id];
@@ -11313,9 +13594,6 @@ class HemmaPanel extends HTMLElement {
     const temps = list("temp_sensor_", 5);
     const climateOn = !!(thermostats.length || temps.length || V.humidity_sensor || V.quality_sensor);
     if (on("show_climate") && climateOn) {
-      // Always the same three cards, off temp_sensor_1 / humidity_sensor /
-      // quality_sensor. The extra temp sensors widen the pill's range and the
-      // thermostats spin its fan; neither is a sub badge of its own.
       const t = num(temps[0]) ?? (st(thermostats[0]) || {}).attributes?.current_temperature;
       const h = num(V.humidity_sensor);
       const subs = [];
@@ -11327,9 +13605,6 @@ class HemmaPanel extends HTMLElement {
           : v <= k[3] ? "Warm" : v <= k[4] ? "Hot" : "Very Hot";
       };
       const humWord = (v) => (v <= 29.99 ? "Very Dry" : v >= 61 ? "High" : "Good");
-      // These three carry their state in their COLOR and glyph - a warm room is a
-      // yellow thermometer, not a teal one. Ladders and icons are
-      // hemma_badge_temp / _humidity / _air_quality's own.
       const tempKeys = () => (V.temp_unit === "C" ? [18, 21, 24, 27, 29] : [65, 70, 76, 81, 85]);
       const tempColor = (v) => {
         const k = tempKeys();
@@ -11355,9 +13630,6 @@ class HemmaPanel extends HTMLElement {
         }
         return CLIMATE;
       };
-      // The gauge fraction each badge computes for its ring, carried on the sub
-      // so the chips row can draw the same arc. Same formulas, so the preview
-      // and the device fill to the same place rather than to a guess.
       const clamp = (x) => Math.max(0.05, Math.min(1, x));
       if (temps[0]) {
         const n = num(temps[0]);
@@ -11392,25 +13664,27 @@ class HemmaPanel extends HTMLElement {
             ? Math.min(...readings) + unit
             : Math.min(...readings) + "\u2013" + Math.max(...readings) + unit)
         : null;
-      // "Show inline" swaps the one Climate pill for the three cards that would
-      // otherwise be its sub badges - hemma_room gates the group on
-      // !show_climate_inline and each of the three on it.
       if (V.show_climate_inline) {
         subs.forEach((sb, i) => out.push({ ...sb, id: "climate:" + i, subs: [] }));
       } else {
+        // hemma_badge_climate_group's own test, so the fan turns here exactly
+        // when it turns on the dashboard.
+        const hvacOn = thermostats.some((eid) => {
+          const s = st(eid);
+          if (!s) return false;
+          const action = (s.attributes || {}).hvac_action;
+          if (["heating", "cooling", "fan_only", "fan", "drying"].includes(action)) return true;
+          return !["off", "unavailable", "unknown"].includes(s.state);
+        });
         out.push({
-          // mdi:fan, not the Hemma fan glyph - hemma_badge_climate_group sets
-          // an MDI icon and it is the only pill on the row that does. The Hemma
-          // one is a different shape and read as a stretched fan here.
           id: "climate", label: "Climate", icon: "mdi-fan", color: CLIMATE, subs,
+          spin: hvacOn,
           text: span || (t != null ? Math.round(t) + unit : null)
             || (h != null ? Math.round(h) + "%" : null) || "\u2014",
         });
       }
     }
 
-    // The group is the pill, never a sub badge of itself. Its members are the
-    // sub badges, unless specific lights were listed, which override them.
     const grp = V.light_group_entity;
     const listed = list("light_entity_", 10);
     const members = grp ? ((st(grp) || {}).attributes || {}).entity_id : null;
@@ -11456,8 +13730,6 @@ class HemmaPanel extends HTMLElement {
     const secEntities = list("security_entity_", 8);
     const locks = (Array.isArray(V.security_locks) ? V.security_locks : [])
       .concat([V.security_lock_entity, V.security_lock_entity_2]).filter(Boolean);
-    // Cameras are a first-class part of this badge and the model had never
-    // read them, so a camera-only room drew nothing here.
     const cams = (Array.isArray(V.security_cameras) ? V.security_cameras : []).filter(Boolean);
     if (on("show_security") && (secEntities.length || locks.length || cams.length)) {
       const all = locks.concat(secEntities);
@@ -11465,9 +13737,6 @@ class HemmaPanel extends HTMLElement {
       out.push({
         id: "security", label: "Security", icon: open ? "lock-open-fill" : "lock-fill", color: TEAL,
         text: open ? open + " Open" : "No Alerts",
-        // The sub row is the two GROUP badges plus one card per separate badge -
-        // never one per lock or per camera. Wording is hemma_badge_lock_group's
-        // and hemma_badge_camera_group's own.
         subs: [].concat(
           locks.length ? [(() => {
             const unl = locks.filter((e) =>
@@ -11501,18 +13770,12 @@ class HemmaPanel extends HTMLElement {
     }
 
     const watts = num(V.energy_power_entity);
-    // Any energy source shows the badge, not just a whole-room power meter -
-    // a room set up with cost or per-device sensors used to render nothing at
-    // all. Same rule as _hemmaEnergyOn on the dashboard side; they must agree
-    // or the preview lies about what you will get.
     const energyOn = on("show_energy") && !!(
       V.energy_power_entity || V.energy_usage_today || V.energy_usage_month
       || V.energy_cost_today || V.energy_cost_month
       || list("energy_entity_", 6).length);
     if (energyOn) {
       const items = list("energy_entity_", 6);
-      // The group badge prints a TIER WORD from its own thresholds, never a
-      // wattage, and nothing at all without a numeric power. Mirrored exactly.
       const headline = watts == null ? ""
         : watts >= Number(V.extreme_threshold ?? 3000) ? "Extreme Usage"
         : watts >= Number(V.heavy_threshold ?? 1000) ? "Heavy Usage"
@@ -11521,9 +13784,6 @@ class HemmaPanel extends HTMLElement {
       out.push({
         id: "energy", label: "Energy", icon: "energy", color: ENERGY,
         text: headline,
-        // Mirrors hemma_badge_energy's name block exactly - unit resolution,
-        // rounding and the appended cost - or the preview shows watts for a
-        // badge the dashboard prints in dollars.
         subs: items.map((e, i) => {
           const ent = st(e);
           const raw = ent ? parseFloat(ent.state) : NaN;
@@ -11546,10 +13806,6 @@ class HemmaPanel extends HTMLElement {
     }
 
     const players = list("media_player_", 10).concat(list("plex_stream_", 2)).concat(list("psn_", 2));
-    // The panel REPLACES the pill rather than joining it, as the room card gates
-    // them. The pill itself is display:none until a source is active; paused
-    // still counts while it is fresh, which is what pause_timeout_minutes is
-    // for.
     const mediaLive = (e) => {
       if (!e) return false;
       const state = String(e.state || "").toLowerCase();
@@ -11566,18 +13822,12 @@ class HemmaPanel extends HTMLElement {
       }
       return state === "idle";
     };
-    // The wide row hides this while the Now Playing panel is up. The phone's is
-    // a FILTER: it stands whether anything plays, and is how you reach the media
-    // tiles at all.
     const mediaShows = forPhone
       ? players.length > 0
       : (!V.show_now_playing && players.some((e) => mediaLive(st(e))));
     if (on("show_media") && mediaShows) {
       const live = players.map(st).find((e) => e && e.state === "playing");
       const artOf = (e) => (e && e.attributes && e.attributes.entity_picture) || null;
-      // The GROUP badge counts and carries no artwork: the title and cover
-      // belong to the sub badge, or on a phone to the panel below. Naming them
-      // here puts what you drill DOWN to on the pill you drill down FROM.
       const playing = players.filter((e) => {
         const x = st(e);
         return x && x.state === "playing";
@@ -11586,9 +13836,6 @@ class HemmaPanel extends HTMLElement {
         id: "media", label: "Media", icon: "media", color: "var(--ink)", dim: !live, clip: true,
         text: playing === 0 ? "None Playing"
           : playing === 1 ? "1 Playing" : playing + " Playing",
-        // One card per LIVE player, matching the sub row: hemma_badge_media_player
-        // hides itself on the same rule the group pill uses, so an idle speaker
-        // is not a dimmed sub badge, it is no sub badge.
         subs: players.filter((e) => mediaLive(st(e))).map((e) => {
           const s = st(e);
           const playing = s && s.state === "playing";
@@ -11605,15 +13852,10 @@ class HemmaPanel extends HTMLElement {
 
   // ── layout animation ──────────────────────────────────────────────────────
 
-  // FLIP: measure before the rebuild, animate each card from where it was.
-  // Transform only - the cards carry backdrop-filter. The preview is excluded:
-  // animating its transform overrides the CSS scale that sizes it.
   _captureCards() {
     const map = new Map();
     this.shadowRoot.querySelectorAll("[data-k]:not([data-k='__map'])").forEach((c) => {
       const r = c.getBoundingClientRect();
-      // A card that is not showing measures 0x0 at 0,0, which as a FLIP origin
-      // is the corner of the window. No box means nothing to animate from.
       if (!r.width && !r.height) return;
       map.set(c.dataset.k, r);
     });
@@ -11655,103 +13897,26 @@ class HemmaPanel extends HTMLElement {
 
   // ── room preview ──────────────────────────────────────────────────────────
 
-  // The room card at a smaller size, from the same values the dashboard reads.
-  // The entrance matches filter-overlay.js's reveal: chrome settles, headings
-  // zoom, tiles stagger. The photo is already there; this lands on top of it.
   _playEntrance(force) {
     if (this._entered) return;
-    // Everything arrives together or it does not read as one arrival. The 2.5s
-    // fallback in _build is the ceiling, so a slow or missing photo delays this
-    // but can never strand it.
     if (!force && !this._bgReady) { this._waitBg = () => this._playEntrance(true); return; }
     this._waitBg = null;
     this._entered = true;
-    this.classList.remove("booting");
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      // No stagger to wait behind, and nothing to animate into.
-      this._revealNotice(null);
+    this._placeCanvasHead();
+    this._alignCanvas();
+    const curtain = this.$("curtain");
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!curtain || still || !curtain.animate) {
+      this.classList.remove("booting");
       return;
     }
-
-    const EASE_IN = "cubic-bezier(0.16, 1, 0.3, 1)";
-
-    // Nothing travels: glass resolves where it is rather than arriving, so
-    // opacity ONLY. A transform on an ancestor freezes the blur beneath it, and
-    // one on the glass re-blurs its backdrop every frame.
-    const riseGlass = (el, delay) => el.animate(
-      [{ opacity: 0 }, { opacity: 1 }],
-      { duration: 340, delay, easing: "cubic-bezier(.22,.61,.36,1)", fill: "backwards" }
-    );
-
-    const rise = (el, delay) => el.animate(
-      [
-        { opacity: 0, filter: "blur(7px)", transform: "scale(.985)" },
-        { opacity: 1, filter: "blur(0px)", transform: "none" },
-      ],
-      { duration: 340, delay, easing: "cubic-bezier(.22,.61,.36,1)", fill: "backwards" }
-    );
-
-    // The bar is one object and it genuinely arrives: a full slide from above
-    // rather than the 14px nudge it used to do, which finished long before the
-    // columns had and left it simply sitting there for most of the intro.
-    const bar = this.shadowRoot.querySelector(".top");
-    if (bar) {
-      bar.animate(
-        [{ transform: "translateY(-100%)" }, { transform: "none" }],
-        { duration: 520, easing: EASE_IN, fill: "backwards" }
-      );
-    }
-    // The other half of the same titlebar, arriving off its own edge. Chrome
-    // travels; the content inside it resolves in place.
-    const rail = this.shadowRoot.querySelector(".rail");
-    if (rail) {
-      rail.animate(
-        [{ transform: "translateX(-100%)" }, { transform: "none" }],
-        { duration: 520, easing: EASE_IN, fill: "backwards" }
-      );
-    }
-
-    // The floating panel settles in place: the rail and bar are chrome hinged to
-    // an edge, this is a free object. It is also the largest piece of glass
-    // here, and a transform on one re-blurs its backdrop every frame.
-    const insp = this.shadowRoot.querySelector(".inspector");
-    if (insp) riseGlass(insp, 90);
-
-    const canvas = this.shadowRoot.querySelector(".canvas");
-    // The preview's glass is on .card.map, so the map is what animates - moving
-    // .canvas around it would freeze the blur exactly as before.
-    const map = this.shadowRoot.querySelector(".card.map");
-    const tail = [];
-    if (map) tail.push(riseGlass(map, 150));
-    else if (canvas) tail.push(riseGlass(canvas, 150));
-
-    // 22ms apart is texture on one gesture, not a queue taking turns. The
-    // stagger runs over GROUPS: rows share one surface, so lifting them
-    // individually deals a group out as separate cards.
-    const top = (el) => el.getBoundingClientRect().top;
-    const left = (el) => el.getBoundingClientRect().left;
-    const order = (a, b) => (top(a) - top(b)) || (left(a) - left(b));
-
-    // Every group is built and only the chosen one is shown, so the hidden
-    // ones were taking their turn in the stagger and spending its first frames
-    // animating nothing.
-    const shown = (el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    };
-
-    const heads = [...this.shadowRoot.querySelectorAll(".sheet .bandhead, #tilespane .bandhead")]
-      .filter(shown);
-    heads.sort(order).forEach((h, i) => rise(h, 100 + i * 22));
-
-    // The group's header is glass, so it belongs here, not with the headings:
-    // rise() would put a transform and a filter on a backdrop-filter surface.
-    const groups = [...this.shadowRoot.querySelectorAll(
-      ".sheet .col, #tilespane .tilegrid")]
-      .filter((g) => g.children.length)
-      .filter(shown);
-    groups.sort(order).forEach((g, i) => tail.push(riseGlass(g, 130 + i * 34)));
-    this._revealNotice(tail);
+    // Held up by its own style, not the class, so removing .booting lays the
+    // interface out underneath without showing a frame of it.
+    curtain.style.display = "block";
+    this.classList.remove("booting");
+    const done = () => { curtain.style.display = ""; };
+    curtain.animate([{ opacity: 1 }, { opacity: 0 }],
+      { duration: 240, easing: "cubic-bezier(.22,.61,.36,1)" }).finished.then(done, done);
   }
 
   // The nav card holds one routes array, shared by every view.
@@ -11801,12 +13966,8 @@ class HemmaPanel extends HTMLElement {
     else this._log("no Scenes entry to restore - save once so the bundle loads", "warn");
   }
 
-  // Every live source, in the card's rank order. Slot order is not that order.
-  // Shared: both previews draw the same widget off the same room.
   _npList(V) {
     const states = this._hass.states;
-    // The card's own key per slot - mp1..mp10, plex1..2, psn1..2. npArt keys off
-    // it, so a new game in the same slot cannot inherit the last one's cover.
     const out = [];
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
       .map((n) => ["player", V["media_player_" + n], "mp" + n])
@@ -11814,8 +13975,6 @@ class HemmaPanel extends HTMLElement {
       .concat([1, 2].map((n) => ["psn", V["psn_" + n], "psn" + n]))
       .filter((x) => x[1])
       .forEach(([k, id, key]) => {
-        // Hidden viewers drop here, where V is in hand - npSource only gets
-        // the entity. Same rule as hemma-core's _hemmaPlexHidden.
         if (k === "plex" && npPlexHidden(V, (states[id] || {}).attributes?.user)) return;
         const found = npSource(k, id, states);
         if (found) { found.key = key; out.push(found); }
@@ -11856,8 +14015,6 @@ class HemmaPanel extends HTMLElement {
     return this._npList(V)[0] || null;
   }
 
-  // One tile per live source. The placeholder stays in the markup as the empty
-  // state, so a room with nothing playing still shows where the panel lands.
   _paintNpStack(host, V) {
     if (!host) return;
     const list = this._npList(V);
@@ -11891,11 +14048,7 @@ class HemmaPanel extends HTMLElement {
     if (NP_ACCENT[s.kind]) el.style.setProperty("--np-accent", NP_ACCENT[s.kind]);
 
     const art = el.querySelector(".mini-npart");
-    const pic = npArt(s);
-    if (pic) {
-      art.classList.add("art");
-      art.style.backgroundImage = "url('" + pic + "')";
-    }
+    if (npPaintArt(art, s)) art.classList.add("art");
     el.querySelector(".mini-nptitle").textContent = s.title;
     el.querySelector(".mini-npsub").textContent = npSubLine(s);
 
@@ -11924,28 +14077,20 @@ class HemmaPanel extends HTMLElement {
     el.appendChild(row);
   }
 
-  // What the preview will be showing, without building it - the exit animation
-  // has to run on the card that is still up, so the leavers are known first.
   _miniKeys(room) {
     const V = room.variables || {};
     const out = new Set(this._miniModel(room).map((b) => "b:" + b.id));
     (room.tiles || []).forEach((t) => {
       const k = this._tileKey(t);
       out.add("t:" + k);
-      // Either/or, exactly as _paintTile draws them: registering both would
-      // leave the diff waiting on a toggle the tile never painted.
       const ent = t.entity && ((this._hass && this._hass.states) || {})[t.entity];
       if (tileProgressOn(t, ent)) out.add("pr:" + k);
-      else if (tileToggleOn(t, tileTypeOf(t))) out.add("tg:" + k);
+      else if (tileToggleOn(t, tileTypeOf(t), ent)) out.add("tg:" + k);
     });
     if (this._scenesOn()) out.add("sc");
     if (V.weather_temp_sensor || V.weather_entity) out.add("w");
     if (V.show_media !== false && V.show_now_playing) {
       out.add("np");
-      // One key per tile, or the diff reads the clones as arriving every render
-      // and replays the entrance.
-      // "npt" is the wide stack's first tile, keyed in the markup; every other
-      // tile there and EVERY tile on the phone carries npt:<key>.
       if (!this._npMinFor(room)) {
         out.add("npt");
         this._npList(V).slice(0, NP_STACK_SLOTS)
@@ -11955,9 +14100,6 @@ class HemmaPanel extends HTMLElement {
     return out;
   }
 
-  // Start minimized collapses to the waveform on load, and tapping the waveform
-  // expands it - the same one-shot the dashboard does, held per room here so
-  // flipping the option in the form re-collapses the preview.
   _npMinFor(room) {
     const want = !!(room.variables || {}).start_minimized;
     const key = room.path + "|" + want;
@@ -11965,9 +14107,6 @@ class HemmaPanel extends HTMLElement {
     return this._npMin;
   }
 
-  // Anything leaving shrinks away first, then the card is swapped and anything
-  // new swells in. The swap is deferred through the exit, which is the only way
-  // to animate an element the rebuild is about to destroy.
   _swapMap(mount, room) {
     const old = mount.firstElementChild;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -11982,23 +14121,15 @@ class HemmaPanel extends HTMLElement {
       const prev = new Set([...(old ? old.querySelectorAll("[data-mk]") : [])]
         .map((e) => e.dataset.mk));
       const card = this._roomMap();
-      // Carry the live <img> elements across rather than letting fresh ones
-      // decode: even straight from cache a new element paints a frame late, and
-      // that frame is the room photo vanishing on every keystroke.
       if (old) {
         const pool = new Map();
         old.querySelectorAll("img").forEach((was) => {
           if (!was.src || !was.complete) return;
-          // Never a cross-fade ghost: it is a COPY of the outgoing photo, so on a
-          // toggle back the pool hands it over still fading to 0 and still due to
-          // remove itself.
           if (was.dataset.ghost) return;
           if (was.getAnimations && was.getAnimations().length) return;
           if (!pool.has(was.src)) pool.set(was.src, []);
           pool.get(was.src).push(was);
         });
-        // The new node's classes and dataset are the current truth; only the
-        // decoded bitmap is worth keeping, so the old element takes them on.
         card.querySelectorAll("img").forEach((now) => {
           const free = pool.get(now.src);
           if (!free || !free.length) return;
@@ -12008,9 +14139,6 @@ class HemmaPanel extends HTMLElement {
           now.replaceWith(was);
         });
       }
-      // Scroll survives the swap. The phone body scrolls and the wide tile row
-      // scrolls, and a live refresh that put either back to the start would
-      // take the page out from under whoever was reading it.
       const scrolls = [".mp-body", ".mini-tiles", ".mp-badges"];
       const keep = new Map();
       if (old) scrolls.forEach((sel) => {
@@ -12019,7 +14147,26 @@ class HemmaPanel extends HTMLElement {
           keep.set(sel, [was.scrollTop, was.scrollLeft]);
         }
       });
+      // A popup opens at its top, and Back lands where Home was left.
+      const pfOf = (n) => ((n && n.querySelector(".card.map")) || {}).dataset;
+      const pfWas = (pfOf(old) || {}).pfilter;
+      const pfNow = (pfOf(card) || {}).pfilter;
+      if (pfWas !== undefined && pfNow !== undefined && pfWas !== pfNow) {
+        const was = old.querySelector(".mp-body");
+        if (!pfWas && was) this._phoneHomeScroll = was.scrollTop;
+        keep.set(".mp-body", [pfNow ? 0 : (this._phoneHomeScroll || 0), 0]);
+      }
+      const sceneWas = new Map();
+      if (old && !still && !roomChanged && !shapeSwap) {
+        old.querySelectorAll(".mp-scene[data-scene]").forEach((e) => {
+          sceneWas.set(e.dataset.scene, e.getBoundingClientRect());
+        });
+      }
+      const oldScrim = old && old.querySelector(".mzscrim");
+      const newScrim = card.querySelector(".mzscrim");
+      if (oldScrim && newScrim) newScrim.replaceWith(oldScrim);
       mount.replaceChildren(card);
+      this._focusPreview();
       keep.forEach(([top, left], sel) => {
         const now = card.querySelector(sel);
         if (!now) return;
@@ -12027,6 +14174,19 @@ class HemmaPanel extends HTMLElement {
         now.scrollLeft = left;
       });
       if (this._applyMapSize) this._applyMapSize(shapeSwap);
+      if (sceneWas.size) {
+        const k = (this._mapVis && this._mapVis.scale) || 1;
+        card.querySelectorAll(".mp-scene[data-scene]").forEach((e) => {
+          const was = sceneWas.get(e.dataset.scene);
+          if (!was) return;
+          const now = e.getBoundingClientRect();
+          const dx = (was.left - now.left) / k, dy = (was.top - now.top) / k;
+          if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+          e.animate(
+            [{ transform: "translate(" + dx + "px," + dy + "px)" }, { transform: "none" }],
+            { duration: 450, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+        });
+      }
       if (still || !old || roomChanged || shapeSwap) return;
       card.querySelectorAll("[data-mk]").forEach((e) => {
         if (prev.has(e.dataset.mk)) return;
@@ -12034,9 +14194,6 @@ class HemmaPanel extends HTMLElement {
       });
     };
 
-    // _miniKeys describes ONE room. The phone card holds every section, so on
-    // that shape every tile read as leaving, animated out over 180ms, and was
-    // snapped back by the commit - the collapse-and-flicker on every refresh.
     const next = still || !old || roomChanged || shapeSwap || this._miniSize === "phone"
       ? null : this._miniKeys(room);
     const leaving = next
@@ -12051,8 +14208,6 @@ class HemmaPanel extends HTMLElement {
     });
   }
 
-  // Just the preview. A field edit should show up immediately, but rebuilding
-  // the whole form would pull the ground out from under the control being used.
   _syncPreview() {
     this._markDirty();
     const mount = this.$("mapmount");
@@ -12062,33 +14217,19 @@ class HemmaPanel extends HTMLElement {
     this._swapMap(mount, room);
   }
 
-  // Rebuild the preview from scratch and re-fit it. Clearing _mapSig is what
-  // makes it actually rebuild: _renderForm skips _swapMap when the signature is
-  // unchanged, and the signature does not know the mock's SHAPE changed.
   _rebuildPreview() {
     const mount = this.$("mapmount");
     const room = this._state && this._state.compact.rooms[this._room];
     if (!mount || !room) return;
     this._mapSig = null;
-    // The SHAPE is changing, so the outgoing tree has nothing in common with the
-    // incoming one: it must not be held for an exit animation, and it must not be
-    // SIZED on the way out - that measures the new shape against the old card and
-    // draws it stretched. commit() sizes it once the new card is there.
     this._mapShapeSwap = true;
     this._swapMap(mount, room);
   }
 
-  // Which size buttons are on offer. Called on every load, not once at build:
-  // deciding it when the control was created meant a dashboard opened later
-  // kept the previous one's options, which is how a phone layout ended up
-  // offering Desktop and Tablet.
   _syncSizeOpts() {
     const seg = this.$("sizeseg");
     if (!seg) return;
     const show = (sel, on) => seg.querySelectorAll(sel).forEach((b) => { b.hidden = !on; });
-    // Desktop and Tablet are always honest; Phone appears once there is a phone
-    // half to draw. No case hides the wide ones any more - a home is always
-    // edited from its wide half.
     show('[data-size="desktop"],[data-size="tablet"]', true);
     show('[data-size="phone"]', this._phoneReachable());
     this._miniSize = this._sizeAllowed(this._miniSize);
@@ -12097,36 +14238,23 @@ class HemmaPanel extends HTMLElement {
     });
   }
 
-  // Which shapes this dashboard can honestly be previewed at. A phone layout
-  // has no wide shape to show, and a wide dashboard with no phone half has no
-  // phone one - offering either would draw a picture of nothing.
   _sizeAllowed(want) {
     const ok = ["desktop", "tablet"];
     if (this._phoneReachable()) ok.push("phone");
     return ok.indexOf(want) === -1 ? "desktop" : want;
   }
 
-  // The phone half's state, whichever way it is reached: editing it directly,
-  // or previewing it from the wide dashboard it is paired with.
   _phoneState() {
     if ((this._state || {}).surface === "mobile") return this._state;
     const p = this._pair;
     if (!p || p.safe === false) return null;
-    // Sync the phone half FIRST: tile settings live on the wide half and used to
-    // reach the phone config only on save, so the phone preview drew a tile you
-    // had just turned off. syncPairTiles is idempotent, so this costs one pass.
     syncPairTiles(p);
-    // Scenes is three cards on the phone, built from a switch on the wide half.
-    // Same reason as the tiles: the preview has to show the switch NOW, not at
-    // the next save.
     syncScenesMobile(p, this._scenesOn());
     syncCamerasMobile(p, this._hass);
+    syncRoomChips(p);
     return p.mobile;
   }
 
-  // The phone half's own config, not the wide room narrowed: its rooms are
-  // SECTIONS of one scrolling view under a single hero. Tiles go through the same
-  // _paintTile, because they are the same cards.
   _phoneMap(card) {
     const st = this._phoneState();
     const screen = document.createElement("div");
@@ -12137,14 +14265,20 @@ class HemmaPanel extends HTMLElement {
       return;
     }
 
+    if (String(this._phoneFilter || "").indexOf("room:") === 0
+      && !(st.compact.rooms || []).some((sc) => sc.name && sc.name !== MOBILE_FAVORITES
+        && "room:" + sc.name === this._phoneFilter)) {
+      this._phoneFilter = null;
+    }
+    const roomPop = String(this._phoneFilter || "").indexOf("room:") === 0
+      ? this._phoneFilter.slice(5) : null;
+    card.dataset.pfilter = this._phoneFilter || "";
+
     const shell = (st.scaffold || {}).shell || {};
     const sv = shell.variables || {};
     const chrome = (st.chrome || {}).items || [];
     const cardOf = (tpl) => (chrome.find((it) => it.card && it.card.template === tpl) || {}).card;
 
-    // The hero. One photo for the whole dashboard - the sections share it -
-    // falling back to the wide dashboard's overview room when the phone half
-    // has none of its own, which is exactly what the theme does.
     const img = document.createElement("img");
     img.className = "mp-photo";
     img.alt = "";
@@ -12159,18 +14293,11 @@ class HemmaPanel extends HTMLElement {
     wash.className = "mp-wash";
     screen.appendChild(wash);
 
-    // A filter is a popup laid OVER the dashboard, which stays blurred underneath
-    // while it is open - so the hero and the field hold the blur rather than it
-    // ramping off when the entrance finishes.
     const veil = document.createElement("div");
     veil.className = "mp-veil";
     screen.appendChild(veil);
     if (this._phoneFilter) screen.classList.add("filtered");
 
-    // The popup's back button. filter-overlay's own: a 40px disc with a convex
-    // sheen lit from above, a conic rim, and the dark side wraps that ground it.
-    // No backdrop-filter - inside a card the preview draws scaled it renders
-    // nothing, and the fill plus the rim is what carries the look anyway.
     if (this._phoneFilter) {
       const back = document.createElement("div");
       back.className = "mp-back";
@@ -12198,7 +14325,15 @@ class HemmaPanel extends HTMLElement {
     baredge.className = "mp-baredge";
     const bartitle = document.createElement("div");
     bartitle.className = "mp-bartitle";
+    const barveil = document.createElement("div");
+    barveil.className = "mp-barveil";
+    if (url) {
+      const veilimg = img.cloneNode(false);
+      veilimg.className = "mp-photo mp-barveilimg";
+      barveil.appendChild(veilimg);
+    }
     screen.appendChild(bar);
+    screen.appendChild(barveil);
     screen.appendChild(baredge);
     screen.appendChild(bartitle);
 
@@ -12206,8 +14341,35 @@ class HemmaPanel extends HTMLElement {
     const wcard = cardOf("hemma_mobile_weather");
     const wv = (wcard && wcard.variables) || {};
     const went = wv.weather_entity && this._hass.states[wv.weather_entity];
-    // The title row: the home's name large on the left, the weather small on
-    // the right at the same height. Not a bare temperature in the corner.
+    const pBell = bellOnFor(this._pair);
+    const pAssist = assistOnFor(this._pair) && assistShown({}, this._hass);
+    const pEdit = true;
+    if (pBell || pAssist || pEdit) {
+      const pill = document.createElement("div");
+      pill.className = "mp-pill" + ((pBell ? 1 : 0) + (pAssist ? 1 : 0) + (pEdit ? 1 : 0) > 1 ? "" : " solo");
+      pill.dataset.jump = "Notifications";
+      if (pBell) {
+        const b = document.createElement("span");
+        b.className = "mp-pbell";
+        b.innerHTML = '<svg viewBox="0 0 19.042 23.3761" aria-hidden="true"><g> <rect height="23.3761" opacity="0" width="19.042" x="0" y="0"/> <defs><mask id="mp-bell-notch" maskUnits="userSpaceOnUse" x="-4" y="-4" width="28" height="32"><rect x="-4" y="-4" width="28" height="32" fill="#fff"/><circle cx="14.322" cy="4.731" r="5.700" fill="black"/></mask></defs><path mask="url(#mp-bell-notch)" d="M9.52099 21.9578C7.86237 21.9578 6.65235 20.756 6.52734 19.3817L12.5146 19.3817C12.3793 20.756 11.1817 21.9578 9.52099 21.9578ZM10.727 1.68277C10.0267 2.50564 9.60359 3.5696 9.60359 4.72542C9.60359 7.30705 11.7349 9.43838 14.3269 9.43838C14.8692 9.43838 15.3916 9.34449 15.8763 9.16748C15.9467 9.72937 15.9848 10.3298 15.9966 10.9634C16.0742 12.0911 16.2437 13.4757 16.8951 14.1504C17.7381 15.0102 18.7324 15.8926 18.7324 16.8688C18.7324 17.5798 18.1832 18.0586 17.257 18.0586L1.78496 18.0586C0.858724 18.0586 0.309534 17.5798 0.309534 16.8688C0.309534 15.8926 1.29566 15.0102 2.14893 14.1504C2.79006 13.4757 2.96773 12.0911 3.03506 10.9634C3.11485 7.21731 4.1075 4.63186 6.7024 3.69025C7.07351 2.42306 8.07843 1.41623 9.52099 1.41623C9.96708 1.41623 10.371 1.51223 10.727 1.68277Z" fill="#fff" fill-opacity="1"/> <circle cx="14.322" cy="4.731" r="4.400" fill="#ff4245"/> </g></svg>';
+        pill.appendChild(b);
+      }
+      if (pAssist) {
+        const s = document.createElement("span");
+        s.className = "mp-passist";
+        s.innerHTML = "<svg viewBox=\"0 0 22.59 20.34\" aria-hidden=\"true\"><path d=\"M22.5859 9.39907C22.5859 14.8347 17.8437 18.7878 11.2826 18.7878C9.1393 18.7878 7.17681 18.3827 5.48654 17.612C4.48795 18.3513 3.1069 18.7878 1.75961 18.7878C1.11917 18.7878 0.883017 18.3066 1.31011 17.919C1.90592 17.3731 2.15343 16.8685 2.15343 16.1103C2.15343 14.3677 4.44089e-16 13.3068 4.44089e-16 9.39907C4.44089e-16 3.94067 4.74219 0 11.2826 0C17.8333 0 22.5859 3.94067 22.5859 9.39907ZM14.5834 9.43073C14.5834 10.2401 15.235 10.902 16.0444 10.902C16.8434 10.902 17.5053 10.2401 17.5053 9.43073C17.5053 8.62348 16.8434 7.96978 16.0444 7.96978C15.235 7.96978 14.5834 8.62348 14.5834 9.43073ZM9.87419 9.43073C9.87419 10.2401 10.5279 10.902 11.3372 10.902C12.1445 10.902 12.8085 10.2401 12.8085 9.43073C12.8085 8.62348 12.1445 7.96978 11.3372 7.96978C10.5279 7.96978 9.87419 8.62348 9.87419 9.43073ZM5.17742 9.43073C5.17742 10.2401 5.84147 10.902 6.63837 10.902C7.44773 10.902 8.09932 10.2401 8.09932 9.43073C8.09932 8.62348 7.43738 7.96978 6.63837 7.96978C5.84147 7.96978 5.17742 8.62348 5.17742 9.43073Z\"/></svg>";
+        pill.appendChild(s);
+      }
+      if (pEdit) {
+        if (pBell || pAssist) pill.appendChild(Object.assign(document.createElement("span"), { className: "mp-psep" }));
+        const d = document.createElement("span");
+        d.className = "mp-pdots";
+        d.innerHTML = "<i></i><i></i><i></i>";
+        pill.appendChild(d);
+      }
+      screen.appendChild(pill);
+    }
+
     const trow = document.createElement("div");
     trow.className = "mp-title";
     trow.dataset.jump = "Appearance";
@@ -12228,16 +14390,9 @@ class HemmaPanel extends HTMLElement {
       t.textContent = deg + "\u00b0";
       const c = document.createElement("span");
       c.className = "mp-wcond";
-      // Written out, not cap(): that helper is a LOCAL const inside mediaWord
-      // and tileStateWord, not a module function. Calling it from here threw,
-      // which aborted the whole mock and left the wide card on screen - so
-      // tapping Phone looked like it did nothing at all.
       const cond = went ? String(went.state).replace(/[-_]/g, " ") : "";
       c.textContent = cond ? cond.charAt(0).toUpperCase() + cond.slice(1) : "";
       w.appendChild(t); w.appendChild(c);
-      // The condition glyph, from the same WEATHER_SVG set the wide preview
-      // draws - it sits beside the reading on the device, and the phone mock
-      // was printing the words with nothing next to them.
       const file = WEATHER_SVG[String((went && went.state) || "").toLowerCase()];
       const wg = document.createElement("img");
       wg.className = "mp-wglyph";
@@ -12247,46 +14402,27 @@ class HemmaPanel extends HTMLElement {
       wwrap.className = "mp-wx";
       wwrap.appendChild(w);
       wwrap.appendChild(wg);
-      // Never in a popup. A filter page is titled after the filter and carries
-      // nothing else up there - the weather belongs to the home screen.
       if (!this._phoneFilter) trow.appendChild(wwrap);
     }
     body.appendChild(trow);
 
-    // The filter badges. Same pills the wide dashboard draws, in the phone's
-    // own row - they are the same badge templates underneath.
     const bcard = cardOf("hemma_mobile_filter_badges");
     const bv = (bcard && bcard.variables) || {};
     const brow = document.createElement("div");
     brow.className = "mp-badges";
     brow.dataset.jump = "badges";
-    // Labeled pills, not bare glyphs: these are the filter controls, and a row of
-    // unlabeled circles says nothing about what tapping one does.
-    // The SAME model the wide preview builds its pills from - one description of a
-    // badge, so icon, color, label and reading cannot disagree between the halves.
-    // The six switches are SHARED keys owned by the wide half, so they are read
-    // from there rather than waited for.
     const wideHome = (((this._pair || {}).desktop || {}).compact || {}).rooms || [];
     const wideV = ((wideHome.find((r) => r.path === "home") || wideHome[0] || {}).variables) || {};
     const bvv = { ...bv };
-    ["show_climate", "show_lights", "show_people", "show_media",
-     "show_security", "show_energy"].forEach((k) => {
+    BADGE_SWITCH_KEYS.forEach((k) => {
       if (wideV[k] !== undefined) bvv[k] = wideV[k];
     });
-    // Ordered by badge_order, which both surfaces read, rather than by the
-    // built-in list - otherwise the preview and the phone disagree the moment
-    // anything is dragged.
     const wideRoom = (wideHome.find((r) => r.path === "home") || wideHome[0] || {});
     const border = this._badgeOrder(wideRoom);
-    // The WIDE room's variables: the phone card carries only the mirrored
-    // subset, so building from it drops whole badges. The wide half is the
-    // authority for every shared key.
     const model = this._miniModel({ variables: { ...bvv, ...wideV } }, { phone: true })
       .filter((b) => PHONE_FILTERS.indexOf(b.id) !== -1)
       .sort((a, b) => border.indexOf(a.id) - border.indexOf(b.id));
 
-    // Tapping a badge FILTERS. The wide dashboard expands a pill into sub
-    // badges; the phone has no sub badge row at all.
     model.forEach((b) => {
       const el = this._paintBadge(b, false);
       el.classList.toggle("open", this._phoneFilter === b.id);
@@ -12295,39 +14431,27 @@ class HemmaPanel extends HTMLElement {
         ev.stopPropagation();
         this._phoneFilter = this._phoneFilter === b.id ? null : b.id;
         this._phoneFilterAnim = true;
-        // ONE rebuild. _select re-renders, and the signature now carries the
-        // filter, so the preview is rebuilt exactly once - with the animation
-        // still armed on the card that survives.
         const pick = selKeyOf(el.dataset.mk);
         if (pick) this._select(pick); else this._rebuildPreview();
       };
       brow.appendChild(el);
     });
-    if (this._phoneFilter && this._phoneFilter !== "scenes"
+    if (this._phoneFilter && this._phoneFilter !== "scenes" && !roomPop
       && !model.some((b) => b.id === this._phoneFilter)) {
       this._phoneFilter = null;
     }
-    // Filtered, the hero says which filter you are in rather than the home's
-    // name - the phone titles the page after the category.
     if (this._phoneFilter) {
       // Scenes is not one of the badges, so it names itself.
-      if (this._phoneFilter === "scenes") h1.textContent = "Scenes";
+      if (roomPop) h1.textContent = roomPop;
+      else if (this._phoneFilter === "scenes") h1.textContent = "Scenes";
       else {
         const on = model.find((b) => b.id === this._phoneFilter);
         if (on && on.label) h1.textContent = on.label;
       }
     }
 
-    // A ROOM popup has no badge row - filter-overlay's own `noBadge =
-    // !!this._config?.room` - and Scenes is a room popup, not a category one.
-    // The category filters keep theirs.
-    if (brow.children.length && this._phoneFilter !== "scenes") body.appendChild(brow);
+    if (brow.children.length && !roomPop && this._phoneFilter !== "scenes") body.appendChild(brow);
 
-    // The chips row sits collapsed under the badges and filter-overlay DOM-moves
-    // it into whichever filter opens, so it is invisible on Home.
-    // CLIMATE only: the row travels to every filter but the card gates its own
-    // contents a second time (`filter === 'climate'`), so the others get an
-    // empty row rather than these readings.
     if (this._phoneFilter === "climate") {
       const clim = model.find((b) => b.id === "climate");
       const chips = (clim && clim.subs) || [];
@@ -12340,20 +14464,12 @@ class HemmaPanel extends HTMLElement {
       }
     }
 
-    // People carries its OWN cards rather than filtering tiles - no tile has a
-    // presence category, so filtering by it produced an empty screen.
-    // The Scenes page is a filter page like the rest, with a two-column grid
-    // instead of a row.
     if (this._phoneFilter === "scenes") {
       const scenes = this._sceneList();
-      const live = this._activeScene(scenes.map((x) => x.id));
-      const colors = (wideV.scene_colors || {});
       const grid = document.createElement("div");
       grid.className = "mp-scenes grid";
       grid.dataset.jump = "Scenes";
-      scenes.forEach((sc) => {
-        grid.appendChild(this._paintSceneChip(sc, sc.id === live, colors));
-      });
+      this._paintSceneChips(grid, scenes, wideV.scene_colors || {});
       body.appendChild(grid);
       card.appendChild(screen);
       if (this._phoneFilterAnim) {
@@ -12386,8 +14502,6 @@ class HemmaPanel extends HTMLElement {
       return;
     }
 
-    // Between the badges and Scenes, and where the title and artwork belong -
-    // the Media pill above only counts. Drawn only while something plays.
     if (!this._phoneFilter && wideV.show_media !== false && wideV.show_now_playing) {
       const npall = this._npList(wideV);
       if (npall.length) {
@@ -12399,9 +14513,6 @@ class HemmaPanel extends HTMLElement {
         nphead.appendChild(nt);
         body.appendChild(nphead);
 
-        // The device draws a horizontal, snap-scrolling row of FULL-WIDTH tiles,
-        // one per source - not a stack. Its own settings: x mandatory, and
-        // snap-stop always so a swipe advances exactly one tile.
         const nprow = document.createElement("div");
         nprow.className = "mp-nprow";
         nprow.dataset.jump = "Now Playing";
@@ -12417,8 +14528,7 @@ class HemmaPanel extends HTMLElement {
         if (NP_ACCENT[nps.kind]) np.style.setProperty("--np-accent", NP_ACCENT[nps.kind]);
         const art = document.createElement("span");
         art.className = "mp-npart";
-        const npic = npArt(nps);
-        if (npic) art.style.backgroundImage = "url('" + npic + "')";
+        npPaintArt(art, nps);
         const col = document.createElement("span");
         col.className = "mp-nptext";
         const ti = document.createElement("span");
@@ -12466,8 +14576,6 @@ class HemmaPanel extends HTMLElement {
       }
     }
 
-    // Scenes is CHROME on the phone, not a room, so the section loop never sees
-    // it. Above Favorites, where syncScenesMobile puts the cards.
     if (this._scenesOn() && !this._phoneFilter) {
       const scenes = this._sceneList();
       if (scenes.length) {
@@ -12496,15 +14604,9 @@ class HemmaPanel extends HTMLElement {
         const srow = document.createElement("div");
         srow.className = "mp-scenes";
         srow.dataset.jump = "Scenes";
-        const live = this._activeScene(scenes.map((x) => x.id));
-        const colors = (wideV.scene_colors || {});
-        scenes.forEach((sc) => {
-          srow.appendChild(this._paintSceneChip(sc, sc.id === live, colors));
-        });
+        this._paintSceneChips(srow, scenes, wideV.scene_colors || {});
         sgroup.appendChild(srow);
 
-        // ONE box grows, contents already inside it. Two staggered heights in a
-        // flex column is what made this jerk.
         if (this._phoneScenesIn
           && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
           this._phoneScenesIn = false;
@@ -12520,40 +14622,10 @@ class HemmaPanel extends HTMLElement {
       }
     }
 
-    // Then the sections, in the order the phone scrolls them.
-    (st.compact.rooms || []).forEach((sec, n) => {
-      // Disabled is disabled; then the filter, if one is on. smart-row's own
-      // rule: no category means the tile is not part of any filter and drops
-      // out, and "unfiltered" means it drops out of every one.
-      const keep = (t) => {
-        if (!this._phoneFilter) return true;
-        const cat = tileCategory(t);
-        if (cat === null || cat === undefined) return false;
-        if (cat === "unfiltered") return false;
-        return cat === this._phoneFilter;
-      };
-      const shown = (sec.tiles || [])
-        .filter((t) => (t.variables || {}).enabled !== false)
-        .filter(keep);
-      // A section with nothing in this filter is gone, heading and all. The
-      // empty-state ghost is an invitation to add a tile, which is the wrong
-      // thing to say about a section that simply has no climate in it.
-      if (this._phoneFilter && !shown.length) return;
-
-      const head = document.createElement("div");
-      head.className = "mp-head";
-      const ht = document.createElement("span");
-      ht.textContent = sec.name || "";
-      head.appendChild(ht);
-      // Every section but Favorites opens a room popup, and says so.
-      if ((sec.name || "") !== MOBILE_FAVORITES) {
-        const chev = document.createElement("span");
-        chev.className = "mp-chev";
-        chev.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
-        head.appendChild(chev);
-      }
-      body.appendChild(head);
-
+    const liveTiles = (sec) => (sec.tiles || [])
+      .filter((t) => (t.variables || {}).enabled !== false)
+      .filter((t) => tileOnSurface(t, true));
+    const tileRow = (shown, sec, sorted) => {
       const row = document.createElement("div");
       row.className = "mp-tiles";
       row.dataset.jump = "tiles";
@@ -12564,11 +14636,13 @@ class HemmaPanel extends HTMLElement {
       }
       const painted = shown.map((tile, ti) => {
         const el = this._paintTile(tile, ti, sec);
-        // Phone tiles come in two heights; the wide ones have one.
-        if ((tile.variables || {}).size === "large") el.classList.add("mp-lg");
-        // _tileKey keys off the tile OBJECT, and these are the PHONE config's -
-        // a different graph from the one the form edits, so the key matched
-        // nothing. Point the tap at the wide twin.
+        const tmpl = tile.template;
+        const isActions = Array.isArray(tmpl)
+          ? tmpl.indexOf("hemma_entity_actions") !== -1
+          : tmpl === "hemma_entity_actions";
+        if ((tile.variables || {}).size === "large" || isActions) {
+          el.classList.add("mp-lg");
+        }
         const twin = this._wideTwinOf(tile);
         if (twin) {
           el.dataset.mk = "t:" + this._tileKey(twin.tile);
@@ -12580,31 +14654,147 @@ class HemmaPanel extends HTMLElement {
         }
         return el;
       });
-      // Active cards rise, the rest hold their configured order. Read per
-      // SECTION: each phone section is its own smart row with its own flag.
-      const sorted = !(sec._row && sec._row.sort === false);
       if (sorted) {
         painted.filter((el) => el.classList.contains("on")).forEach((el) => row.appendChild(el));
         painted.filter((el) => !el.classList.contains("on")).forEach((el) => row.appendChild(el));
       } else {
         painted.forEach((el) => row.appendChild(el));
       }
-      body.appendChild(row);
+      return row;
+    };
+
+    if (roomPop) {
+      const sections = st.compact.rooms || [];
+      const secIdx = sections.findIndex((sc) => (sc.name || "") === roomPop);
+      const sec = sections[secIdx];
+      const link = (((this._pair || {}).link || {}).links || []).find((l) => l.section === secIdx);
+      const wideIdx = link && !link.overview ? link.room : null;
+
+      const chipsV = (cardOf(MOBILE_CHIPS) || {}).variables || {};
+      const e = (chipsV.room_chips || {})[roomKeyOf(roomPop)] || {};
+      const rm = this._miniModel({ variables: {
+        temp_sensor_1: e.temp_entity, humidity_sensor: e.humidity_entity,
+        quality_sensor: e.entity_quality, temp_unit: chipsV.temp_unit,
+        light_group_entity: e.lights_entity,
+      } }, { phone: true });
+      const crow = document.createElement("div");
+      crow.className = "mp-chips";
+      crow.dataset.jump = "badges";
+      crow.dataset.stagger = "0";
+      const clim = rm.find((b) => b.id === "climate");
+      ((clim && clim.subs) || []).forEach((sb) => {
+        const el = this._paintChip(sb);
+        if (wideIdx !== null) {
+          el.dataset.mk = "b:climate";
+          el.dataset.mproom = String(wideIdx);
+        }
+        crow.appendChild(el);
+      });
+      const bareChip = (b, mk) => {
+        const el = this._paintChip({ ...b, bare: true });
+        if (mk && wideIdx !== null) {
+          el.dataset.mk = mk;
+          el.dataset.mproom = String(wideIdx);
+        }
+        crow.appendChild(el);
+      };
+      const lit = rm.find((b) => b.id === "lights");
+      if (lit) {
+        const S = this._hass.states;
+        const mems = ((S[e.lights_entity] || {}).attributes || {}).entity_id;
+        const eids = Array.isArray(mems) && mems.length ? mems : [e.lights_entity];
+        const n = eids.filter((id) => (S[id] || {}).state === "on").length;
+        bareChip({ icon: "light", label: "Lights", glyphHeight: "90%",
+          color: n ? lit.color : "var(--badge-title-inactive, rgba(255,255,255,0.55))",
+          text: n === 0 ? "All Off" : n === eids.length ? "All On" : n + " On" }, "b:lights");
+      }
+      if (e.motion_entity) {
+        const ms = (this._hass.states[e.motion_entity] || {}).state;
+        bareChip({ icon: "motion", label: "Motion", glyphHeight: "70%", color: "#fff",
+          text: ms === "on" ? "Detected" : ms === "off" ? "Not Detected" : "Unavailable" }, null);
+      }
+      if (crow.children.length) body.appendChild(crow);
+
+      const scenes = this._scenesOn() ? this._sceneListForRoom(roomPop) : [];
+      if (scenes.length) {
+        const sgroup = document.createElement("div");
+        sgroup.className = "mp-scenegroup";
+        sgroup.dataset.stagger = "0";
+        const shead = document.createElement("div");
+        shead.className = "mp-head";
+        shead.dataset.jump = "Scenes";
+        shead.appendChild(Object.assign(document.createElement("span"), { textContent: "Scenes" }));
+        sgroup.appendChild(shead);
+        const srow = document.createElement("div");
+        srow.className = "mp-scenes";
+        srow.dataset.jump = "Scenes";
+        this._paintSceneChips(srow, scenes, wideV.scene_colors || {});
+        sgroup.appendChild(srow);
+        body.appendChild(sgroup);
+      }
+
+      const buckets = new Map();
+      (sec ? liveTiles(sec) : []).forEach((t) => {
+        const cat = tileCategory(t);
+        const k = ROOM_SECTION_LABEL[cat] ? cat : "other";
+        if (!buckets.has(k)) buckets.set(k, []);
+        buckets.get(k).push(t);
+      });
+      ROOM_SECTION_ORDER.concat("other").filter((k) => buckets.has(k)).forEach((k, i) => {
+        const head = document.createElement("div");
+        head.className = "mp-head";
+        head.dataset.stagger = String(i);
+        head.appendChild(Object.assign(document.createElement("span"),
+          { textContent: ROOM_SECTION_LABEL[k] }));
+        body.appendChild(head);
+        const row = tileRow(buckets.get(k), sec, true);
+        row.dataset.stagger = String(i);
+        body.appendChild(row);
+      });
+    }
+
+    // Then the sections, in the order the phone scrolls them.
+    (roomPop ? [] : (st.compact.rooms || [])).forEach((sec, n) => {
+      const keep = (t) => {
+        if (!this._phoneFilter) return true;
+        const cat = tileCategory(t);
+        if (cat === null || cat === undefined) return false;
+        if (cat === "unfiltered") return false;
+        return cat === this._phoneFilter;
+      };
+      const shown = liveTiles(sec).filter(keep);
+      if (this._phoneFilter && !shown.length) return;
+
+      const head = document.createElement("div");
+      head.className = "mp-head";
+      const ht = document.createElement("span");
+      ht.textContent = sec.name || "";
+      head.appendChild(ht);
+      if ((sec.name || "") !== MOBILE_FAVORITES) {
+        if (!this._phoneFilter) {
+          const chev = document.createElement("span");
+          chev.className = "mp-chev";
+          chev.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
+          head.appendChild(chev);
+        }
+        head.classList.add("tappable");
+        head.title = "Open the " + sec.name + " popup";
+        head.onclick = (ev) => {
+          ev.stopPropagation();
+          this._phoneFilter = "room:" + sec.name;
+          this._phoneFilterAnim = true;
+          this._rebuildPreview();
+        };
+      }
+      body.appendChild(head);
+
+      const sorted = !(sec._row && sec._row.sort === false);
+      body.appendChild(tileRow(shown, sec, sorted));
     });
 
-    // Scroll-linked like the dashboard's: the big title is gone by 45% and the
-    // compact one enters after 55%. Measured against the title's LIVE position,
-    // not a fixed scrollTop, so the handover holds whatever is above it.
     bartitle.textContent = h1.textContent;
     const BAR_H = 44;
     const onScroll = () => {
-      // The hero travels with the content. It cannot MOVE inside the body: the
-      // body clips overflow-x, and the photo overhangs its box by 3x the blur
-      // radius so the blur does not sample past its edge. Offset by the scroll
-      // instead, which keeps both.
-      const sy = body.scrollTop;
-      img.style.transform = "translate3d(0," + (-sy).toFixed(1) + "px,0)";
-      wash.style.transform = "translate3d(0," + (-sy).toFixed(1) + "px,0)";
       const r = h1.getBoundingClientRect();
       const s0 = screen.getBoundingClientRect();
       const scale = (this._mapVis && this._mapVis.scale) || 1;
@@ -12617,6 +14807,7 @@ class HemmaPanel extends HTMLElement {
       h1.style.opacity = String(1 - tp);
       const cp = Math.max(0, Math.min(1, (p - 0.55) / 0.45));
       bar.style.opacity = String(cp);
+      barveil.style.opacity = String(cp);
       baredge.style.opacity = String(cp);
       bartitle.style.opacity = String(cp);
       bartitle.style.transform = "translateY(" + ((1 - cp) * 5).toFixed(2) + "px)";
@@ -12626,16 +14817,12 @@ class HemmaPanel extends HTMLElement {
 
     card.appendChild(screen);
 
-    // filter-overlay's own entrance, numbers included: blur up over 0.30s, the
-    // header receding, sections springing in on a 40ms stagger.
     if (this._phoneFilterAnim) {
       this._phoneFilterAnim = false;
       requestAnimationFrame(() => this._playPhoneFilterIn(screen));
     }
   }
 
-  // Both directions. Opening a filter and returning from one are the same
-  // move on the device, so they are the same move here.
   _playPhoneFilterIn(screen) {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const SPRING_IN = "cubic-bezier(0.32, 0.72, 0, 1)";
@@ -12644,9 +14831,6 @@ class HemmaPanel extends HTMLElement {
     const body = screen.querySelector(".mp-body");
     if (!body) return;
 
-    // A filter on the CONTENT, not a backdrop-filter over it: inside a card that
-    // is drawn scaled, backdrop sampling is unreliable and rendered nothing. A
-    // filter is immune to the transform and ramps identically.
     body.animate(
       [{ filter: "blur(14px)" }, { filter: "blur(0px)" }],
       { duration: 300, easing: "ease", fill: "backwards" });
@@ -12673,28 +14857,36 @@ class HemmaPanel extends HTMLElement {
          { transform: "none", opacity: 1 }],
         { duration: 420, easing: EASE_OUT, fill: "backwards" });
     }
-    // Heading and its row travel together, as one section does in the popup.
-    // Every section the page can hold, or the one on a Scenes page would arrive
-    // with no animation at all while the rest of the entrance played around it.
     const sections = [...body.children].filter((el) =>
       el.classList.contains("mp-head") || el.classList.contains("mp-tiles")
       || el.classList.contains("mp-scenegroup") || el.classList.contains("mp-chips"));
-    const h = screen.clientHeight || 844;
+    // filter-overlay.js's own return, value for value: the dashboard comes back
+    // from depth, not up from the floor. 0.62s on SPRING_IN, from 50% 30%.
     sections.forEach((el, i) => {
+      const step = el.dataset.stagger !== undefined ? Number(el.dataset.stagger) : Math.floor(i / 2);
+      el.style.transformOrigin = "50% 30%";
       el.animate(
-        [{ transform: "translateY(" + h + "px)" }, { transform: "translateY(0)" }],
-        { duration: 550, delay: Math.floor(i / 2) * 40, easing: SPRING_IN, fill: "backwards" });
+        [{ transform: "scale(0.93) translateY(20px)", opacity: 0 },
+         { transform: "scale(1) translateY(0px)", opacity: 1 }],
+        { duration: 620, delay: step * 40, easing: SPRING_IN, fill: "backwards" });
     });
   }
 
-  // One preview tile, shared by both mocks: they are the same cards on both
-  // dashboards, and a second painter would drift.
-  // One scene chip, at hemma_scene_core's own tint rule - on takes
-  // scene_colors[id] or the yellow accent, off is a flat white. Read off
-  // SC.chip, not the generic chip()'s active rule.
+  _paintSceneChips(parent, scenes, colors) {
+    const active = this._activeScenes(scenes.map((x) => x.id));
+    const rank = new Map(active.map((id, i) => [id, i]));
+    scenes.forEach((sc, i) => {
+      const chip = this._paintSceneChip(sc, rank.has(sc.id), colors);
+      chip.dataset.mk = "sec:Scenes";
+      chip.style.order = String(rank.has(sc.id) ? rank.get(sc.id) : active.length + i);
+      parent.appendChild(chip);
+    });
+  }
+
   _paintSceneChip(sc, on, colors) {
     const chip = document.createElement("div");
     chip.className = "mp-scene" + (on ? " on" : "");
+    chip.dataset.scene = sc.id;
     const accent = "var(--hemma-color-yellow, #FFCC00)";
     const tint = on
       ? ((colors || {})[sc.id] || accent)
@@ -12710,18 +14902,14 @@ class HemmaPanel extends HTMLElement {
     return chip;
   }
 
-  // hemma_scene_core's rule: a scene is active when every entity it stores still
-  // matches live state, not when it was most recently activated. Configs come
-  // from _hemmaSC's localStorage cache; no cache means no scene is shown active,
-  // which is honest rather than a guess.
-  _activeScene(ids) {
+  _activeScenes(ids) {
     let cfg = this._sceneCfg;
     if (cfg === undefined) {
       try { cfg = JSON.parse(localStorage.getItem("hemma_scene_cfg_v1") || "null"); }
       catch (e) { cfg = null; }
       this._sceneCfg = cfg;
     }
-    if (!cfg) return null;
+    if (!cfg) return [];
     let ign = this._sceneIgn;
     if (ign === undefined) {
       try { ign = JSON.parse(localStorage.getItem("hemma_scene_ignore_v1") || "null"); }
@@ -12766,18 +14954,13 @@ class HemmaPanel extends HTMLElement {
       }
       return checked > 0;
     };
-    // Most recently activated wins when more than one matches, which is what
-    // activeList does with the scene state's timestamp.
     const ts = (id) => {
       const t = Date.parse((states[id] || {}).state);
       return isNaN(t) ? 0 : t;
     };
-    return (ids || []).filter(isActive).sort((a, b) => ts(b) - ts(a))[0] || null;
+    return (ids || []).filter(isActive).sort((a, b) => ts(b) - ts(a));
   }
 
-  // Deleting a tile deletes its twin. Done HERE rather than by sweeping at save,
-  // because the tile is still whole and its twin key is exact - a sweep cannot
-  // tell a deleted twin from a phone-only tile written on purpose.
   _removePairTwin(room, tile) {
     const p = this._pair;
     if (!p || p.safe === false || !tile) return 0;
@@ -12789,27 +14972,17 @@ class HemmaPanel extends HTMLElement {
     const sec = ((p.mobile.compact || {}).rooms || [])[link.section];
     if (!sec) return 0;
     const key = tileTwinKey(tile);
-    // Only when the wide half has no OTHER tile with the same key. Two tiles on
-    // the same entity and template are one twin between them, and deleting one
-    // must not take the survivor's copy with it.
     if ((room.tiles || []).some((t) => t && tileTwinKey(t) === key)) return 0;
     const before = (sec.tiles || []).length;
     sec.tiles = (sec.tiles || []).filter((t) => !(t && tileTwinKey(t) === key));
     return before - sec.tiles.length;
   }
 
-  // CACHED by entity id: _tileKey identifies a tile by object IDENTITY, so
-  // fresh objects each render gave every person a new key and replayed the
-  // entrance animation. The name and picture are hemma_presence's own - the
-  // first word of the friendly name, and the entity's own avatar.
   _personTile(id) {
     if (!this._personTiles) this._personTiles = new Map();
     let t = this._personTiles.get(id);
     if (!t) {
       t = { template: "hemma_presence", entity: id, icon: "person",
-        // "home" is not one of hemma_entity's default active states, so both
-        // people drew as off. active_states is the mechanism the card already
-        // has for exactly this, so use it rather than a special case.
         variables: { person_entity: id, active_states: ["home"] } };
       this._personTiles.set(id, t);
     }
@@ -12818,14 +14991,10 @@ class HemmaPanel extends HTMLElement {
     t.name = String(friendly).trim().split(/\s+/)[0]
       || String(id).split(".").pop().replace(/_/g, " ");
     const pic = (e && e.attributes && e.attributes.entity_picture) || null;
-    // Mutated rather than replaced, so the object identity - and the key that
-    // rides on it - survives a rename or a new avatar.
     t.variables.entity_picture = pic || undefined;
     return t;
   }
 
-  // A gauge ring around the glyph, ported from the badges' own: 32x32, r13.5,
-  // stroke 3, 270 degrees from 225, remainder at 30% white.
   _paintChip(sub) {
     const el = document.createElement("div");
     el.className = "mp-chip";
@@ -12845,14 +15014,20 @@ class HemmaPanel extends HTMLElement {
     ring.className = "mp-ring";
     ring.style.color = sub.color || "#fff";
     let paths = "";
-    if (arc < 269) {
+    if (sub.bare) {
+      ring.classList.add("bare");
+      ring.style.setProperty("--gc", sub.color || "#fff");
+      if (sub.glyphHeight) ring.style.setProperty("--gh", sub.glyphHeight);
+    } else if (arc < 269) {
       paths += '<path d="' + arcPath(225 + arc, 495) + '" stroke="#fff"'
         + ' stroke-opacity="0.30" stroke-width="' + W + '" stroke-linecap="round"'
         + ' fill="none"/>';
     }
-    paths += '<path d="' + arcPath(225, 225 + arc) + '" stroke="currentColor"'
-      + ' stroke-width="' + W + '" stroke-linecap="round" fill="none"/>';
-    ring.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true">' + paths + "</svg>";
+    if (!sub.bare) {
+      paths += '<path d="' + arcPath(225, 225 + arc) + '" stroke="currentColor"'
+        + ' stroke-width="' + W + '" stroke-linecap="round" fill="none"/>';
+      ring.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true">' + paths + "</svg>";
+    }
 
     // The glyph sits inside the ring, at the badges' own 85% mask scale.
     const g = document.createElement("span");
@@ -12876,9 +15051,6 @@ class HemmaPanel extends HTMLElement {
     return el;
   }
 
-  // One badge pill, for both mocks. It was a closure inside the wide preview,
-  // which is why the phone half hand-rolled its own row of white glyphs with no
-  // colors, no readings and no sub-badges. Same painter, same badges.
   _paintBadge(b, small) {
     const el = document.createElement(small ? "span" : "button");
     if (!small) el.type = "button";
@@ -12892,7 +15064,7 @@ class HemmaPanel extends HTMLElement {
       g.alt = "";
     } else {
       g = document.createElement("span");
-      g.className = "pglyph";
+      g.className = "pglyph" + (b.spin ? " spin" : "");
       g.style.setProperty("--i", "url('" + iconUrl(b.icon) + "')");
       g.style.setProperty("--sc", b.color);
     }
@@ -12904,9 +15076,6 @@ class HemmaPanel extends HTMLElement {
       l.textContent = b.label;
       col.appendChild(l);
     }
-    // Guarded like .plabel above: the Energy group badge prints no second
-    // line at all when there is no numeric power, and an empty span still
-    // takes its line height - the badge would sit taller than the real one.
     if (b.text) {
       const t = document.createElement("span");
       t.className = "ptext";
@@ -12917,12 +15086,8 @@ class HemmaPanel extends HTMLElement {
     return el;
   }
 
-  // hemma_entity's --hemma-icon-inactive-color, in the order it uses:
-  // media_player, then the energy tiers, then by icon, then by domain.
   _inactiveIconColor(tile, ent, kind) {
     const tv = tile.variables || {};
-    // The icon the tile actually DRAWS. variables.icon alone misses every tile
-    // whose icon comes from its template default.
     const icon = tv.icon || tile.icon || TILE_ICON[kind] || "";
     const domain = String((ent && ent.entity_id) || tile.entity || "").split(".")[0];
     if (domain === "media_player") return null;
@@ -12936,8 +15101,6 @@ class HemmaPanel extends HTMLElement {
       if (w >= Number(tv.normal_threshold ?? 200)) return "var(--hemma-badge-energy-medium-color, #FFD600)";
       return "var(--hemma-badge-energy-low-color, #30D158)";
     }
-    // hemma_network has its own rule, like the energy tile: colored once there
-    // is ANY traffic, neutral only when there is none.
     if (kind === "network") {
       const num = (id) => {
         if (!id) return null;
@@ -12974,9 +15137,6 @@ class HemmaPanel extends HTMLElement {
       || (KEEP_TINT.indexOf(kind) !== -1 ? (TILE_COLOR[kind] || TILE_TINT) : null);
   }
 
-  // The wide-half tile a phone tile stands for, matched the way the pair sync
-  // matches them: template AND entity, never position. The form edits the wide
-  // config, so this is what a tap on the phone preview has to resolve to.
   _wideTwinOf(tile) {
     const key = tileTwinKey(tile);
     const rooms = (this._state && this._state.compact.rooms) || [];
@@ -12992,22 +15152,15 @@ class HemmaPanel extends HTMLElement {
       const kind = type && type.id;
       const ent = tile.entity && this._hass.states[tile.entity];
       const active = tileActive(kind, ent, tile.variables || {}, this._hass.states);
-      // A tile that takes itself off the dashboard is still one you must be able
-      // to point at, so the preview draws it and says which way round it is.
       const away = tileHidesNow(type, kind, ent, tile.variables || {}, this._hass.states);
       const el = document.createElement("div");
       el.className = "mtile" + (active ? " on" : "") + (away ? " away" : "");
-      // What Smart Sort sorts on. hemma-smart-row asks the rendered card; here
-      // the same answer is already computed above.
       el.dataset.active = active ? "1" : "0";
       el.dataset.mk = "t:" + this._tileKey(tile);
       el.dataset.jump = this._tileKey(tile);
       el.innerHTML = '<span class="mtop"><span class="mcircle"><span class="mglyph"></span></span></span>'
         + '<span class="mbot"><span class="mname"></span><span class="mstate"></span></span>';
       const circle = el.querySelector(".mcircle");
-      // The thermostat puts its reading in the circle and colors it by mode -
-      // teal cooling, yellow heating, the flat tint otherwise. Mirrors the
-      // temp_puck custom field and state_display in hemma_thermostat.yaml.
       const mode = kind === "thermostat" && ent ? String(ent.state).toLowerCase() : "";
       const puck = (() => {
         if (kind !== "thermostat" || !ent) return null;
@@ -13026,11 +15179,9 @@ class HemmaPanel extends HTMLElement {
           : mode === "heat" ? "var(--hemma-puck-heat-color, var(--hemma-color-yellow, #FFCC00))"
           : (TILE_COLOR[kind] || TILE_TINT));
       } else {
-        // THREE exclusive branches, and they must stay that way: written as a
-        // separate `if (face)` ahead of the pair, it removes .mglyph and then
-        // falls into the else, which reaches for what was just removed.
         const face = (tile.variables || {}).entity_picture;
-        const art = kind === "media" ? mediaArtUrl(ent, this._hass.states) : "";
+        const art = kind === "media" ? mediaArtUrl(ent, this._hass.states)
+          : kind === "game" ? gameActivity(ent).art : "";
         if (face) {
           el.querySelector(".mglyph").remove();
           circle.classList.add("art", "face");
@@ -13042,15 +15193,11 @@ class HemmaPanel extends HTMLElement {
           circle.style.backgroundImage = "url('" + art + "')";
         } else {
           const g = el.querySelector(".mglyph");
-          // Off, the glyph keeps the color hemma_entity gives it - an inactive
-          // lock is teal and an inactive energy tile is tiered.
           if (!active) {
             const ic = this._inactiveIconColor(tile, ent, kind);
             if (ic) g.style.setProperty("--ic", ic);
           }
           const tv = tile.variables || {};
-          // hemma_cover and hemma_lock each draw a different glyph either side
-          // of their state, so the preview has to pick the same one.
           const isOpen = !!ent && /^(open|opening)$/i.test(ent.state);
           const isUnlocked = !!ent && /^(unlocked|unlocking|open|opening)$/i.test(ent.state);
           const picked = (kind === "cover" || kind === "cover_group")
@@ -13058,9 +15205,6 @@ class HemmaPanel extends HTMLElement {
             : (kind === "lock" || kind === "lock_group")
               ? (isUnlocked ? (tv.icon_unlocked || "lock-open-fill") : (tv.icon_locked || "lock-fill"))
               : (tv.icon || tile.icon);
-          // The actions tile has no glyph of its own to fall back to - it
-          // takes any domain, so the card derives one and this has to reach
-          // the same answer or the preview shows a different tile.
           const derived = type && type.glyphFromEntity
             ? type.glyphFromEntity[String(tile.entity || "").split(".")[0]]
             : null;
@@ -13068,50 +15212,22 @@ class HemmaPanel extends HTMLElement {
             "url('" + iconUrl(picked || derived || TILE_ICON[kind] || "tile") + "')");
           // hemma_fan spins its glyph while the fan runs.
           g.classList.toggle("spin", kind === "fan" && active);
-          // hemma_plant keeps green for a healthy plant and turns the circle
-          // warning-yellow when it needs something, the way a lit light does.
           circle.style.setProperty("--sc", kind === "plant" && active
             ? "var(--hemma-color-yellow, #FFCC00)"
             : (TILE_COLOR[kind] || TILE_TINT));
         }
       }
-      // The one tile whose whole point is its buttons was the one tile the
-      // preview drew without them, so the card and its preview disagreed on
-      // the only thing that makes it different from a plain entity tile.
       if (kind === "entity_actions") {
         const tv = tile.variables || {};
-        const rail = document.createElement("span");
-        rail.className = "mrail";
-        [1, 2].forEach((n) => {
-          const id = tv["action_" + n + "_entity"];
-          if (tv["action_" + n + "_enabled"] === false || !id) return;
-          const es = this._hass.states[id];
-          const word = String((es && es.state) || "").toLowerCase().replace(/_/g, " ");
-          const dead = ACTION_DEAD.indexOf(word) !== -1 || !es;
-          const b = document.createElement("span");
-          b.className = "mact" + (dead ? " dim" : ACTION_ACTIVE.indexOf(word) !== -1 ? " hot" : "");
-          b.style.setProperty("--ac", tv["action_" + n + "_active_color"]
-            || ACTION_ACCENT[String(id).split(".")[0]] || ACTION_TEAL);
-          // The card's own order: the field, then the entity's own icon, then
-          // a question mark. An mdi name goes to ha-icon; a bare name is a
-          // Hemma glyph and masks like every other icon in this preview.
-          const raw = String(tv["action_" + n + "_icon"]
-            || (es && es.attributes && es.attributes.icon) || "mdi:help-circle").trim();
-          if (raw.indexOf(":") !== -1) {
-            const ico = document.createElement("ha-icon");
-            ico.setAttribute("icon", raw);
-            b.appendChild(ico);
-          } else {
-            const g = document.createElement("span");
-            g.className = "mactglyph";
-            g.style.setProperty("--i", "url('" + iconUrl(raw) + "')");
-            b.appendChild(g);
-          }
-          rail.appendChild(b);
-        });
-        if (rail.children.length) {
-          el.classList.add("hasrail");
-          el.appendChild(rail);
+        const has = [1, 2].some((n) => tv["action_" + n + "_enabled"] !== false
+          && String(tv["action_" + n + "_entity"] || "").trim());
+        if (has) {
+          const more = document.createElement("span");
+          more.className = "mmore";
+          more.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="3" cy="12" r="2.5"/>'
+            + '<circle cx="12" cy="12" r="2.5"/><circle cx="21" cy="12" r="2.5"/></svg>';
+          el.classList.add("hasmore");
+          el.querySelector(".mtop").appendChild(more);
         }
       }
       el.querySelector(".mname").textContent = tile.name || (type && type.label) || "Tile";
@@ -13139,10 +15255,9 @@ class HemmaPanel extends HTMLElement {
           + ' stroke-dashoffset="' + (87.965 - pct * 0.87965).toFixed(3) + '"/>'
           + '</g>' + (glyph ? GLYPH[glyph] : "") + '</svg>';
         el.querySelector(".mtop").appendChild(pr);
+        el.classList.add("hasring");
       }
-      // The ring and the toggle share the corner, so the card hides the toggle
-      // for as long as the ring is running rather than stacking them.
-      if (!ring && tileToggleOn(tile, type)) {
+      if (!ring && tileToggleOn(tile, type, ent)) {
         const sw = document.createElement("span");
         sw.className = "mtgl";
         sw.dataset.mk = "tg:" + this._tileKey(tile);
@@ -13159,10 +15274,6 @@ class HemmaPanel extends HTMLElement {
             + '<circle cx="14" cy="13" r="9" fill="rgba(255,255,255,0.8)"/></svg>';
         el.querySelector(".mtop").appendChild(sw);
       }
-      // The card is transform-scaled, so pointer deltas are screen pixels and
-      // must be divided back down. With Smart Sort on the order is DERIVED, so
-      // the visual index is not the config index and a drag would write the
-      // wrong one - the Tiles list stays draggable either way.
       el.title = this._smartSortOn()
         ? "Smart Sort is on - reorder in the Tiles list"
         : "Drag to reorder";
@@ -13199,15 +15310,10 @@ class HemmaPanel extends HTMLElement {
             if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
             moved = true;
             this._tileDragged = true;
-            // Unconditional now: .mfree only opens the clip box vertically, so
-            // there is no scroll position left to lose.
             row.classList.add("mfree");
             el.classList.add("mdrag");
             try { el.setPointerCapture(ev.pointerId); } catch (err) { /* not captured */ }
           }
-          // The drop target is chosen on X alone, so vertical travel is purely
-          // the lift. Clamped, it stays inside the room .mfree just opened
-          // however far the pointer wanders off the row.
           const dyc = Math.max(-14, Math.min(14, dy / scale));
           el.style.transform = "translate(" + (dx / scale) + "px," + dyc + "px)";
           let best = me, bestD = Infinity;
@@ -13240,8 +15346,6 @@ class HemmaPanel extends HTMLElement {
           requestAnimationFrame(() => this._playCards(before));
         };
 
-        // Same guard as the tile list: a mouse drag here swept a selection
-        // through whatever sat beside the preview.
         if (ev.pointerType !== "touch") ev.preventDefault();
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onUp);
@@ -13255,9 +15359,6 @@ class HemmaPanel extends HTMLElement {
     const wrap = document.createElement("div");
     wrap.className = "mapwrap";
 
-    // Desktop and tablet are the same dashboard at different widths. Phone is
-    // the other half of the pair, drawn from its own config - offered whenever
-    // there is a phone layout to draw.
     if (!this._miniSize) {
       this._miniSize = localStorage.getItem("hemma_panel_preview_size") || "desktop";
     }
@@ -13273,9 +15374,6 @@ class HemmaPanel extends HTMLElement {
     // Needed by both mocks: the tail cross-fades on a room change.
     const room = this._state.compact.rooms[this._room] || {};
 
-    // The phone gets its own mock, but everything after this block is SHARED -
-    // an early return here left the card hidden and _applyMapSize bound to the
-    // previous one. A zone names either a band or the exact card it stands for.
     const jump = (id) => {
       const el = this.shadowRoot.getElementById("band-" + id)
         || this.shadowRoot.querySelector('[data-k="' + CSS.escape(id) + '"]');
@@ -13295,6 +15393,7 @@ class HemmaPanel extends HTMLElement {
 
     card.innerHTML = `
       <div class="miniroom">
+        <div class="mzscrim"></div>
         <img class="mini-photo" alt="">
         <div class="mini-grain"></div>
         <div class="mini-tint"></div>
@@ -13304,6 +15403,8 @@ class HemmaPanel extends HTMLElement {
             <span class="mini-time"></span>
             <span class="mini-tabs"></span>
             <span class="mini-settings"><i></i><i></i><i></i></span>
+            <span class="mini-assist"><svg viewBox="0 0 22.59 20.34" aria-hidden="true"><path d="M22.5859 9.39907C22.5859 14.8347 17.8437 18.7878 11.2826 18.7878C9.1393 18.7878 7.17681 18.3827 5.48654 17.612C4.48795 18.3513 3.1069 18.7878 1.75961 18.7878C1.11917 18.7878 0.883017 18.3066 1.31011 17.919C1.90592 17.3731 2.15343 16.8685 2.15343 16.1103C2.15343 14.3677 4.44089e-16 13.3068 4.44089e-16 9.39907C4.44089e-16 3.94067 4.74219 0 11.2826 0C17.8333 0 22.5859 3.94067 22.5859 9.39907ZM14.5834 9.43073C14.5834 10.2401 15.235 10.902 16.0444 10.902C16.8434 10.902 17.5053 10.2401 17.5053 9.43073C17.5053 8.62348 16.8434 7.96978 16.0444 7.96978C15.235 7.96978 14.5834 8.62348 14.5834 9.43073ZM9.87419 9.43073C9.87419 10.2401 10.5279 10.902 11.3372 10.902C12.1445 10.902 12.8085 10.2401 12.8085 9.43073C12.8085 8.62348 12.1445 7.96978 11.3372 7.96978C10.5279 7.96978 9.87419 8.62348 9.87419 9.43073ZM5.17742 9.43073C5.17742 10.2401 5.84147 10.902 6.63837 10.902C7.44773 10.902 8.09932 10.2401 8.09932 9.43073C8.09932 8.62348 7.43738 7.96978 6.63837 7.96978C5.84147 7.96978 5.17742 8.62348 5.17742 9.43073Z"/></svg></span>
+            <span class="mini-bell"><svg viewBox="0 0 18.42 20.54" aria-hidden="true"><path d="M1.48 16.64h15.47c.93 0 1.48-.48 1.48-1.19 0-.98-.99-1.86-1.84-2.72-.65-.67-.82-2.06-.9-3.19-.07-3.74-1.06-6.33-3.66-7.27C11.66 1.01 10.66 0 9.21 0S6.76 1.01 6.39 2.27C3.8 3.22 2.81 5.8 2.73 9.55c-.07 1.13-.25 2.51-.89 3.19C.99 13.59 0 14.48 0 15.45c0 .71.55 1.19 1.48 1.19Zm7.73 3.9c1.66 0 2.86-1.2 2.99-2.58H6.22c.13 1.38 1.34 2.58 2.99 2.58Z"/></svg><i class="dot"></i></span>
           </div>
           <div class="mini-fill"></div>
           <div class="mz" data-jump="Appearance">
@@ -13337,8 +15438,6 @@ class HemmaPanel extends HTMLElement {
     const url = found && ((dark && found.night) || found.day);
     if (url) q(".mini-photo").src = url;
     else q(".miniroom").classList.add("nophoto");
-    // The other half of the toggle, fetched and decoded while you are looking
-    // at this one.
     if (found) { warmPhoto(found.day); warmPhoto(found.night); }
 
     // Navigation, so the room's place in the tab order reads too.
@@ -13371,8 +15470,6 @@ class HemmaPanel extends HTMLElement {
       t.className = "mini-tab scenes";
       t.dataset.mk = "sc";
       t.textContent = "Scenes";
-      // No data-jump: the chip opens the menu the dashboard opens, rather than
-      // scrolling the form to the Scenes card.
       t.title = "The scenes this dashboard will list";
       t.onclick = (ev) => {
         ev.stopPropagation();
@@ -13382,8 +15479,21 @@ class HemmaPanel extends HTMLElement {
       };
       tabs.appendChild(t);
     }
-    // Removed rather than hidden: an element that never leaves the DOM has
-    // nothing to animate in from.
+    const bellOn = V.show_notifications !== false;
+    const dotsOn = !!V.hemma_ui_managed;
+    const assistOn = assistShown(V, this._hass);
+    const slot = (n) => "calc(var(--pad-x) + " + n + " * (var(--chrome-btn) + var(--chrome-btn-gap)))";
+    const bell = q(".mini-bell");
+    const assist = q(".mini-assist");
+    if (!dotsOn) q(".mini-settings").remove();
+    if (!assistOn) assist.remove();
+    else assist.style.right = slot(dotsOn ? 1 : 0);
+    if (!bellOn) bell.remove();
+    else bell.style.right = slot((dotsOn ? 1 : 0) + (assistOn ? 1 : 0));
+    q(".miniroom").style.setProperty("--mini-np-inset",
+      "calc(" + ((dotsOn ? 1 : 0) + (assistOn ? 1 : 0) + (bellOn ? 1 : 0))
+      + " * (var(--chrome-btn) + var(--chrome-btn-gap)))");
+
     const npOn = V.show_media !== false && !!V.show_now_playing;
     if (!npOn) q(".mz-np").remove();
     else {
@@ -13412,8 +15522,6 @@ class HemmaPanel extends HTMLElement {
     if (wt) wx.dataset.mk = "w";
     if (deg != null) {
       wx.textContent = Math.round(deg) + "°";
-      // The condition comes from the weather entity; weather_temp_sensor is a
-      // temperature override and carries no condition of its own.
       const wc = V.weather_entity && this._hass.states[V.weather_entity];
       const cond = wc ? String(wc.state || "").toLowerCase() : "";
       const file = WEATHER_SVG[cond];
@@ -13440,8 +15548,6 @@ class HemmaPanel extends HTMLElement {
       open.subs.forEach((sb) => subs.appendChild(pill(sb, true)));
       if (!animate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
-      // Each pill starts under the pill that opened it and slides out to its
-      // place, so the row reads as coming from the badge rather than appearing.
       const src = badges.querySelector(".pbadge.open");
       const from = src ? src.getBoundingClientRect() : null;
       subs.querySelectorAll(".pbadge").forEach((el, i) => {
@@ -13458,12 +15564,11 @@ class HemmaPanel extends HTMLElement {
     };
 
     if (!model.length) {
-      // Every badge a room CAN have, drawn as a placeholder. Clicking one opens
-      // it in the inspector, which is the same gesture as clicking a real pill.
       SECTIONS.filter((sec) => sec.group === "badges" && sec.icon).forEach((sec) => {
         const el = pill({ id: String(sec.label).toLowerCase(), label: sec.label,
           icon: sec.icon, color: sec.iconColor || "var(--ink)", subs: [] }, false);
         el.classList.add("ghost");
+        delete el.dataset.mk;
         el.title = "Add " + sec.label + " to this room";
         el.onclick = (ev) => {
           ev.stopPropagation();
@@ -13489,8 +15594,6 @@ class HemmaPanel extends HTMLElement {
         badges.querySelectorAll(".pbadge").forEach((x) => x.classList.remove("open"));
         if (this._miniOpen) el.classList.add("open");
         drawSubs(true);
-        // One gesture, both answers: you asked about Climate, so the row shows
-        // what it expands to AND the inspector shows what it is made of.
         const pick = selKeyOf(el.dataset.mk);
         if (pick) this._select(pick);
       };
@@ -13502,8 +15605,6 @@ class HemmaPanel extends HTMLElement {
     // Tiles, in the order they sit along the bottom of the room.
     const tiles = q(".mini-tiles");
     if (!room.tiles.length) {
-      // Not one ghost per type: sixteen of them would be noise. The row shows
-      // its own shape instead, and the first slot carries the invitation.
       for (let i = 0; i < 5; i++) {
         const slot = document.createElement("div");
         slot.className = "mtile ghost" + (i ? " faint" : "");
@@ -13524,20 +15625,16 @@ class HemmaPanel extends HTMLElement {
         tiles.appendChild(slot);
       }
     }
-    room.tiles.filter((t) => (t.variables || {}).enabled !== false).forEach((tile, ti) => {
-      tiles.appendChild(this._paintTile(tile, ti, room));
-    });
-    // Lay the row out in its sorted order before it is ever shown - no
-    // animation, because nothing moved: this IS its first position. The row is
-    // still detached here, so it has to be handed over rather than looked up.
+    room.tiles
+      .filter((t) => (t.variables || {}).enabled !== false)
+      .filter((t) => tileOnSurface(t, false))
+      .forEach((tile, ti) => {
+        tiles.appendChild(this._paintTile(tile, ti, room));
+      });
     this._applyMiniSort(false, tiles);
 
     }
 
-    // Clicking the document IS the navigation, the way Keynote's inspector
-    // follows the object you click. Delegated, because closest() picks the
-    // INNERMOST zone where per-element listeners would fire both. Outside the
-    // shape branch, or the phone mock is inert.
     card.addEventListener("click", (ev) => {
       if (ev.target.closest(".mini-nphead")) return;
       if (this._tileDragged) return;
@@ -13546,9 +15643,6 @@ class HemmaPanel extends HTMLElement {
       const obj = ev.target.closest("[data-mk]");
       const pick = obj && selKeyOf(obj.dataset.mk);
       if (pick) {
-        // A phone section can belong to a different room than the one the form
-        // is on. Go there first, or the detail push looks for the tile in the
-        // wrong room's band and finds nothing.
         const want = obj.dataset.mproom;
         if (want !== undefined && Number(want) !== this._room) {
           this._room = Number(want);
@@ -13560,8 +15654,6 @@ class HemmaPanel extends HTMLElement {
       if (z) jump(z.dataset.jump);
     });
 
-    // Hover either side, both light. This reciprocity is what makes a panel
-    // read as an inspector rather than a form parked next to a picture.
     card.addEventListener("mouseover", (ev) => {
       const obj = ev.target.closest("[data-mk]");
       this._link(obj && selKeyOf(obj.dataset.mk), "preview");
@@ -13573,21 +15665,12 @@ class HemmaPanel extends HTMLElement {
     wrap.appendChild(slot);
 
 
-    // Measured off the real screens: 1.55:1, not 16:9, and 1180x820 landscape,
-    // not a 4:3 iPad - which put the preview on the wrong tile tier. 390x844 is
-    // the logical size the mobile dashboard is laid out against.
     const SPEC = { desktop: [960, Math.round(960 / 1.55)], tablet: [700, 486],
       phone: [390, 844] };
     const applySize = (animate) => {
       if (isPhone(this)) return;
       const [natW, natH] = SPEC[this._miniSize];
-      // offsetWidth, not getBoundingClientRect: the rect is the PAINTED box, and
-      // the entrance holds this column at scale(.93) through its delay - fitting
-      // to that sticks, since a transform never fires the resize observer.
       const availW = slot.offsetWidth - MAP_SHADOW_ROOM;
-      // The column's own flex space, not the viewport: no scroll position, no
-      // header height, no constant to go stale when the chrome moves. Below
-      // PANEL_NARROW the page itself scrolls, so there is no height to be bound by.
       let budget = 0;
       const stage = slot.closest(".stage");
       const col = slot.closest(".canvas");
@@ -13597,8 +15680,6 @@ class HemmaPanel extends HTMLElement {
         const headH = head
           ? head.offsetHeight + parseFloat(getComputedStyle(head).marginBottom || 0)
           : 0;
-        // The plinth is a padded panel now, so its own inset comes out of the
-        // budget too, or the screen inside it overflows by exactly that much.
         const ph = slot.closest(".plinth");
         const ps = ph ? getComputedStyle(ph) : null;
         const pPad = ps
@@ -13606,9 +15687,11 @@ class HemmaPanel extends HTMLElement {
         const free = stage.offsetHeight - headH - pPad
           - parseFloat(cs.paddingTop || 0) - parseFloat(cs.paddingBottom || 0);
         budget = Math.max(240, free) - MAP_SHADOW_ROOM;
+      } else if (isNarrow(this)) {
+        // The page scrolls here, so nothing else bounds the height: an unbounded phone frame took the whole column width.
+        budget = Math.max(240, Math.round(window.innerHeight * 0.6)) - MAP_SHADOW_ROOM;
       }
-      // Desktop and tablet share a reserved height so the frame holds still. The
-      // phone is measured against its own, or it draws wider than the column.
+      if (this._miniSize === "phone") budget = Math.round(budget * 0.88);
       const ratio = natH / natW;
       const frame = this._miniSize === "phone" ? ratio : MAP_TALLEST;
       const w = fitWidth(availW, budget, Infinity, frame);
@@ -13616,29 +15699,16 @@ class HemmaPanel extends HTMLElement {
       const f = w / natW;
 
       const host = slot.closest(".plinth") || slot.parentElement;
-      // One batch, no layout read in the middle: the natural size and the
-      // factor that shrinks it can never be a frame out of step.
       card.style.width = natW + "px";
       card.style.height = natH + "px";
       if (host) host.style.setProperty("--map-scale", f.toFixed(4));
-      // Always the TALLER shape's height, whichever is showing, so a size switch
-      // moves neither the frame nor the column below it. fitWidth already
-      // reserves that much.
       slot.style.height = Math.round(w * frame) + MAP_SHADOW_ROOM + "px";
 
       this._mapVis = { w: natW * f, h: natH * f, scale: f };
-      // The PAINTED width, published for the control row: splitting those
-      // controls to the edges only reads as a toolbar if the edges are the
-      // preview's.
       const canvas = slot.closest(".canvas");
       if (canvas) canvas.style.setProperty("--preview-w", Math.round(natW * f) + "px");
-      // A 180px noise tile drawn INSIDE the scaled card, so its size is divided
-      // by the scale. Rounded to whole pixels: fractional, the tile repeats on
-      // fractional boundaries and every seam resamples into a faint grid.
       if (host) host.style.setProperty("--grain-px", Math.round(180 / f) + "px");
 
-      // Two different LAYOUTS, not one at two sizes, so there is nothing to
-      // morph - a scale between them stretches by the difference in aspect.
       if (animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         card.animate(
           [
@@ -13648,14 +15718,13 @@ class HemmaPanel extends HTMLElement {
           { duration: RT(220), easing: EASE }
         );
       }
-      // The very first paint has to wait for the measurement, or the screen
-      // shows at the fallback scale for a frame and then jumps.
       if (!shown) {
         shown = true;
         card.style.visibility = "";
         const changed = this._mapRoom !== room.path;
         this._mapRoom = room.path;
-        if (changed && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        if (changed && !this.classList.contains("booting")
+          && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
           card.animate(ROOM_FADE, { duration: ROOM_FADE_MS, easing: EASE });
         }
       }
@@ -13666,9 +15735,6 @@ class HemmaPanel extends HTMLElement {
     if (this._sizeObs) this._sizeObs.disconnect();
     let last = "";
     this._sizeObs = new ResizeObserver(() => {
-      // #tilespane is a sibling of .stage, which is flex:1 1 auto - so folding a
-      // tile changes .stage's height and this fires on every frame of the fold.
-      // One fit at the end is enough.
       if (this._folding) return;
       const b = slot.getBoundingClientRect();
       const key = Math.round(b.width) + "x" + Math.round(b.height);
@@ -13689,9 +15755,6 @@ class HemmaPanel extends HTMLElement {
 
   // ── tiles ─────────────────────────────────────────────────────────────────
 
-  // Scenes leaving the phone preview, the same collapse a card uses when it
-  // switches off. Synchronous: the caller rebuilds immediately after, and this
-  // runs on the elements about to be replaced.
   _collapsePhoneScenes() {
     const mount = this.$("mapmount");
     if (!mount || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -13708,109 +15771,265 @@ class HemmaPanel extends HTMLElement {
     ).finished.then(() => clone.remove(), () => clone.remove());
   }
 
-  // The ROW is the scene - its icon in the color it is about to use, its name,
-  // then the color as a trailing value - so you read the answer off the row
-  // rather than off the control. Not a `fields:` entry: scene_colors is a MAP
-  // keyed by entity id and the field machinery writes flat keys.
   _renderSceneColors(room, card) {
     if (!card || card.querySelector(".scenecolors")) return;
+    const catalog = this._sceneCatalog();
+    if (!catalog.length) return;
     const scenes = this._sceneList();
-    if (!scenes.length) return;
+    const v = room.variables;
+    const custom = (Array.isArray(v.scene_order) && v.scene_order.length > 0)
+      || (Array.isArray(v.scenes) && v.scenes.length > 0);
+    const shownIds = new Set(scenes.map((s) => s.id));
+    const hidden = catalog.filter((s) => !shownIds.has(s.id));
+    const visibleIds = () => scenes.map((s) => s.id);
+    const hiddenIds = () => hidden.map((s) => s.id);
+
+    const rebuild = () => {
+      card.querySelectorAll(".scenecolors").forEach((n) => n.remove());
+      this._renderSceneColors(room, card);
+    };
+    const write = (patch) => {
+      const rooms = this._state.compact.rooms;
+      Object.keys(patch).forEach((key) => {
+        const value = patch[key];
+        rooms.forEach((r) => {
+          if (value === undefined || (Array.isArray(value) && !value.length)) delete r.variables[key];
+          else r.variables[key] = clone(value);
+        });
+      });
+      this._markDirty();
+      this._syncPreview();
+      rebuild();
+    };
+    // A pinned list from before becomes a custom order with everything else hidden.
+    const settle = (order, hide) => write({
+      scenes: undefined,
+      scene_order: order,
+      scene_exclude: hide.length ? hide : undefined,
+    });
 
     const wrap = document.createElement("div");
-    wrap.className = "scenecolors";
+    wrap.className = "row scenecolors";
     const head = document.createElement("div");
-    head.className = "flabel";
-    head.textContent = "Scene colors";
+    head.className = "schead";
+    const lab = document.createElement("label");
+    lab.textContent = "Scene Order";
+    head.appendChild(lab);
+    if (hidden.length) {
+      const cnt = document.createElement("span");
+      cnt.className = "sccount";
+      cnt.textContent = hidden.length + " hidden";
+      head.appendChild(cnt);
+    }
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "badgeedit scedit";
+    head.appendChild(edit);
     wrap.appendChild(head);
+    const list = document.createElement("div");
+    list.className = "sclist";
+    wrap.appendChild(list);
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "scadd";
+    add.innerHTML = '<span class="scadddot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.4" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></svg></span>'
+      + '<span class="scaddname">Add Scene</span>';
+    add.onclick = () => {
+      const items = hidden.map((sc) => ({ id: sc.id, label: sc.label, haIcon: sc.icon, group: "Hidden" }));
+      items.push({ id: "\u0000new", label: "New Scene in Home Assistant", icon: "open", group: "new", quiet: true });
+      this._menuAt(add, items, (id) => {
+        if (id === "\u0000new") { this._newScene(); return; }
+        settle(custom ? visibleIds().concat([id]) : undefined, hiddenIds().filter((h) => h !== id));
+      });
+    };
+    wrap.appendChild(add);
+    const paintEdit = () => {
+      const on = !!this._editScenes;
+      edit.textContent = on ? "Done" : "Edit";
+      edit.setAttribute("aria-pressed", on ? "true" : "false");
+      wrap.classList.toggle("editing", on);
+    };
+    paintEdit();
+    edit.onclick = () => { this._editScenes = !this._editScenes; paintEdit(); };
+
+    const glyphBtn = (cls, label, path) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = cls;
+      btn.setAttribute("aria-label", label);
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"'
+        + ' stroke-linecap="round">' + path + "</svg>";
+      return btn;
+    };
+
+    const drag = (ev, row) => {
+      if (ev.button) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const rows = [...list.children];
+      const from = rows.indexOf(row);
+      if (from < 0) return;
+      const step = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : row.offsetHeight;
+      const y0 = ev.clientY;
+      let to = from;
+      try { row.setPointerCapture(ev.pointerId); } catch (e) { /* capture is a nicety */ }
+      row.classList.add("scdrag");
+      rows.forEach((r) => { if (r !== row) r.style.transition = "transform .2s cubic-bezier(.2,.8,.2,1)"; });
+      const move = (e) => {
+        const dy = e.clientY - y0;
+        row.style.transform = "translateY(" + dy + "px)";
+        to = Math.max(0, Math.min(rows.length - 1, from + Math.round(dy / step)));
+        rows.forEach((r, i) => {
+          if (r === row) return;
+          let shift = 0;
+          if (from < to && i > from && i <= to) shift = -step;
+          if (from > to && i < from && i >= to) shift = step;
+          r.style.transform = shift ? "translateY(" + shift + "px)" : "";
+        });
+      };
+      const up = () => {
+        row.removeEventListener("pointermove", move);
+        row.removeEventListener("pointerup", up);
+        row.removeEventListener("pointercancel", up);
+        rows.forEach((r) => { r.style.transition = ""; r.style.transform = ""; });
+        row.classList.remove("scdrag");
+        if (to === from) return;
+        const ids = rows.map((r) => r.dataset.id);
+        const [moved] = ids.splice(from, 1);
+        ids.splice(to, 0, moved);
+        settle(ids, hiddenIds());
+      };
+      row.addEventListener("pointermove", move);
+      row.addEventListener("pointerup", up);
+      row.addEventListener("pointercancel", up);
+    };
 
     const ACCENT = "var(--hemma-color-yellow, #FFCC00)";
-    scenes.forEach((sc) => {
+    const makeRow = (sc, shown) => {
       const map = () => (room.variables.scene_colors || {});
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "scenecolor";
-
+      const row = document.createElement("div");
+      row.className = "scenecolor" + (shown ? "" : " hid");
+      row.dataset.id = sc.id;
+      if (shown) {
+        const minus = glyphBtn("scminus", "Hide " + sc.label, '<path d="M7 12h10"/>');
+        minus.onclick = () => settle(custom ? visibleIds().filter((id) => id !== sc.id) : undefined,
+          hiddenIds().concat([sc.id]));
+        row.appendChild(minus);
+      } else {
+        const plus = glyphBtn("scplus", "Show " + sc.label, '<path d="M12 7v10M7 12h10"/>');
+        plus.onclick = () => settle(custom ? visibleIds().concat([sc.id]) : undefined,
+          hiddenIds().filter((id) => id !== sc.id));
+        row.appendChild(plus);
+      }
+      const dot = document.createElement("span");
+      dot.className = "scdot";
       const ic = document.createElement("ha-icon");
       ic.className = "scicon";
       ic.setAttribute("icon", sc.icon);
+      dot.appendChild(ic);
       const nm = document.createElement("span");
       nm.className = "scname";
       nm.textContent = sc.label;
+      row.appendChild(dot);
+      row.appendChild(nm);
+      if (!shown) {
+        ic.style.color = "rgba(255,255,255,0.78)";
+        return row;
+      }
       const val = document.createElement("span");
       val.className = "scval";
       const sw = document.createElement("span");
       sw.className = "swatch";
-
       const paint = () => {
-        const v = map()[sc.id] || "";
-        const hex = swatchOf(v || ACCENT);
-        // The icon wears the color, so the row shows the result rather than
-        // describing it.
-        ic.style.color = v || ACCENT;
-        sw.style.background = hex || "transparent";
-        val.textContent = v ? colorLabel(v) : "Yellow";
-        val.classList.toggle("dim", !v);
+        const cv = map()[sc.id] || "";
+        dot.style.background = swatchOf(cv || ACCENT) || "";
+        ic.style.color = "#fff";
+        sw.style.background = swatchOf(cv || ACCENT) || "transparent";
+        val.textContent = cv ? colorLabel(cv) : "Yellow";
+        val.classList.toggle("dim", !cv);
       };
       paint();
-
-      row.appendChild(ic);
-      row.appendChild(nm);
-      row.appendChild(val);
-      row.appendChild(sw);
-
-      row.onclick = () => {
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "scpick";
+      pick.setAttribute("aria-label", sc.label + " color");
+      pick.appendChild(val);
+      pick.appendChild(sw);
+      pick.onclick = () => {
         const cur = map()[sc.id] || "";
         const items = [{ id: "", label: "Yellow (default)", checked: !cur }];
         HEMMA_ACCENTS.forEach((acc) => items.push({
-          id: acc.id, label: acc.label, swatch: acc.hex, group: "Hemma",
-          checked: cur === acc.id,
+          id: acc.id, label: acc.label, swatch: acc.hex, checked: cur === acc.id,
         }));
-        this._menuAt(row, items, (id) => {
+        this._menuAt(pick, items, (id) => {
           const next = { ...map() };
           if (id) next[sc.id] = id; else delete next[sc.id];
-          // Absent, not empty: an empty object is a key the file never carried
-          // and the round trip would fail on it.
-          if (Object.keys(next).length) room.variables.scene_colors = next;
-          else delete room.variables.scene_colors;
-          this._mirrorToPair("scene_colors", room.variables.scene_colors, [room]);
+          // Absent, not empty: an empty object is a key the file never carried.
+          this._state.compact.rooms.forEach((r) => {
+            if (Object.keys(next).length) r.variables.scene_colors = clone(next);
+            else delete r.variables.scene_colors;
+          });
           this._markDirty();
           paint();
           this._syncPreview();
         });
       };
-      wrap.appendChild(row);
-    });
+      row.appendChild(pick);
+      const grip = glyphBtn("scgrip", "Reorder " + sc.label, '<path d="M5 8h14M5 12h14M5 16h14"/>');
+      grip.onpointerdown = (ev) => drag(ev, row);
+      row.appendChild(grip);
+      return row;
+    };
 
-    const hint = document.createElement("div");
-    hint.className = "hint";
-    hint.textContent = "The color a scene's icon takes while it is the one that "
-      + "is on. Scenes that are off draw white.";
-    wrap.appendChild(hint);
+    scenes.forEach((sc) => list.appendChild(makeRow(sc, true)));
+    if (hidden.length) {
+      const hg = document.createElement("div");
+      hg.className = "schidden";
+      const hl = document.createElement("div");
+      hl.className = "schidden-head";
+      hl.textContent = "Hidden";
+      hg.appendChild(hl);
+      hidden.forEach((sc) => hg.appendChild(makeRow(sc, false)));
+      wrap.appendChild(hg);
+    }
     card.appendChild(wrap);
   }
 
-  // The same gesture the tiles use. The only difference is that badges are a
-  // fixed set of six, so a reorder writes a permutation rather than splicing an
-  // array of arbitrary length.
+  async _newScene() {
+    const path = "/config/scene/edit/new";
+    const app = !!(window.externalApp || (window.webkit && window.webkit.messageHandlers
+      && window.webkit.messageHandlers.getExternalAuth));
+    if (!app) {
+      const tab = window.open(path, "_blank");
+      if (tab) {
+        window.addEventListener("focus", () => { if (this._state) this._renderForm(); }, { once: true });
+        return;
+      }
+    }
+    const dirty = this._isDirty();
+    const ok = await this._ask({
+      title: "Leave Hemma?",
+      message: "Home Assistant's scene editor opens in place of Hemma. Use its back arrow to return here."
+        + (dirty ? " Your changes are saved first." : ""),
+      confirmLabel: dirty ? "Save and Open" : "Open Editor",
+    });
+    if (!ok || (dirty && !(await this._save()))) return;
+    history.pushState(null, "", path);
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+  }
+
   _orderBadgeCards(room, col) {
     if (!col) return;
     col.classList.add("badgecol");
     col.classList.toggle("editing", !!this._editBadges);
 
-    // Edit lives here, NOT in the group header. That header is collapsed to
-    // height:0 opacity:0 when hints are off, so a button inside it went with
-    // them - and while they were on it overlapped the description, because the
-    // header is a two-column grid with no room for a third thing.
     if (!col.querySelector(".badgebar")) {
-      // A ROW of the list, not a button over it, sharing .sortstrip's rules so
-      // this and Smart Sort read alike. Its OWN class though: .sortstrip means
-      // the tile list's one settings row, and the suite holds it to one.
       const bar = document.createElement("div");
       bar.className = "badgebar";
       const lab = document.createElement("span");
       lab.className = "bandtog";
-      lab.textContent = "Order";
+      lab.textContent = "Badge Order";
       bar.appendChild(lab);
       const eb = document.createElement("button");
       eb.className = "badgeedit";
@@ -13824,22 +16043,15 @@ class HemmaPanel extends HTMLElement {
       eb.onclick = () => {
         this._editBadges = !this._editBadges;
         paint();
-        // In place, not a rebuild: a fresh grip is born at its end position and
-        // has nothing to slide from.
         col.classList.toggle("editing", this._editBadges);
       };
       bar.appendChild(eb);
-      // Under the caption, above the badges - where Smart Sort sits relative to
-      // the tiles. The caption is the column's first child when hints are on
-      // and a collapsed one when they are off, so this goes after it either way.
       const gh = col.querySelector(".grouphead");
       col.insertBefore(bar, gh ? gh.nextSibling : col.firstChild);
     }
     const cards = [...col.children].filter((c) => c.dataset && c.dataset.bid);
     if (cards.length < 2) return;
     const order = this._badgeOrder(room);
-    // Reappend in order. The header sits above them and is not in this list, so
-    // moving these around it is safe.
     order.forEach((id) => {
       const hit = cards.find((c) => c.dataset.bid === id);
       if (hit) col.appendChild(hit);
@@ -13853,8 +16065,6 @@ class HemmaPanel extends HTMLElement {
       grip.className = "grip";
       grip.type = "button";
       grip.tabIndex = -1;
-      // Pointer-only, like the tiles': announcing a control a keyboard cannot
-      // work is a promise the row does not keep.
       grip.setAttribute("aria-hidden", "true");
       grip.title = "Drag to reorder";
       grip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
@@ -13914,8 +16124,6 @@ class HemmaPanel extends HTMLElement {
       const ids = cards.map((c) => c.dataset.bid);
       const [pick] = ids.splice(me, 1);
       ids.splice(shown, 0, pick);
-      // Always the full list. A partial one reads fine, but writing every id
-      // means the order cannot drift when a default changes underneath it.
       room.variables.badge_order = ids;
       this._mirrorToPair("badge_order", ids, [room]);
       this._markDirty();
@@ -13926,10 +16134,6 @@ class HemmaPanel extends HTMLElement {
     window.addEventListener("pointerup", onUp);
   }
 
-  // What badge_order says, in its order, then everything it does not mention.
-  // Slotting unmentioned ids back into their built-in POSITION sounds right and
-  // is not: ["energy"] means energy FIRST, and filling the others in around it
-  // walks it back to the end.
   _badgeOrder(room) {
     const saved = ((room.variables || {}).badge_order) || [];
     const out = [];
@@ -13946,25 +16150,21 @@ class HemmaPanel extends HTMLElement {
     fs.className = "tilewrap";
     fs.dataset.k = "__tiles";
 
+    const grid = document.createElement("div");
+    grid.className = "tilegrid" + (this._editTiles ? " editing" : "");
+    room.tiles.forEach((tile, i) => grid.appendChild(this._tileCardSafe(room, tile, i, pane)));
+
     if (!room.tiles.length) {
       const e = document.createElement("div");
       e.className = "hint";
-      e.textContent = "No tiles yet. Add one below.";
-      fs.appendChild(e);
+      e.textContent = "No tiles yet. Add one above.";
+      grid.appendChild(e);
     }
-
-    const grid = document.createElement("div");
-    grid.className = "tilegrid" + (this._editTiles ? " editing" : "");
-    room.tiles.forEach((tile, i) => grid.appendChild(this._tileCard(room, tile, i, pane)));
 
     const bar = document.createElement("div");
     bar.className = "addbar";
     const addable = TILE_TYPES.filter((t) => !t.hidden)
       .slice().sort((x, y) => x.label.localeCompare(y.label));
-    // Nothing is pre-selected. The first type alphabetically is not a
-    // suggestion, and a field that always reads "Air purifier" looks like a
-    // choice already made - so it prompts instead, and + stays out of reach
-    // until there is something to add.
     let pickType = "";
     const typeLabels = { "": "" };
     addable.forEach((t) => { typeLabels[t.id] = t.label; });
@@ -14015,8 +16215,6 @@ class HemmaPanel extends HTMLElement {
     eb.onclick = () => {
       this._editTiles = !this._editTiles;
       this._armed = null;
-      // In place, never a rebuild: a fresh row is BORN at its end position, so
-      // there is nothing for the margin to travel from and the minus pops.
       grid.classList.toggle("editing", this._editTiles);
       grid.querySelectorAll(".tile.armed").forEach((t) => t.classList.remove("armed"));
       eb.classList.toggle("on", this._editTiles);
@@ -14028,17 +16226,10 @@ class HemmaPanel extends HTMLElement {
 
     bar.classList.add("addrowbar");
     grid.insertBefore(bar, grid.firstChild);
-    // The caption comes out of the grid so Smart Sort can sit between it and
-    // the list. Nothing moves visually: neither the column nor the grid paints
-    // a surface in the inspector, so the caption was already sitting on the
-    // panel's own glass rather than on a group.
     if (head) fs.appendChild(head);
 
-    // A row under the add row, in the same group: both are about the list rather
-    // than in it, and as a row it takes the group's rhythm and hairline. Not ON
-    // the add row - that pairs a setting with an action.
     if (this._tileOptions) {
-      grid.insertBefore(this._tileOptions, bar.nextSibling);
+      grid.insertBefore(this._tileOptions, bar);
       this._tileOptions = null;
     }
     fs.appendChild(grid);
@@ -14046,12 +16237,32 @@ class HemmaPanel extends HTMLElement {
     pane.appendChild(fs);
   }
 
+  _tileCardSafe(room, tile, i, pane) {
+    try {
+      return this._tileCard(room, tile, i, pane);
+    } catch (err) {
+      console.error("hemma-panel: tile failed to render", tile, err);
+      const t = tile || {};
+      const box = document.createElement("div");
+      box.className = "tile locked shut";
+      box.dataset.k = this._tileKey(t);
+      const head = document.createElement("div");
+      head.className = "thead";
+      const title = document.createElement("div");
+      title.className = "grow";
+      title.textContent = t.name || "(unnamed)";
+      const kind = document.createElement("span");
+      kind.className = "kind";
+      kind.textContent = tileLabel(t) + " - failed to load";
+      title.appendChild(kind);
+      head.appendChild(title);
+      box.appendChild(head);
+      return box;
+    }
+  }
+
   _tileCard(room, tile, i, pane) {
     const type = tileTypeOf(tile);
-    // What the card draws when the icon field is empty. For most tiles that
-    // is a fixed glyph; this one derives it from the entity, and the picker
-    // showed the fixed one - so the field ghosted a plug while the tile drew a
-    // speaker, and called the plug "default".
     const glyphNow = () => (type.glyphFromEntity
       ? type.glyphFromEntity[String(tile.entity || "").split(".")[0]] : null);
 
@@ -14061,8 +16272,6 @@ class HemmaPanel extends HTMLElement {
 
     const head = document.createElement("div");
     head.className = "thead";
-    // First in the row, ahead of the icon - where iOS puts it. Always built, so
-    // it can open and close rather than appearing and disappearing.
     const rm = document.createElement("button");
     rm.type = "button";
     rm.className = "rmbtn";
@@ -14086,9 +16295,6 @@ class HemmaPanel extends HTMLElement {
     if (type && TILE_ICON[type.id]) {
       const g = document.createElement("span");
       g.className = "sicon";
-      // The tile's OWN icon, not the type's, resolved the way the card does it:
-      // what you chose, then what the type derives from the entity, then the
-      // type's glyph.
       const tv2 = tile.variables || {};
       const chosen = tv2.icon || tile.icon;
       g.style.setProperty("--i",
@@ -14104,9 +16310,6 @@ class HemmaPanel extends HTMLElement {
     title.innerHTML = `${tile.name || "(unnamed)"}${kind ? ` <span class="kind">${kind}</span>` : ""}`;
     head.appendChild(title);
     const tFoldKey = room.path + "|tile|" + this._tileKey(tile);
-    // In the list a tile IS its header, and the box below is shut a few lines
-    // down, so the caret has to read collapsed for EVERY row - the fold state is
-    // seeded at boot and a tile added later is not in it.
     this._folded.add(tFoldKey);
     head.appendChild(this._foldButton(tFoldKey, head, box,
       tile.name || (type && type.label) || "tile"));
@@ -14115,8 +16318,6 @@ class HemmaPanel extends HTMLElement {
     grip.type = "button";
     grip.className = "grip";
     grip.tabIndex = -1;
-    // Reordering is pointer-only, so announcing a control a keyboard cannot
-    // work would be a promise the row does not keep.
     grip.setAttribute("aria-hidden", "true");
     grip.title = "Drag to reorder";
     grip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
@@ -14124,22 +16325,21 @@ class HemmaPanel extends HTMLElement {
       + '<path d="M5 6.5h14M5 12h14M5 17.5h14"/></svg>';
     grip.onclick = (ev) => ev.stopPropagation();
     head.appendChild(grip);
-    // No trailing summary while it is on: a tile's Name comes FROM its entity, so
-    // the pair is the same fact twice. Off is worth saying.
     const tileOn = (tile.variables || {}).enabled !== false;
+    const notes = [];
     if (!tileOn) {
-      const c = document.createElement("span");
-      c.className = "count";
-      c.textContent = "Off";
-      head.appendChild(c);
+      notes.push("Off");
       box.classList.add("off");
-    } else if (tileShowWhen(type, tile.variables) === "active") {
-      // Off is worth saying in the list, and so is a tile that will not be
-      // there most of the time - otherwise it reads as one that has gone
-      // missing. It is the row's only summary either way.
+    } else {
+      const surf = (tile.variables || {}).surfaces;
+      if (surf === "phone") notes.push("Phone only");
+      else if (surf === "desktop") notes.push("Desktop only");
+      if (tileShowWhen(type, tile.variables) === "active") notes.push("Shown when active");
+    }
+    if (notes.length) {
       const c = document.createElement("span");
       c.className = "count";
-      c.textContent = "Shown when active";
+      c.textContent = notes.join(" \u00b7 ");
       head.appendChild(c);
     }
     // Same rule as a section row: in the list, a tile is its header.
@@ -14169,53 +16369,36 @@ class HemmaPanel extends HTMLElement {
     dots.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
     dots.onpointerdown = (ev) => ev.stopPropagation();
     const grp = type && TILE_GROUP[type.id];
-    // No "Add lock" here. It is one row, at the foot of the locks it adds to -
-    // the same place the section + sits - so you find it by reading the card
-    // rather than by opening a menu named after nothing.
-    dots.onclick = () => this._menuAt(dots, [
-      { id: "remove", label: "Remove tile" },
-    ], (id) => {
+    const elsewhere = ((this._state && this._state.compact.rooms) || [])
+      .filter((r) => r !== room).length > 0;
+    const menu = elsewhere
+      ? [{ id: "move", label: "Move to Room\u2026" }, { id: "remove", label: "Remove tile" }]
+      : [{ id: "remove", label: "Remove tile" }];
+    dots.onclick = () => this._menuAt(dots, menu, (id) => {
       if (id === "remove") return removeTile();
+      if (id === "move") return this._moveTileMenu(dots, room, tile);
     });
     head.appendChild(dots);
     // Drag the header to reorder. Presses on the buttons are left alone.
     head.onpointerdown = (ev) => {
-      // Cleared on every press, so the flag a drag sets below is never stale
-      // by the time the click that follows asks about it.
       head._dragged = false;
-      // The grip is a button, and it is the only one that starts a drag rather
-      // than swallowing it - that is the whole reason iOS draws one.
       const fromGrip = !!(ev.target.closest && ev.target.closest(".grip"));
       if (ev.button || (!fromGrip && ev.target.closest("button"))) return;
-      // Inside one tile there is nothing to reorder - the list is not on screen
-      // - so the row still took the grab cursor and the pointer capture and
-      // then had nowhere to put anything down.
       if (this._sel) return;
-      // Same trade as the room pills: on a phone the page has to be able to
-      // scroll from anywhere, so touch never starts a reorder.
       if (!fromGrip && ev.pointerType === "touch" && isPhone(this)) return;
       const grid = box.parentNode;
       if (!grid) return;
 
       const startX = ev.clientX, startY = ev.clientY;
-      // Tiles only. The add row is the grid's FIRST child, so every index here
-      // was one out from the tile it named: the gap opened above the row under
-      // the pointer, and the drop landed a place off.
       const cards = [...grid.children].filter((c) => c.classList.contains("tile"));
       const self = cards.indexOf(box);
       if (self < 0) return;
       const rects = cards.map((c) => c.getBoundingClientRect());
       let moved = false, target = self, shown = self;
 
-      // Where the row lands is how far it has TRAVELED, not which center the
-      // pointer is nearest: at a boundary two slots are equidistant, so
-      // nearest-center flipped between them and restarted every transition.
       const pitch = rects.length > 1
         ? (rects[rects.length - 1].top - rects[0].top) / (rects.length - 1)
         : rects[0].height;
-      // The row has to travel a seventh of a slot PAST the halfway line before
-      // the gap moves, and the same again to come back - so a hand that is not
-      // quite still cannot make it change its mind.
       const HYST = 0.14;
       const slotFor = (dy) => {
         if (!pitch) return self;
@@ -14225,11 +16408,7 @@ class HemmaPanel extends HTMLElement {
         return Math.max(0, Math.min(cards.length - 1, t));
       };
 
-      // One column, so a reorder drags the same direction the page scrolls.
-      // Gated behind a hold on touch, like the room pills.
       const touch = ev.pointerType === "touch";
-      // A handle is already a deliberate target, so it lifts at once. Only the
-      // row's own body needs the hold, to tell a lift from a scroll.
       let canDrag = !touch || fromGrip, holdTimer = 0;
       const eatTouch = (e3) => { if (canDrag && e3.cancelable) e3.preventDefault(); };
       if (touch && fromGrip) {
@@ -14250,8 +16429,6 @@ class HemmaPanel extends HTMLElement {
         window.removeEventListener("touchmove", eatTouch, { passive: false });
       };
 
-      // The grid's slots are uniform, so slot k always sits at rects[k]. Shifting
-      // the others into the projected order opens a real gap under the pointer.
       const shiftTo = (t) => {
         if (t === shown) return;
         shown = t;
@@ -14279,9 +16456,6 @@ class HemmaPanel extends HTMLElement {
           box.classList.add("dragging");
           try { head.setPointerCapture(ev.pointerId); } catch (err) { /* not captured */ }
         }
-        // Locked to the column, the way a table view reorder is. Sideways
-        // drift is movement the list cannot act on, so it only reads as the
-        // row coming loose.
         box.style.transform = "translateY(" + dy + "px)";
         target = slotFor(dy);
         shiftTo(target);
@@ -14296,8 +16470,6 @@ class HemmaPanel extends HTMLElement {
 
         if (!moved) return;
 
-        // Capture where everything actually looks right now, transforms included,
-        // so the rebuild animates from the gap rather than jumping.
         const before = this._captureCards();
         cards.forEach((c) => { c.style.transition = ""; c.style.transform = ""; });
 
@@ -14308,9 +16480,6 @@ class HemmaPanel extends HTMLElement {
         requestAnimationFrame(() => this._playCards(before));
       };
 
-      // A press that will drag must not also start a text selection - the sweep
-      // carries past the row into the one below. Touch is left alone: preventing
-      // the default there kills the scroll the hold exists to allow.
       if (ev.pointerType !== "touch") ev.preventDefault();
 
       window.addEventListener("pointermove", onMove);
@@ -14318,8 +16487,6 @@ class HemmaPanel extends HTMLElement {
       window.addEventListener("pointercancel", onUp);
     };
 
-    // Slides in from the trailing edge once the minus is pressed. Outside the
-    // head, so the head can travel and leave it standing.
     const del = document.createElement("button");
     del.type = "button";
     del.className = "delbtn";
@@ -14357,8 +16524,6 @@ class HemmaPanel extends HTMLElement {
       const clean = raw.filter((id) => typeof id === "string" && MEMBER_ID.test(id));
       if (clean.length !== raw.length) {
         if (!tile.entity && clean.length) tile.entity = clean[0];
-        // The template is left alone: hemma_popup_lock reads one lock as
-        // happily as six, so a repair is no reason to drop back to more-info.
         if (clean.length > 1 || (clean.length && clean[0] !== tile.entity)) {
           tile.variables[grp.list] = clean;
         } else {
@@ -14367,8 +16532,6 @@ class HemmaPanel extends HTMLElement {
         }
       }
     }
-    // What the popup will iterate: it falls back to the card's own entity, so
-    // a single lock still has a door sensor and a battery, and they are read.
     const onGroupTemplate = !!grp
       && (grp.entityless || Array.isArray(tile.template));
     const effectiveMembers = () => {
@@ -14379,8 +16542,6 @@ class HemmaPanel extends HTMLElement {
     const pending = !!grp && this._pendingMember.has(pendingKey);
     const isGroup = !!grp && (memberList().length > 1 || pending);
 
-    // The tile's own on/off, first inside it - the switch a list row no longer
-    // carries. It rides up into the bar beside the name when you push in.
     const tsw = this._boolSwitch(
       (tile.variables || {}).enabled === false ? false : true, true,
       (v) => {
@@ -14405,9 +16566,6 @@ class HemmaPanel extends HTMLElement {
       this._syncPreview();
     };
 
-    // Entity first, then Name: you pick the thing and it names itself, but only
-    // while the name is still one the panel wrote. A multi-entity tile puts Name
-    // FIRST and never auto-names - no single sensor is the card's name.
     const autoName = !type.multiEntity && !isGroup;
     const friendlyOf = (id) => {
       const e = id && this._hass && this._hass.states[id];
@@ -14429,15 +16587,11 @@ class HemmaPanel extends HTMLElement {
             title.firstChild.textContent = next + " ";
           }
         }
-        // Slot 1 tracks the tile's entity, but only ever with an entity:
-        // clearing the combo used to stamp an empty string into the list.
         if (isGroup && v && memberList().length) {
           const list = memberList().slice();
           list[0] = v;
           tile.variables[grp.list] = list;
         }
-        // Sensors that come in a named pair or a set fill themselves in from
-        // the one you picked. Both only ever seed an EMPTY field.
         let rebuild = false;
         if (type.twin && v && !(tile.variables || {})[type.twin.key]) {
           const twin = this._twinOf(v, type.twin.from, type.twin.to);
@@ -14458,16 +16612,11 @@ class HemmaPanel extends HTMLElement {
             }
           }
         }
-        // A tile that derives its glyph from the entity has just changed what
-        // its icon field is ghosting, and the field is already on screen.
         if (type.glyphFromEntity && glyphNow() !== was) rebuild = true;
         if (rebuild) this._renderForm();
         else this._syncPreview();
       });
     const entityLabel = isGroup ? grp.noun + " 1" : (type.entityLabel || "Entity");
-    // noEntity keeps a type's entity off the form entirely, where
-    // entityAdvanced only moves it to the drawer. Not `&& !isGroup`: a second
-    // sensor makes the tile a group and would bring the row back.
     const noEntityRow = !!type.noEntity;
     const entityInDrawer = !noEntityRow && !!type.entityAdvanced && !isGroup;
     if (noEntityRow) {
@@ -14487,8 +16636,6 @@ class HemmaPanel extends HTMLElement {
     if (grp) {
       const v = tile.variables || {};
       const list = Array.isArray(v[grp.list]) ? v[grp.list] : [];
-      // Dropping back to one entity is no longer a group, so the popup and the
-      // member list both go with it.
       const collapse = () => {
         if (tile.variables) {
           delete tile.variables[grp.list];
@@ -14496,10 +16643,6 @@ class HemmaPanel extends HTMLElement {
         }
         if (grp.single) tile.template = grp.single;
       };
-      // hemma_entity dereferences the tile's entity in seven templates, so an
-      // entityless group keeps one pointed at its first member and RE-points on
-      // every list change - backfilling only when empty left it pointing at a
-      // sensor no longer in the list.
       const syncEntity = () => {
         if (!grp.entityless) return;
         const l = (tile.variables && tile.variables[grp.list]) || [];
@@ -14516,9 +16659,6 @@ class HemmaPanel extends HTMLElement {
         drop.onclick = onclick;
         return drop;
       };
-      // A member row is a 38px control between 12px paddings over a 1px rule.
-      // The + chip is 22px between a 2px and a 14px margin. anincheck.py holds
-      // both against the CSS so they cannot drift apart from it.
       const ROW_H = 63;
       const ADD_H = 38;
       const naturalH = (el) => {
@@ -14526,9 +16666,6 @@ class HemmaPanel extends HTMLElement {
           ? el.getBoundingClientRect().height : 0;
         return (h > 1 ? h : ROW_H);   // 0 while the card is still detached
       };
-      // Collapse first, then let the caller re-render. Falls straight through
-      // where there is no animation to wait on - reduced motion, or the JXA
-      // harness, which has no setTimeout and no real events.
       const animateOut = (el, done, floor) => {
         const canAnimate = el && el.classList
           && typeof el.addEventListener === "function"
@@ -14545,19 +16682,10 @@ class HemmaPanel extends HTMLElement {
         el.classList.add("rowout");
       };
       const memberRow = (label, combo, drop, enter) => {
-        // The row's own second and third children, like every other row: shared
-        // in one wrapper, the field gave up the minus's width and the minus sat
-        // short of the + below it.
         const r = addRow(label, combo.wrap);
         if (r) r.appendChild(drop);
-        // Bound here so settled and pending rows collapse alike. A pending row
-        // stands in for the + chip, so cancelling settles to the CHIP's height:
-        // collapsing to 0 shut the section and reopened it.
         if (r && drop && typeof drop.onclick === "function") {
           const removeIt = drop.onclick;
-          // The pending row is the one standing in for the + chip. Its minus
-          // means "never mind", not "delete": there is nothing there yet to
-          // lose, so asking twice would be friction over nothing.
           drop.onclick = enter
             ? () => animateOut(r, removeIt, ADD_H)
             : (ev) => {
@@ -14565,12 +16693,7 @@ class HemmaPanel extends HTMLElement {
               this._armRow(r, label, () => animateOut(r, removeIt, 0));
             };
         }
-        // A fresh node every render, so a transition has no start value and this
-        // has to be a keyframe. The class comes off once played: it carries
-        // overflow:hidden, which would clip the combo's menu.
         if (enter && r) {
-          // Measured after layout where there is a frame to wait for; the
-          // constant covers the detached first paint and the harness.
           const play = () => {
             r.style.setProperty("--rowh", naturalH(r) + "px");
             r.style.setProperty("--rowfrom", ADD_H + "px");
@@ -14592,14 +16715,9 @@ class HemmaPanel extends HTMLElement {
           const gone = (tile.variables[grp.list] || [])[n];
           const next = (tile.variables[grp.list] || []).slice();
           next.splice(n, 1);
-          // With an entity carrying slot 1, one left in the list means the list
-          // is redundant. Without one, the list IS the members, so it only goes
-          // when the last one does.
           const floor = grp.entityless ? 1 : 2;
           if (next.filter(Boolean).length < floor) collapse();
           else tile.variables[grp.list] = next;
-          // Per-member maps are keyed by entity id, so a removed member leaves
-          // an orphan the popup never reads and the config never sheds.
           if (gone && tile.variables) {
             (grp.perMember || []).forEach((pm) => {
               const m = tile.variables[pm.key];
@@ -14614,8 +16732,6 @@ class HemmaPanel extends HTMLElement {
         };
         const row = this._combo(member || "", this._entityList(grp.domains),
           grp.domains.map((d) => d + ".").join(" / "), (val) => {
-            // Emptying the combo takes the lock out, the same as the button
-            // beside it. It does not leave a member with no entity.
             if (!val) return drop();
             const next = (tile.variables[grp.list] || []).slice();
             next[n] = val;
@@ -14626,8 +16742,6 @@ class HemmaPanel extends HTMLElement {
         memberRow(grp.noun + " " + (n + 1), row, dropButton(drop));
       });
       if (pending) {
-        // The first entity stays on the tile and extras live in the list, so
-        // both the list and the group template are written by the pick.
         const row = this._combo("", this._entityList(grp.domains),
           grp.domains.map((d) => d + ".").join(" / "), (val) => {
             if (!val) return;
@@ -14645,10 +16759,6 @@ class HemmaPanel extends HTMLElement {
           dropButton(() => { this._pendingMember.delete(pendingKey); this._renderForm(); }),
           true);
       } else if (grp.entityless || tile.entity || list.length) {
-        // An entityless group starts empty, so the chip must be there from the
-        // off or there is no way to add one. A glyph in the drop buttons' own
-        // column, not a full-width row: add and remove are a pair, and the name
-        // survives as the title and aria-label.
         const add = document.createElement("button");
         add.type = "button";
         add.className = "addmore";
@@ -14664,10 +16774,6 @@ class HemmaPanel extends HTMLElement {
       }
     }
 
-    // The drawer's summary IS the heading for whatever comes first inside it, so
-    // the first group draws none of its own. Later groups keep theirs, because
-    // those separate something from something. Named by the type, else by that
-    // first group, else Advanced.
     const tfields = tileFieldsFor(type, this._phoneReachable());
     const advFields = tfields.filter((f) => f.advanced);
     const firstGroup = advFields.length && advFields[0].group ? advFields[0].group : null;
@@ -14697,9 +16803,6 @@ class HemmaPanel extends HTMLElement {
           this._openAdv(det, sum, now, true);
         };
         det.appendChild(sum); det.appendChild(advBody);
-        // Held, not appended. A group tile builds its per-member rows before
-        // any field, so a drawer appended where it was first asked for left
-        // every plain row after it sitting underneath Advanced.
         advDet = det;
       }
       if (advPending) {
@@ -14712,9 +16815,6 @@ class HemmaPanel extends HTMLElement {
       const r = document.createElement("div");
       r.className = "row";
       const l = document.createElement("label");
-      // A per-member row names two things, and as one string they wrapped
-      // mid-phrase in a 33% label column. A heading is not open to this one:
-      // these are the drawer's first rows, and a drawer opens on a field.
       if (sub) {
         const t = document.createElement("span");
         t.textContent = label;
@@ -14728,10 +16828,6 @@ class HemmaPanel extends HTMLElement {
       r.appendChild(l); r.appendChild(input);
       advBody.appendChild(r);
     };
-    // A field can name the group it opens, so the drawer reads as "Popup" and
-    // "Popup buttons" rather than one undifferentiated list. The heading is only
-    // recorded here - advRow flushes it once the drawer exists to hang it in,
-    // which is why the FIRST field of a group is the one that carries it.
     let advGroup = null, advPending = null;
     const advGroupHead = (name) => {
       if (!name || name === advGroup) return;
@@ -14739,23 +16835,15 @@ class HemmaPanel extends HTMLElement {
       advPending = name;
     };
 
-    // Per-member extras, keyed by the member's entity id - that is how
-    // hemma_popup_lock_group reads door_sensors and battery_entities.
     if (onGroupTemplate && grp.perMember && grp.perMember.length) {
       const members = effectiveMembers();
       grp.perMember.forEach((pm) => {
         const raw = (tile.variables || {})[pm.key];
         const map = (raw && typeof raw === "object" && !Array.isArray(raw)) ? raw : {};
-        // One member puts its name under every field and says nothing: there
-        // is only one thing it could belong to. The second line goes.
         const many = members.length > 1;
         members.forEach((id) => {
           const st = this._hass.states[id];
           const who = (st && st.attributes.friendly_name) || id;
-          // Every kind writes the same shape: { member_entity_id: value }.
-          // An empty value deletes the key rather than storing "", because the
-          // popup reads `overrides[id] || <derived>` and would take "" as an
-          // answer and print nothing.
           const write = (val) => {
             const next = {};
             members.forEach((k) => { if (map[k]) next[k] = map[k]; });
@@ -14769,8 +16857,6 @@ class HemmaPanel extends HTMLElement {
           if (pm.kind === "text") {
             const input = document.createElement("input");
             input.value = map[id] || "";
-            // The placeholder is what the popup derives on its own, so what a
-            // name is overriding is visible before it is overridden.
             input.placeholder = String(who)
               .replace(/\s*Battery(\s+(Level|State|Percentage))?$/i, "").trim() || who;
             input.onchange = () => write(input.value.trim());
@@ -14788,30 +16874,24 @@ class HemmaPanel extends HTMLElement {
       });
     }
 
-    // advFields above still reads the unfiltered list, so a type that both
-    // groups its drawer AND hides the first field of that group would name the
-    // drawer after something not on screen. Nothing does yet; the fix belongs
-    // there rather than here if one ever does.
     tfields.filter((f) => !f.when || f.when(tile.variables || {})).forEach((f) => {
       const cur = (tile.variables || {})[f.key];
       let input;
-      // Declared here, not inside the block below: the plain-input path falls
-      // out of that block and still calls put(), which threw "Can't find
-      // variable: put" and took the whole Tiles section down with it.
-      const put = f.advanced ? advRow : addRow;
+      const put = f.advanced ? advRow : ((label, input) => {
+        const r = addRow(label, input);
+        if (r && r.dataset) r.dataset.opt = "1";
+        return r;
+      });
       if (f.advanced && f.group && f.group !== firstGroup) advGroupHead(f.group);
       const hintUnder = () => {
         if (!f.hint) return;
         const h = document.createElement("div");
         h.className = "hint";
         h.textContent = f.hint;
+        if (!f.advanced) h.dataset.opt = "1";
         (f.advanced && advBody ? advBody : body).appendChild(h);
       };
 
-      // hemma_popup_plant takes ONE flat list and reads each entry's kind off
-      // its entity id, so the panel draws the six readings it will actually
-      // plot and writes them back in that order. Anything it cannot type is
-      // carried on the end rather than dropped.
       if (f.type === "plantsensors") {
         const raw = Array.isArray(cur) ? cur.filter(Boolean) : [];
         const bySlot = {};
@@ -14833,10 +16913,6 @@ class HemmaPanel extends HTMLElement {
           this._syncPreview();
         };
         PLANT_SLOTS.forEach((sl) => {
-          // Suggestions, not a wall: the field still takes anything you type,
-          // since an install whose ids do not name their readings still has to
-          // be configurable. What it will not do is offer a light sensor for
-          // the temperature slot and let the popup plot it as light.
           const opts = this._entityList(["sensor"]).filter((id) => plantSlotOf(id) === sl.type);
           const c = this._combo(bySlot[sl.type] || "", opts, "sensor.", (v) => {
             if (v) bySlot[sl.type] = v; else delete bySlot[sl.type];
@@ -14860,8 +16936,6 @@ class HemmaPanel extends HTMLElement {
         put(f.label, this._chipPicker(cur, f.domains || ["sensor"], (items) => {
           if (items.length) { if (!tile.variables) tile.variables = {}; tile.variables[f.key] = items; }
           else if (tile.variables) delete tile.variables[f.key];
-          // hemma_battery scores the list and never shows an entity row, so
-          // the first sensor backfills the entity hemma_entity still reads.
           if (type.noEntity && !tile.entity && items.length) {
             tile.entity = items[0];
             return this._renderForm();
@@ -14872,16 +16946,11 @@ class HemmaPanel extends HTMLElement {
         return;
       }
 
-      /* A tile can carry a map too: unimplemented here, a map field fell through
-         to the generic input and drew a bare text box. One row per entity in the
-         field this maps `over`, named for the entity. */
       if (f.type === "map") {
         const over = ((tile.variables || {})[f.over] || []).filter(Boolean);
         const raw = (tile.variables || {})[f.key];
         const map = (raw && typeof raw === "object" && !Array.isArray(raw)) ? raw : {};
         if (!over.length) {
-          // Through put(), not straight into a container: advBody is built
-          // lazily inside advRow and does not exist yet here.
           const h = document.createElement("div");
           h.className = "hint";
           h.textContent = f.emptyHint || "Add the entities above first.";
@@ -14891,9 +16960,6 @@ class HemmaPanel extends HTMLElement {
         over.forEach((id) => {
           const st = this._hass.states[id];
           const who = (st && st.attributes.friendly_name) || id;
-          // Same shape every kind writes: { entity_id: value }. Empty deletes
-          // the key rather than storing "", which the popup would take as an
-          // answer and render as nothing.
           const write = (v) => {
             const next = {};
             over.forEach((k) => { if (map[k]) next[k] = map[k]; });
@@ -14932,9 +16998,23 @@ class HemmaPanel extends HTMLElement {
         hintUnder();
         return;
       }
-      // A field others are hidden behind has to rebuild the card, or the rows
-      // it just unlocked do not appear until something else re-renders.
       const after = () => { if (f.reveals) this._renderForm(); else this._syncPreview(); };
+      if (f.type === "states") {
+        const vals = f.values || {};
+        put(f.label, this._combo(listOption(vals, cur), f.options, "",
+          (v) => {
+            const next = (vals[v] || []).slice();
+            if (next.length) {
+              if (!tile.variables) tile.variables = {};
+              tile.variables[f.key] = next;
+            } else if (tile.variables) delete tile.variables[f.key];
+            if (tile.variables && !Object.keys(tile.variables).length) delete tile.variables;
+            after();
+          },
+          { fixed: true, labels: { "": "Default", ...(f.optionLabels || {}) } }).wrap);
+        hintUnder();
+        return;
+      }
       if (f.type === "select") {
         put(f.label, this._combo(String(cur === undefined ? "" : cur), f.options, "",
           (v) => {
@@ -14947,10 +17027,6 @@ class HemmaPanel extends HTMLElement {
         hintUnder();
         return;
       }
-      // Typed: anything that is not an object is not written, or a half-typed
-      // brace reaches the template as a string.
-      // An empty box accepting "any CSS color" is a question most people cannot
-      // answer, so Hemma's own accents are one tap away.
       if (f.type === "color") {
         const cur2 = cur === undefined ? "" : String(cur);
         const btn = document.createElement("button");
@@ -14985,10 +17061,6 @@ class HemmaPanel extends HTMLElement {
           this._syncPreview();
         };
         native.onchange = () => write(native.value);
-        // showPicker is the API for opening a control you are not showing, and
-        // it needs the press that opened the menu - so it runs on that press,
-        // not a frame later. click() is the fallback for anything older, and
-        // it is why the input keeps a real box: a zero-sized one opens nothing.
         const openNative = () => {
           try {
             if (typeof native.showPicker === "function") { native.showPicker(); return; }
@@ -15057,9 +17129,6 @@ class HemmaPanel extends HTMLElement {
           after();
         };
         if (f.type === "icon") {
-          // A field whose default is an entity's OWN icon has nothing to ghost
-          // - that is an mdi name this picker cannot draw - so it says what
-          // will happen instead of drawing the wrong glyph.
           const ghost = f.iconNoGhost ? null
             : (f.iconDefault || glyphNow() || TILE_ICON[type.id] || null);
           put(f.label, this._combo(
@@ -15099,6 +17168,7 @@ class HemmaPanel extends HTMLElement {
 
     if (entityInDrawer) advRow(entityLabel, entCombo.wrap);
     if (advDet) body.appendChild(advDet);
+    this._groupTileBody(box, body);
 
     box.appendChild(body);
     return box;

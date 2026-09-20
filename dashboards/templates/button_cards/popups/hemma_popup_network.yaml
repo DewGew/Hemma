@@ -880,12 +880,6 @@ hemma_popup_network:
             type: 'custom:apexcharts-card',
             graph_span: '2h',
             header: { show: false },
-            // align_to rounds the ends and stepSize spaces the ticks; they have to be
-            // the same number. apexcharts-card writes a concrete min and max from the
-            // data before Apex sees the axis, so forceNiceScale never runs and
-            // tickAmount just halves whatever range it got: 0/83/166, 0/375/750,
-            // 81/82/84. With both ends on a multiple of the step Apex takes stepSize
-            // and every label is a multiple of it. tickAmount must stay off, it wins.
             yaxis: [{ min: 0, align_to: 100, show: true, apex_config: { stepSize: 100, decimalsInFloat: 0, floating: true, labels: { offsetX: 4, offsetY: -8, align: 'left', style: { colors: 'rgba(255,255,255,0.42)', fontSize: '11px', fontFamily: 'var(--primary-font-family, system-ui)' } } } }],
             series: networkSeries,
             apex_config: {
@@ -900,27 +894,12 @@ hemma_popup_network:
               },
               theme: { mode: 'dark' },
               stroke: { curve: 'monotoneCubic', width: 2.5, lineCap: 'round' },
-              // Apple's charts are charts: a labeled scale, time along the
-              // bottom, faint horizontal rules, on a ground dark enough to read
-              // them against. Without those this was a sparkline claiming to be
-              // informative - a curve you cannot take a number off.
               grid: {
                 show: true,
                 borderColor: 'rgba(255,255,255,0.10)',
                 strokeDashArray: 0,
                 xaxis: { lines: { show: false } },
                 yaxis: { lines: { show: true } },
-                // Measured, not guessed. A floating y label is drawn from the
-                // CHART's left edge, not the plot's, so grid.padding never moved
-                // it: at offsetX 6 the widest label ("1000") started at -2px,
-                // outside the card. offsetX 42 puts the right edge of the number
-                // column at 44px in, on every popup, and padding.left 56 starts
-                // the plot 12px past it. padding.right 8 leaves room for the last
-                // time label to sit inside the content edge instead of past it.
-                // Full bleed. The plot runs the card's whole inner width and the
-                // numbers move inside it, left-aligned at the plot's own left
-                // edge so their position no longer moves with the digit count,
-                // and lifted 8px so no gridline crosses a digit.
                 padding: { left: 0, right: 0, top: -6, bottom: -4 },
               },
               xaxis: {
@@ -1404,9 +1383,6 @@ hemma_popup_network:
             const throughput = [];
             const push = (label, icon, id) => {
               const v = safeNum(id);
-              // Tinted to the series it belongs to, so a download row and the
-              // download line read as one thing rather than two teal icons and
-              // two differently-colored lines.
               if (id) throughput.push({ icon: icon,
                 iconTone: /upload/i.test(label) ? ulCol : dlCol,
                 label: label, value: fmt(v) + ' Mbit/s', entity: id });
@@ -1428,8 +1404,6 @@ hemma_popup_network:
               || hass?.entities?.[id]?.name
               || states[id]?.attributes?.friendly_name
               || (id ? id.split('.')[1].replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Device');
-            // The two rows are different things - the mesh itself and the link
-            // out - and one glyph for both said neither.
             const deviceGlyph = (id, label) => {
               const t = ((label || '') + ' ' + (id || '')).toLowerCase();
               if (/mesh|wifi|wi-fi|access.?point|ap\b/.test(t)) return 'mesh';
@@ -1442,8 +1416,6 @@ hemma_popup_network:
               devices.push({
                 icon: deviceGlyph(id, nameFor(id, label, statId)),
                 label: nameFor(id, label, statId),
-                // The entity is what makes the tile open the device; without it
-                // the whole tile was the restart button.
                 entity: statId || id,
                 action: 'Restart',
                 confirm: true,
@@ -1468,8 +1440,6 @@ hemma_popup_network:
               type: 'custom:button-card',
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,
-              // The chart lives in THIS shadow root, so the reveal has to as
-              // well - the same rule in the popup's own sheet matches nothing.
               extra_styles: '@keyframes hemma-plate-hold { from, to { opacity: 0; } }'
                 + ' @keyframes hemma-plate-in {'
                 + ' from { opacity: 0; transform: perspective(900px) translateZ(-70px); }'
@@ -1496,15 +1466,8 @@ hemma_popup_network:
                   + ' box-shadow: var(--hemma-popup-plate-shadow, none) !important;'
                   + ' backdrop-filter: var(--hemma-popup-plate-backdrop, none) !important;'
                   + ' -webkit-backdrop-filter: var(--hemma-popup-plate-backdrop, none) !important;'
-                  // visible, or a tooltip near the top of the chart is clipped
-                  // by the card holding it. The content is inset by the card's
-                  // padding, so nothing reaches the rounded corners anyway.
                   + ' overflow: visible !important;'
                   + ' will-change: auto !important; cursor: default !important; }',
-                // The plate hands its own shadow to the theme's hover rule via
-                // --hemma-card-hover-shadow, and custom properties inherit - so
-                // the chart card nested inside it was painting that shadow around
-                // the graph. Stood back down for everything under the plate.
                 '#container > * { --hemma-card-hover-shadow: none !important;'
                   + ' --button-card-box-shadow-hover: none !important; }',
                 'ha-card::before, ha-card::after { display: none !important; }',
@@ -1529,33 +1492,19 @@ hemma_popup_network:
               },
               custom_fields: metricFields,
             };
-            // First, not last: the wrapper is built after the groups because it
-            // needs graphCard, but it belongs at the top of the popup.
             areas.unshift('"metric"');
             fields.metric = { card: metricCard };
             fstyle.metric = [{ 'justify-self': 'stretch' }, { overflow: 'visible' }];
 
-            // Devices moves to a column of its own, and the rest of the
-            // sections stack down the left. Only worth it when there is
-            // something to put beside them, so a popup with no Devices row
-            // keeps the single column it had.
             const aside = fstyle.dev ? 'dev' : null;
             const mainAreas = areas
               .map((a) => a.replace(/"/g, ''))
               .filter((k) => k !== aside);
-            // >= 1, not > 1. The surface width is set in CSS and cannot know
-            // what the data did, so the arrangement must not change with it:
-            // "By device" is dropped whenever every device is drawing zero, and
-            // on > 1 that folded the columns while the surface stayed wide,
-            // leaving two plates stretched across 900px. One section beside the
-            // aside is a fine layout; no sections at all is not.
             const sideBySide = !!aside && mainAreas.length >= 1;
             const sideAreas = sideBySide
               ? mainAreas.map((k, i) => '"' + k + ' ' + (i === 0 ? aside : '.') + '"').join(' ')
               : '';
 
-            // areas is the visual order; fstyle's own key order is not, because
-            // metric is unshifted in after the groups were already added.
             const order = sideBySide ? [mainAreas[0], aside].concat(mainAreas.slice(1))
                                      : areas.map((a) => a.replace(/"/g, ''));
             order.forEach((key, i) => {
@@ -1567,15 +1516,8 @@ hemma_popup_network:
 
             const uiCard = {
               type: 'custom:button-card',
-              // Transparent, or this nested ha-card lays a second
-              // backdrop-filter over the popup's own and the block it
-              // covers reads a shade off from everything around it.
               card_mod: { style: contentCardStyle
                 + '\nha-card { will-change: auto !important; }' },
-              // One column again as soon as the surface is narrow. #container is
-              // the grid, and extra_styles is written into this card's own
-              // shadow root at first render - card_mod would land half a second
-              // late and the columns would visibly reflow.
               extra_styles: sideBySide
                 ? '@media (max-width: 760px) { #container {'
                   + ' grid-template-areas: ' + areas.join(' ') + ' !important;'
@@ -1589,19 +1531,12 @@ hemma_popup_network:
                   { padding: '6px 26px 22px 26px' },
                 ],
                 grid: [
-                  // Devices is a different kind of thing from the readings above
-                  // it - two buttons, not measurements - so it stands beside
-                  // them rather than under them. Only when there is room: the
-                  // media query in extra_styles puts it back in one column, and
-                  // that is also the phone path, where the sheet is full width.
                   { 'grid-template-areas': sideBySide ? sideAreas : areas.join(' ') },
                   { 'grid-template-columns': sideBySide
                       ? 'minmax(0, 1fr) fit-content(var(--hemma-popup-aside-max, 420px))'
                       : 'minmax(0, 1fr)' },
                   { 'row-gap': '18px' },
                   { 'column-gap': '18px' },
-                  // Without this every plate stretches to its row, and the two
-                  // Devices rows would be pulled as tall as the chart.
                   { 'align-items': 'start' },
                 ],
                 custom_fields: fstyle,

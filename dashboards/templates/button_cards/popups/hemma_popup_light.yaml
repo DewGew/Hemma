@@ -1,29 +1,23 @@
-# Light Popup
 hemma_popup_light:
   template:
-    - hemma_popup_base
-
+  - hemma_popup_base
   variables:
-    room_name: null  # title override; falls back to the group's area, then "Home"
+    room_name: null
     lights: []
     group_rooms: true
-    popup_group: null  # override the popup's group; 'none' keeps it on `entity` alone
+    popup_group: null
     initial_filter: -1
-    show_scenes: false
-
   custom_fields:
     lpc_init: |
       [[[
-        if (typeof window._hemmaLPC !== 'function' || window._hemmaLPCv !== 37) {
-              window._hemmaLPCv = 37;
-              window._hemmaLPC = function(__entity, __states, __hass, __vars) {
+        if (typeof window._hemmaLPC !== 'function' || window._hemmaLPCv !== 72) {
+              window._hemmaLPCv = 72;
+              window._hemmaLPC = function(__entity, __states, __hass, __vars, __mode) {
               const entity = __entity, states = __states, hass = __hass, variables = __vars;
               const _pgVar   = variables.popup_group || variables.group_entity || null;
               const _pgOff   = _pgVar === 'none';
               let   groupId  = (_pgOff ? entity?.entity_id : (_pgVar || entity?.entity_id)) || null;
               let   _autoIdx = -1;
-              // A flat room group is promoted to the parent group-of-groups, so a room's
-              // light card opens the same popup its light badge does.
               if (!_pgOff && groupId && variables.group_rooms === true
                   && !(Array.isArray(variables.lights) && variables.lights.length > 0)) {
                 const _mems0 = states[groupId]?.attributes?.entity_id;
@@ -42,7 +36,7 @@ hemma_popup_light:
                   }
                 }
               }
-  
+
               if (!window._hemmaLightMoreInfoSetup) {
                 window._hemmaLightMoreInfoSetup = true;
                 window._hemmaLastScrollTs = 0;
@@ -57,8 +51,27 @@ hemma_popup_light:
                 }, { capture: true, passive: true });
                 document.addEventListener('ll-custom', (e) => {
                   const d = (e.detail && e.detail.event_data) ? e.detail.event_data : (e.detail || {});
+                  /* The icon toggles through here rather than button-card's own
+                     toggle action, for the same reason the row tap does: the
+                     popup dismisses on a background tap and the tile re-renders
+                     while the tap is still dispatching, so only the control can
+                     say the tap belonged to it. */
+                  if (d.hemma_light_toggle) {
+                    if (Date.now() - window._hemmaLastScrollTs < 400) return;
+                    window._hemmaSuppressDismiss = Date.now() + 600;
+                    const _h = document.querySelector('home-assistant')?.hass;
+                    if (_h) _h.callService('light', 'toggle', { entity_id: d.hemma_light_toggle });
+                    return;
+                  }
                   if (!d.hemma_light_more_info) return;
                   if (Date.now() - window._hemmaLastScrollTs < 400) return;
+                  /* Claim the tap. The popup dismisses on a background tap and
+                     cannot recognize this one from the event: the tile
+                     re-renders while the tap is still being dispatched, so the
+                     hit test finds nothing under the pointer and reads it as
+                     bare ground. The tile knows it was tapped, so it says so -
+                     the same way the room pills do. */
+                  window._hemmaSuppressDismiss = Date.now() + 600;
                   const ha = document.querySelector('home-assistant');
                   if (ha) {
                     ha.dispatchEvent(new CustomEvent('hass-more-info', {
@@ -68,7 +81,7 @@ hemma_popup_light:
                   }
                 });
               }
-  
+
               const _expand = (eid, seen = new Set()) => {
                 if (!eid || seen.has(eid)) return [];
                 seen.add(eid);
@@ -78,12 +91,12 @@ hemma_popup_light:
                 if (Array.isArray(mems)) return mems.flatMap(m => _expand(m, seen));
                 return eid.startsWith('light.') ? [eid] : [];
               };
-  
+
               const topLevelIds = states[groupId]?.attributes?.entity_id || [];
               const hasRooms = variables.group_rooms === true
                             && topLevelIds.length > 1
                             && Array.isArray(states[topLevelIds[0]]?.attributes?.entity_id);
-  
+
               const toTitle = s => s.replace(/_/g, ' ').replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
               const _hassObj = typeof hass !== 'undefined' ? hass : null;
@@ -98,8 +111,6 @@ hemma_popup_light:
                 return aid ? (_hassObj?.areas?.[aid]?.name || null) : null;
               };
 
-              // A single-room popup takes the group's area, since group helpers are
-              // usually renamed to a bare "Lights"; a multi-room one is the whole home.
               const roomName = variables.room_name || _areaName(groupId)
                             || (hasRooms ? 'Home' : states[groupId]?.attributes?.friendly_name)
                             || 'Lighting';
@@ -110,11 +121,11 @@ hemma_popup_light:
                     lights: states[rid]?.attributes?.entity_id || [],
                   }))
                 : null;
-  
+
               const lightIds = (Array.isArray(variables.lights) && variables.lights.length > 0)
                 ? variables.lights
                 : rooms ? rooms.flatMap(r => r.lights) : (groupId ? _expand(groupId) : []);
-  
+
               const gidKey     = JSON.stringify(groupId);
               const _lightIds  = JSON.stringify(lightIds);
               const _countSnip = `
@@ -124,46 +135,15 @@ hemma_popup_light:
               `;
               const n = rooms ? rooms.length : 0;
               const isDesktop = window.innerWidth >= 600;
-  
-              // Scene detection
-              // Keys-then-lookup: ownKeys doesn't register entities, get does.
-              const _scopeLeaves = new Set(_expand(groupId));
-              const _touchesGroup = (s) => {
-                const targets = s.attributes?.entity_id;
-                if (!Array.isArray(targets)) return false;
-                return targets.some(id => {
-                  if (typeof id !== 'string' || !id.startsWith('light.')) return false;
-                  if (_scopeLeaves.has(id)) return true;
-                  return _expand(id).some(leaf => _scopeLeaves.has(leaf));
-                });
-              };
 
-              const _showScenes = variables.show_scenes === true;
-              const sceneIds = (rooms && _showScenes) ? Object.keys(states || {})
-                .filter(id => id.startsWith('scene.'))
-                .map(id => states[id])
-                .filter(s => !s.entity_id.startsWith('scene.hemma'))
-                .filter(s => {
-                  const re = _getReg(s.entity_id);
-                  return re && !(re.hidden || re.hidden_by || re.disabled || re.disabled_by);
-                })
-                .filter(_touchesGroup)
-                .sort((a, b) => (a.attributes?.friendly_name || a.entity_id)
-                  .localeCompare(b.attributes?.friendly_name || b.entity_id))
-                .map(s => s.entity_id) : [];
-              if (variables.scene_order && Array.isArray(variables.scene_order)) {
-                const _so = variables.scene_order;
-                sceneIds.sort((a, b) => {
-                  const ai = _so.indexOf(a), bi = _so.indexOf(b);
-                  if (ai !== -1 && bi !== -1) return ai - bi;
-                  if (ai !== -1) return -1;
-                  if (bi !== -1) return 1;
-                  return 0;
-                });
-              }
-              const hasScenes = sceneIds.length > 0;
-              const _scnIdsJson = JSON.stringify(sceneIds);
-  
+              const TILE_W = 209;
+              // The surface is capped at 92vw below, so a tablet fits fewer than five.
+              const _fitCols = Math.floor((window.innerWidth * 0.92 - 44 + 10) / (TILE_W + 10));
+              const _deskCols = Math.max(2, Math.min(5, _fitCols, rooms
+                ? rooms.reduce((m, r) => Math.max(m, (r.lights || []).length), 1)
+                : lightIds.length));
+              const _deskW = Math.max(560, 44 + _deskCols * TILE_W + (_deskCols - 1) * 10);
+
               // Initial filter
               const _popupSessionId = Math.random();
               let initialFilter = typeof variables.initial_filter === 'number' ? variables.initial_filter : -1;
@@ -180,15 +160,93 @@ hemma_popup_light:
                   if (_autoIdx >= 0) initialFilter = _autoIdx;
                 }
               }
-  
+
               const ghostStyle = [
                 ':host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; --ha-card-border-radius: 0px !important; --ha-card-background: transparent !important; --ha-card-border-width: 0px !important; width: 100% !important; max-width: none !important; }',
                 'ha-card { background: transparent !important; border: none !important; border-radius: 0px !important; box-shadow: none !important; overflow: visible !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
                 'ha-card:hover { box-shadow: none !important; }',
                 'ha-ripple { display: none !important; }',
               ].join('\n');
-  
-              /* Badge pill */
+
+              /* Widget plate. Three layers because each lands at a different
+                 moment: styles.card paints on frame one, card_mod outranks the
+                 theme but arrives half a second late, and extra_styles carries
+                 the entrance because card_mod is far too late to start it. */
+              const PLATE_FILL = 'var(--hemma-popup-row-fill, rgba(12,14,19,0.62))';
+              const plateMod = [
+                ':host { --ha-card-box-shadow: none !important;'
+                  + ' --button-card-box-shadow: none !important;'
+                  + ' --button-card-box-shadow-hover:'
+                  + ' var(--hemma-popup-plate-shadow, none) !important;'
+                  + ' --hemma-card-hover-shadow:'
+                  + ' var(--hemma-popup-plate-shadow, none) !important;'
+                  + ' --hemma-card-hover-filter: none !important;'
+                  + ' --hemma-hover-filter: none !important;'
+                  + ' --ha-card-backdrop-filter: none !important;'
+                  + ' width: 100% !important; max-width: none !important; }',
+                'ha-card { background: ' + PLATE_FILL + ' !important;'
+                  + ' border: none !important;'
+                  + ' border-radius: var(--hemma-popup-row-radius, 26px) !important;'
+                  + ' box-shadow: var(--hemma-popup-plate-shadow, none) !important;'
+                  + ' backdrop-filter: var(--hemma-popup-plate-backdrop, none) !important;'
+                  + ' -webkit-backdrop-filter:'
+                  + ' var(--hemma-popup-plate-backdrop, none) !important;'
+                  + ' will-change: auto !important;'
+                  + ' overflow: visible !important; cursor: default !important; }',
+                'ha-card::before, ha-card::after { display: none !important; }',
+                'ha-card:hover { box-shadow: var(--hemma-popup-plate-shadow, none) !important;'
+                  + ' filter: none !important; }',
+                'ha-ripple { display: none !important; }',
+              ].join('\n');
+
+
+              const plateCardStyles = (pad) => [
+                { background: PLATE_FILL },
+                { 'border-radius': 'var(--hemma-popup-row-radius, 26px)' },
+                { 'backdrop-filter': 'var(--hemma-popup-plate-backdrop, none)' },
+                { '-webkit-backdrop-filter': 'var(--hemma-popup-plate-backdrop, none)' },
+                { 'box-shadow': 'var(--hemma-popup-plate-shadow, none)' },
+                { border: 'none' },
+                { margin: isDesktop ? '0 0 12px 0' : '0 0 10px 0' },
+                { padding: pad },
+              ];
+
+              /* Transform only, no opacity. An animated opacity on an ANCESTOR
+                 paints the subtree into its own layer and every backdrop-filter
+                 inside it has nothing left to sample - so while a room section
+                 faded in, its tiles lost their frost entirely and only picked
+                 up the blur and the saturation once the animation ended.
+                 Transform on an ancestor does not do that.
+                 The delay is written in rather than read from a custom
+                 property: one set on the same element that extra_styles reads
+                 it back on resolves to the PREVIOUS render. */
+              const sectionEnter = (delayMs) => '@keyframes hemma-section-in {'
+                + ' from { transform: perspective(900px) translateZ(-70px); }'
+                + ' to { transform: perspective(900px) translateZ(0); } }'
+                + ' ha-card { animation: hemma-section-in 320ms'
+                + ' cubic-bezier(0.2, 0.8, 0.3, 1) both;'
+                + ' animation-delay: ' + delayMs + 'ms; }'
+                + ' @media (prefers-reduced-motion: reduce) {'
+                + ' ha-card { animation: none; } }';
+
+              /* The close control's entrance, to the frame: hemma-popup-chrome-in
+                 lives in the popup's own shadow root and keyframes do not cross
+                 one, so it is restated here rather than referenced. */
+              const rowEnter = (delayMs) => '@keyframes hemma-row-in {'
+                + ' from { opacity: 0; transform: perspective(900px) translateZ(-70px); }'
+                + ' to { opacity: 1; transform: perspective(900px) translateZ(0); } }'
+                + ' ha-card { animation: hemma-row-in 320ms'
+                + ' cubic-bezier(0.2, 0.8, 0.3, 1) both;'
+                + ' animation-delay: ' + delayMs + 'ms; }'
+                + ' @media (prefers-reduced-motion: reduce) {'
+                + ' ha-card { animation: none; } }';
+
+              /* No stagger here. A stagger reads as a sequence, and these
+                 sections are not one - they are the rooms of a house, all
+                 equally present. They keep the depth entrance; they just all
+                 arrive on the same frame. */
+              const nextPlateDelay = () => 0;
+
               const _tidsJson = JSON.stringify(topLevelIds);
               const _roomLIds = JSON.stringify(rooms ? rooms.map(r => r.lights) : []);
               const _gkBadge = JSON.stringify(groupId);
@@ -197,9 +255,178 @@ hemma_popup_light:
                 const _sel2=(window._hemmaLF&&window._hemmaLF[_gid2]!==undefined)?window._hemmaLF[_gid2]:-1;
                 const _rLIds=${_roomLIds};
                 const _aLIds=${_lightIds};
-                const _aIds=(_sel2===-1||_sel2===${n})?_aLIds:(_rLIds[_sel2]||_aLIds);
+                const _aIds=(_sel2===-1)?_aLIds:(_rLIds[_sel2]||_aLIds);
                 const oc=_aIds.filter(id=>states[id]?.state==="on").length;
               `;
+              const _roomNamesJson = JSON.stringify(rooms ? rooms.map(r => r.name) : []);
+              /* The toggle's scope is whatever the pills have selected, so the
+                 label names it - and it is a toggle, not a one-way off: with
+                 everything off it restores exactly the lights that were on. */
+              const _pwrSnip = `
+                const _pgid = ${_gkBadge};
+                const _psel = (window._hemmaLF && window._hemmaLF[_pgid] !== undefined)
+                  ? window._hemmaLF[_pgid] : -1;
+                const _pRoom = ${_roomNamesJson};
+                const _pAll = ${_lightIds};
+                const _pRl = ${_roomLIds};
+                const _pIds = (_psel === -1) ? _pAll : (_pRl[_psel] || _pAll);
+                const _pName = (_psel >= 0 && _pRoom[_psel]) ? _pRoom[_psel]
+                  : ${JSON.stringify(rooms ? 'All Lights' : (roomName || 'Lights'))};
+                const oc = _pIds.filter(id => states[id]?.state === 'on').length;
+                const _pText = (oc > 0 ? 'Turn ' + _pName + ' Off' : 'Turn ' + _pName + ' On');
+              `;
+
+              /* Same object as the close control, mirrored across the bar: same
+                 48px target, same flat dark circle, same material. Two chrome
+                 controls in one bar in two different materials reads as a
+                 mistake - so the state is carried by the fill, not by making one
+                 of them glass. White fill with a dark glyph when anything in
+                 scope is on, which is how a tile says the same thing. */
+              const powerBtnCard = {
+                type: 'custom:button-card',
+                entity: groupId,
+                tap_action: rooms
+                  ? { action: 'fire-dom-event', event_data: { hemma_lf_badge_tap: groupId } }
+                  : { action: 'call-service', service: 'script.hemma_light_smart_toggle',
+                      service_data: { light_entity: groupId } },
+                haptic: 'medium',
+                show_icon: false, show_name: false, show_label: false, show_state: false,
+                card_mod: { style: [
+                  ':host { --ha-card-box-shadow: none !important;'
+                    + ' --button-card-box-shadow: none !important;'
+                    + ' --button-card-box-shadow-hover: none !important; }',
+                  'ha-card { border: none !important; border-radius: 50% !important;'
+                    + ' width: 48px !important; height: 48px !important;'
+                    + ' aspect-ratio: 1 !important; flex-shrink: 0 !important;'
+                    + ' background: var(--lp-pwr-bg) !important;'
+                    + ' backdrop-filter: var(--hemma-popup-tile-backdrop, none) !important;'
+                    + ' -webkit-backdrop-filter: var(--hemma-popup-tile-backdrop, none) !important;'
+                    + ' box-shadow: none !important; will-change: auto !important;'
+                    + ' cursor: pointer !important; display: flex !important;'
+                    + ' align-items: center !important; justify-content: center !important;'
+                    + ' transition: background 0.2s ease, transform 0.15s ease !important; }',
+                  'ha-card::before, ha-card::after { display: none !important; }',
+                  '@media (hover: hover) { ha-card:hover { filter: brightness(1.12) !important; } }',
+                  'ha-card:active { transform: scale(0.94) !important; }',
+                  'ha-ripple { display: none !important; }',
+                ].join('\n') },
+                styles: {
+                  /* Inline, not only in card_mod: card_mod lands about half a
+                     second late, so with the fill and the box only declared
+                     there the toggle painted as a bare glyph with no circle and
+                     no width - and then jumped to 48px and shoved the state
+                     text sideways when card_mod arrived. Frame one has to be
+                     the finished shape. */
+                  card: [
+                    { '--lp-pwr-bg': `[[[ ${_pwrSnip}
+                      return oc > 0 ? 'var(--hemma-entity-background-active, rgba(255,255,255,1))'
+                                    : 'var(--hemma-popup-row-fill, rgba(12,14,19,0.62))'; ]]]` },
+                    { background: 'var(--lp-pwr-bg)' },
+                    { width: '48px' }, { height: '48px' },
+                    { 'border-radius': '50%' },
+                    { 'box-sizing': 'border-box' },
+                    { display: 'flex' },
+                    { 'align-items': 'center' }, { 'justify-content': 'center' },
+                    { border: 'none' }, { padding: '0' },
+                  ],
+                  grid: [{ 'grid-template-areas': '"pwr_init" "c"' },
+                         { 'grid-template-columns': 'auto' },
+                         { 'grid-template-rows': '0 auto' },
+                         { 'align-items': 'center' }, { 'justify-items': 'center' }],
+                  custom_fields: {
+                    pwr_init: [{ height: '0' }, { overflow: 'hidden' },
+                               { padding: '0' }, { margin: '0' }],
+                    c: [{ 'justify-self': 'center' }],
+                  },
+                },
+                custom_fields: {
+                  pwr_init: `[[[
+                    window._hemmaLPRbadgeEl = window._hemmaLPRbadgeEl || {};
+                    window._hemmaLPRbadgeEl[${_gkBadge}] = this;
+                    return '';
+                  ]]]`,
+                  c: `[[[ ${_pwrSnip}
+                    return '<img class="lp-pwr" src="${window.hemmaIconUrl('power_on')}"'
+                      + ' style="width:17px;height:17px;display:block;pointer-events:none;'
+                      + 'filter:' + (oc > 0 ? 'brightness(0)' : 'brightness(0) invert(1)')
+                      + ';opacity:' + (oc > 0 ? '0.85' : '0.92') + ';" />';
+                  ]]]`,
+                },
+              };
+
+              /* The state belongs beside the toggle, not in the middle of the
+                 sheet: "All off" next to the button that turns them on says what
+                 the button will do. Live, so it stays a card rather than the
+                 chrome's eyebrow, which is evaluated once when the popup opens. */
+              const headerActionsCard = {
+                type: 'custom:button-card',
+                entity: groupId,
+                tap_action: { action: 'none' },
+                show_icon: false, show_name: false, show_label: false, show_state: false,
+                card_mod: { style: [
+                  ':host { --ha-card-box-shadow: none !important;'
+                    + ' --button-card-box-shadow: none !important;'
+                    + ' --button-card-box-shadow-hover: none !important; }',
+                  'ha-card { background: transparent !important; border: none !important;'
+                    + ' box-shadow: none !important; backdrop-filter: none !important;'
+                    + ' -webkit-backdrop-filter: none !important;'
+                    + ' will-change: auto !important; padding: 0 !important;'
+                    + ' cursor: default !important; overflow: visible !important; }',
+                  'ha-card::before, ha-card::after { display: none !important; }',
+                  '#container { padding: 0 !important; overflow: visible !important; }',
+                  'ha-ripple { display: none !important; }',
+                ].join('\n') },
+                styles: {
+                  card: [{ background: 'transparent' }, { padding: '0' },
+                         { 'box-shadow': 'none' }, { width: 'max-content' }],
+                  grid: [{ 'grid-template-areas': isDesktop ? '"pwr st"' : '"pwr"' },
+                         { 'grid-template-columns': isDesktop ? 'auto max-content' : 'auto' },
+                         { 'align-items': 'center' }, { 'column-gap': '10px' }],
+                  custom_fields: {
+                    pwr: [{ 'justify-self': 'start' }],
+                    st:  [{ 'justify-self': 'start' }, { overflow: 'visible' }],
+                  },
+                },
+                custom_fields: {
+                  ...(isDesktop ? { st: `[[[ ${_pwrSnip}
+                    const _w = oc === 0 ? 'All off' : (oc + ' on');
+                    return '<div style="font-family:var(--primary-font-family,system-ui);'
+                      + 'font-size:15px;font-weight:500;letter-spacing:-0.01em;white-space:nowrap;'
+                      + 'color:var(--hemma-popup-tiles-text-secondary, rgba(255,255,255,0.56));'
+                      + 'text-shadow:0 1px 3px rgba(0,0,0,0.35);">' + _w + '</div>';
+                  ]]]` } : {}),
+                  pwr: { card: powerBtnCard },
+                },
+              };
+
+              const makeHeadCard = (field) => ({
+                type: 'custom:button-card',
+                entity: groupId,
+                tap_action: { action: 'none' },
+                show_icon: false, show_name: false, show_label: false, show_state: false,
+                card_mod: { style: ghostStyle },
+                styles: {
+                  card: [{ background: 'transparent' }, { border: 'none' },
+                         { 'box-shadow': 'none' },
+                         { padding: isDesktop ? '4px 22px 14px 22px' : '2px 14px 12px 14px' }],
+                  grid: [{ 'grid-template-areas': '"lp_head"' },
+                         { 'grid-template-columns': 'minmax(0, 1fr)' }],
+                  custom_fields: {
+                    lp_head: [{ 'justify-self': 'stretch' }, { overflow: 'visible' }],
+                  },
+                },
+                custom_fields: { lp_head: field },
+              });
+
+              const headField = `[[[ ${_countSnip}
+                const _UI = window._hemmaUI;
+                const _w = oc === 0 ? 'Off' : (oc === tot ? 'All on' : oc + ' on');
+                return (_UI && _UI.headline)
+                  ? _UI.headline({ title: 'Lights', state: _w, barTitle: true }) : '';
+              ]]]`;
+
+
+              /* Badge pill */
               const badgePillCard = {
                 type: 'custom:button-card',
                 entity: groupId,
@@ -211,7 +438,7 @@ hemma_popup_light:
                 card_mod: {
                   style: [
                     ':host { --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: inset 0 1px 0.5px -0.5px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-top-tight,0.30) * 150%), transparent), inset 0 -1px 0.5px -0.5px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-bottom-tight,0.20) * 150%), transparent), inset 0 3px 6px -3px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-top-soft,0.10) * 150%), transparent), inset 0 -3px 6px -3px color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-bottom-soft,0.06) * 150%), transparent) !important; }',
-                    'ha-card { background: var(--pill-fill) !important; border: none !important; border-radius: 50% !important; width: 36px !important; height: 36px !important; aspect-ratio: 1 !important; flex-shrink: 0 !important; backdrop-filter: var(--hemma-glass-pill-backdrop, none) !important; -webkit-backdrop-filter: var(--hemma-glass-pill-backdrop, none) !important; box-shadow: inset 0 1px 0.5px -0.5px var(--pill-glow-top-tight), inset 0 -1px 0.5px -0.5px var(--pill-glow-bottom-tight), inset 0 3px 6px -3px var(--pill-glow-top-soft), inset 0 -3px 6px -3px var(--pill-glow-bottom-soft) !important; cursor: pointer !important; position: relative !important; overflow: visible !important; display: flex !important; align-items: center !important; justify-content: center !important; transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease !important; --pill-glow-top-tight: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-top-tight,0.30) * 100%), transparent) !important; --pill-glow-top-soft: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-top-soft,0.10) * 100%), transparent) !important; --pill-glow-bottom-tight: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-bottom-tight,0.20) * 100%), transparent) !important; --pill-glow-bottom-soft: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-bottom-soft,0.06) * 100%), transparent) !important; }',
+                    'ha-card { background: var(--pill-fill) !important; border: none !important; border-radius: 50% !important; width: 48px !important; height: 48px !important; aspect-ratio: 1 !important; flex-shrink: 0 !important; backdrop-filter: var(--hemma-glass-pill-backdrop, none) !important; -webkit-backdrop-filter: var(--hemma-glass-pill-backdrop, none) !important; box-shadow: inset 0 1px 0.5px -0.5px var(--pill-glow-top-tight), inset 0 -1px 0.5px -0.5px var(--pill-glow-bottom-tight), inset 0 3px 6px -3px var(--pill-glow-top-soft), inset 0 -3px 6px -3px var(--pill-glow-bottom-soft) !important; cursor: pointer !important; position: relative !important; overflow: visible !important; display: flex !important; align-items: center !important; justify-content: center !important; transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease !important; --pill-glow-top-tight: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-top-tight,0.30) * 100%), transparent) !important; --pill-glow-top-soft: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-top-soft,0.10) * 100%), transparent) !important; --pill-glow-bottom-tight: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint-tight,65%), white) calc(var(--hemma-glass-pill-glow-bottom-tight,0.20) * 100%), transparent) !important; --pill-glow-bottom-soft: color-mix(in srgb, color-mix(in srgb, var(--pill-accent,#ffffff) var(--hemma-glass-pill-ring-tint,40%), white) calc(var(--hemma-glass-pill-glow-bottom-soft,0.06) * 100%), transparent) !important; }',
                     'ha-card::after { content: ""; position: absolute; inset: -1px; border-radius: 50%; padding: 1px; background: conic-gradient(from 0deg, transparent 0deg 50deg, rgba(0,0,0,0.32) 80deg 100deg, transparent 130deg 230deg, rgba(0,0,0,0.32) 260deg 280deg, transparent 310deg 360deg); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; pointer-events: none; }',
                     '@media (hover: hover) { :host(:hover) ha-card { background: color-mix(in srgb, var(--pill-fill, var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))) 88%, white 12%) !important; } }',
                     'ha-card:active { transform: scale(0.94) !important; }',
@@ -229,12 +456,18 @@ hemma_popup_light:
                 },
                 custom_fields: {
                   c: `[[[${_badgeOc}return oc>0
-                    ? '<img src="${window.hemmaIconUrl('power_on')}" style="width:16px;height:16px;filter:brightness(0);opacity:0.85;display:block;pointer-events:none;" />'
-                    : '<img src="${window.hemmaIconUrl('power_on')}" style="width:16px;height:16px;filter:brightness(0) invert(1);opacity:0.92;display:block;pointer-events:none;" />'; ]]]`,
+                    ? '<img src="${window.hemmaIconUrl('power_on')}" style="width:24px;height:24px;filter:brightness(0);opacity:0.85;display:block;pointer-events:none;" />'
+                    : '<img src="${window.hemmaIconUrl('power_on')}" style="width:24px;height:24px;filter:brightness(0) invert(1);opacity:0.92;display:block;pointer-events:none;" />'; ]]]`,
                 },
               };
-  
-              /* Header */
+
+              if (__mode === 'header') {
+                return { eyebrow: '', title: rooms ? 'Lights' : (roomName || 'Lights'),
+                         actions: headerActionsCard, width: _deskW };
+              }
+
+              /* Header - only the f_init carrier survives here; the title and
+                 the power pill moved into the popup chrome. */
               const headerCard = {
                 type: 'custom:button-card',
                 entity: groupId,
@@ -244,45 +477,43 @@ hemma_popup_light:
                 styles: {
                   card: [
                     { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                    { padding: isDesktop ? '24px 24px 0 24px' : '20px 14px 0 14px' },
+                    { padding: '0' }, { 'min-height': '0' },
                   ],
                   grid: [
-                    { 'grid-template-areas': '"f_init f_init" "hdr_t hdr_b"' },
-                    { 'grid-template-columns': '1fr auto' },
-                    { 'align-items': 'flex-start' },
+                    { 'grid-template-areas': '"f_init"' },
+                    { 'grid-template-columns': '1fr' },
                   ],
                   custom_fields: {
                     f_init: [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }],
-                    hdr_t: [{ 'justify-self': 'start' }, { 'text-align': 'left' }],
-                    hdr_b: [{ 'justify-self': 'end' }, { 'align-self': 'flex-start' }],
                   },
                 },
                 custom_fields: {
                   f_init: '',
-                  hdr_t: '<div style="font-family:var(--primary-font-family,system-ui);color:#fff;">'
-                    + '<div style="font-size:16px;font-weight:400;letter-spacing:-0.01em;">' + roomName + '</div>'
-                    + '<div style="font-size:13px;color:rgba(255,255,255,0.45);font-weight:400;margin-top:2px;">Light Control</div>'
-                    + '</div>',
-                  hdr_b: { card: badgePillCard },
                 },
               };
-  
+
               /* Light Mode colors */
+              /* The same tokens the dashboard's own tiles read, not a second
+                 set of literals beside them - so a popup tile and a room tile
+                 are the same material by construction, and both follow the
+                 theme's light and dark blocks together. The inactive fill is a
+                 dark near-black over the blur, which is what makes it read as a
+                 control rather than a hole. */
               const _lc = {
-                onBg:    'rgba(255,255,255,0.94)',
-                onName:  'rgba(0,0,0,0.85)',
-                onLabel: 'rgba(0,0,0,0.50)',
-                offBg:   'rgba(255,255,255,0.11)',
-                offName: 'rgba(255,255,255,0.90)',
-                offLabel:'rgba(255,255,255,0.50)',
+                onBg:    'var(--hemma-entity-background-active, rgba(255,255,255,1))',
+                onName:  'var(--hemma-entity-name-active, rgba(0,0,0,0.88))',
+                onLabel: 'var(--hemma-entity-state-active, rgba(0,0,0,0.50))',
+                offBg:   'var(--hemma-entity-background, rgba(0,0,0,0.40))',
+                offName: 'var(--hemma-entity-name, rgba(255,255,255,0.98))',
+                offLabel:'var(--hemma-entity-state, rgba(255,255,255,0.56))',
               };
               const _hp = {
-                activeBg:  'rgba(255,255,255,0.88)',
-                activeClr: 'rgba(0,0,0,0.80)',
-                inactBg:   'rgba(255,255,255,0.10)',
-                inactClr:  'rgba(255,255,255,0.85)',
+                activeBg:  'var(--hemma-entity-background-active, rgba(255,255,255,1))',
+                activeClr: 'var(--hemma-entity-name-active, rgba(0,0,0,0.88))',
+                inactBg:   'var(--hemma-entity-background, rgba(0,0,0,0.40))',
+                inactClr:  'var(--hemma-entity-name, rgba(255,255,255,0.98))',
               };
-  
+
               /* Light entity card */
               const makeLightCard = (lightId) => ({
                 type: 'custom:button-card',
@@ -296,12 +527,15 @@ hemma_popup_light:
                 },
                 hold_action: { action: 'more-info' },
                 double_tap_action: { action: 'none' },
-                icon_tap_action: { action: 'toggle' },
+                icon_tap_action: {
+                  action: 'fire-dom-event',
+                  event_data: { hemma_light_toggle: lightId },
+                },
                 show_name: true,
                 show_state: false,
                 show_label: true,
                 label: `[[[ const e=states["${lightId}"]; const b=e?.attributes?.brightness; return b?Math.round(b/2.55)+"%":e?.state==="on"?"On":"Off"; ]]]`,
-                extra_styles: ':host{--hemma-card-hover-filter:brightness(1.10);width:100%!important;max-width:none!important;display:block!important;box-sizing:border-box!important;--button-card-ripple-color:transparent!important;--button-card-ripple-hover-color:transparent!important;--ha-ripple-color:transparent!important;--ha-ripple-hover-color:transparent!important;}ha-card{transition:background 0.45s ease,transform var(--hemma-popup-tile-hover-duration,0.2s) ease,filter var(--hemma-popup-tile-hover-duration,0.2s) ease!important;transform:scale(1)!important;}ha-card:hover{transform:scale(var(--hemma-popup-tile-hover-scale,1.01))!important;}ha-card:active{transform:scale(1)!important;}@media (hover:hover){ha-card:hover{filter:var(--hemma-card-hover-filter,brightness(1.06))!important;}ha-card:hover::after{background:var(--lc-hover-tint,rgba(255,255,255,0.06))!important;}}ha-card::before{display:none!important;}ha-card::after{content:""!important;position:absolute!important;inset:0!important;border-radius:inherit!important;background:transparent!important;transition:background var(--hemma-popup-tile-hover-duration,0.2s) ease!important;pointer-events:none!important;}ha-ripple{display:none!important;}div#img-cell{position:relative!important;overflow:hidden!important;transition:transform var(--hemma-popup-tile-hover-duration,0.2s) ease!important;}div#img-cell::before{display:none!important;}div#img-cell::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;background-color:var(--lc-clr,#ffffff)!important;-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%27-0.4809 -0.8399 16.9931 29.6759%27%3E%3Crect height=%2729.6759%27 opacity=%270%27 width=%2716.9931%27 x=%27-0.4809%27 y=%27-0.8399%27/%3E%3Cpath d=%27M4.13672 23.8711L11.5547 23.8711C11.9414 23.8711 12.2344 23.5664 12.2344 23.1797C12.2344 22.8047 11.9414 22.5 11.5547 22.5L4.13672 22.5C3.75 22.5 3.44531 22.8047 3.44531 23.1797C3.44531 23.5664 3.75 23.8711 4.13672 23.8711ZM7.83984 27.2695C9.65625 27.2695 11.168 26.3789 11.2852 25.0312L4.40625 25.0312C4.48828 26.3789 6.01172 27.2695 7.83984 27.2695Z%27 fill=%27white%27/%3E%3Cpath d=%27M0 7.21875C0 11.7188 2.96484 12.832 3.44531 20.6484C3.46875 21.0703 3.72656 21.3398 4.17188 21.3398L11.5078 21.3398C11.9648 21.3398 12.2109 21.0703 12.2461 20.6484C12.7266 12.832 15.6797 11.7188 15.6797 7.21875C15.6797 3.17578 12.2227 0 7.83984 0C3.45703 0 0 3.17578 0 7.21875Z%27 fill=%27white%27/%3E%3C/svg%3E")!important;-webkit-mask-repeat:no-repeat!important;-webkit-mask-position:center!important;-webkit-mask-size:auto 61.5%!important;mask-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%27-0.4809 -0.8399 16.9931 29.6759%27%3E%3Crect height=%2729.6759%27 opacity=%270%27 width=%2716.9931%27 x=%27-0.4809%27 y=%27-0.8399%27/%3E%3Cpath d=%27M4.13672 23.8711L11.5547 23.8711C11.9414 23.8711 12.2344 23.5664 12.2344 23.1797C12.2344 22.8047 11.9414 22.5 11.5547 22.5L4.13672 22.5C3.75 22.5 3.44531 22.8047 3.44531 23.1797C3.44531 23.5664 3.75 23.8711 4.13672 23.8711ZM7.83984 27.2695C9.65625 27.2695 11.168 26.3789 11.2852 25.0312L4.40625 25.0312C4.48828 26.3789 6.01172 27.2695 7.83984 27.2695Z%27 fill=%27white%27/%3E%3Cpath d=%27M0 7.21875C0 11.7188 2.96484 12.832 3.44531 20.6484C3.46875 21.0703 3.72656 21.3398 4.17188 21.3398L11.5078 21.3398C11.9648 21.3398 12.2109 21.0703 12.2461 20.6484C12.7266 12.832 15.6797 11.7188 15.6797 7.21875C15.6797 3.17578 12.2227 0 7.83984 0C3.45703 0 0 3.17578 0 7.21875Z%27 fill=%27white%27/%3E%3C/svg%3E")!important;mask-repeat:no-repeat!important;mask-position:center!important;mask-size:auto 61.5%!important;opacity:var(--lc-io,0.9)!important;pointer-events:none!important;transform:translateZ(0)!important;will-change:transform!important;}div#img-cell:hover,div#img-cell:active{transform:scale(1.03)!important;}#img-cell img{opacity:0!important;}',
+                extra_styles: ':host{--hemma-card-hover-filter:brightness(1.04);width:100%!important;max-width:none!important;display:block!important;box-sizing:border-box!important;--button-card-ripple-color:transparent!important;--button-card-ripple-hover-color:transparent!important;--ha-ripple-color:transparent!important;--ha-ripple-hover-color:transparent!important;}ha-card{transition:background 0.45s ease,transform var(--hemma-popup-tile-hover-duration,0.2s) ease,filter var(--hemma-popup-tile-hover-duration,0.2s) ease!important;transform:scale(1)!important;}ha-card:hover{transform:scale(var(--hemma-popup-tile-hover-scale,1.01))!important;}ha-card:active{transform:scale(1)!important;}@media (hover:hover){ha-card:hover{filter:var(--hemma-card-hover-filter,brightness(1.04))!important;}ha-card:hover::after{background:var(--lc-hover-tint,rgba(255,255,255,0.03))!important;}}ha-card::before{display:none!important;}ha-card::after{content:""!important;position:absolute!important;inset:0!important;border-radius:inherit!important;background:transparent!important;transition:background var(--hemma-popup-tile-hover-duration,0.2s) ease!important;pointer-events:none!important;}ha-ripple{display:none!important;}div#img-cell{position:relative!important;overflow:hidden!important;transition:transform var(--hemma-popup-tile-hover-duration,0.2s) ease!important;}div#img-cell::before{display:none!important;}div#img-cell::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;background-color:var(--lc-clr,#ffffff)!important;-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%27-0.4809 -0.8399 16.9931 29.6759%27%3E%3Crect height=%2729.6759%27 opacity=%270%27 width=%2716.9931%27 x=%27-0.4809%27 y=%27-0.8399%27/%3E%3Cpath d=%27M4.13672 23.8711L11.5547 23.8711C11.9414 23.8711 12.2344 23.5664 12.2344 23.1797C12.2344 22.8047 11.9414 22.5 11.5547 22.5L4.13672 22.5C3.75 22.5 3.44531 22.8047 3.44531 23.1797C3.44531 23.5664 3.75 23.8711 4.13672 23.8711ZM7.83984 27.2695C9.65625 27.2695 11.168 26.3789 11.2852 25.0312L4.40625 25.0312C4.48828 26.3789 6.01172 27.2695 7.83984 27.2695Z%27 fill=%27white%27/%3E%3Cpath d=%27M0 7.21875C0 11.7188 2.96484 12.832 3.44531 20.6484C3.46875 21.0703 3.72656 21.3398 4.17188 21.3398L11.5078 21.3398C11.9648 21.3398 12.2109 21.0703 12.2461 20.6484C12.7266 12.832 15.6797 11.7188 15.6797 7.21875C15.6797 3.17578 12.2227 0 7.83984 0C3.45703 0 0 3.17578 0 7.21875Z%27 fill=%27white%27/%3E%3C/svg%3E")!important;-webkit-mask-repeat:no-repeat!important;-webkit-mask-position:center!important;-webkit-mask-size:auto 61.5%!important;mask-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%27-0.4809 -0.8399 16.9931 29.6759%27%3E%3Crect height=%2729.6759%27 opacity=%270%27 width=%2716.9931%27 x=%27-0.4809%27 y=%27-0.8399%27/%3E%3Cpath d=%27M4.13672 23.8711L11.5547 23.8711C11.9414 23.8711 12.2344 23.5664 12.2344 23.1797C12.2344 22.8047 11.9414 22.5 11.5547 22.5L4.13672 22.5C3.75 22.5 3.44531 22.8047 3.44531 23.1797C3.44531 23.5664 3.75 23.8711 4.13672 23.8711ZM7.83984 27.2695C9.65625 27.2695 11.168 26.3789 11.2852 25.0312L4.40625 25.0312C4.48828 26.3789 6.01172 27.2695 7.83984 27.2695Z%27 fill=%27white%27/%3E%3Cpath d=%27M0 7.21875C0 11.7188 2.96484 12.832 3.44531 20.6484C3.46875 21.0703 3.72656 21.3398 4.17188 21.3398L11.5078 21.3398C11.9648 21.3398 12.2109 21.0703 12.2461 20.6484C12.7266 12.832 15.6797 11.7188 15.6797 7.21875C15.6797 3.17578 12.2227 0 7.83984 0C3.45703 0 0 3.17578 0 7.21875Z%27 fill=%27white%27/%3E%3C/svg%3E")!important;mask-repeat:no-repeat!important;mask-position:center!important;mask-size:auto 61.5%!important;opacity:var(--lc-io,0.9)!important;pointer-events:none!important;transform:translateZ(0)!important;will-change:transform!important;}div#img-cell:hover,div#img-cell:active{transform:scale(1.03)!important;}#img-cell img{opacity:0!important;}',
                 styles: {
                   card: [
                     { background: `[[[ return states["${lightId}"]?.state==="on"?"${_lc.onBg}":"${_lc.offBg}";]]]` },
@@ -312,10 +546,12 @@ hemma_popup_light:
                     /* On-state cards are already near-white, so the hover lift just washes out
                        the dark text and yellow icon. Override via styles.card (inline, beats
                        the :host default in extra_styles) to kill both while the light is on. */
-                    { '--hemma-card-hover-filter': `[[[ return states["${lightId}"]?.state==="on"?"none":"brightness(1.10)";]]]` },
-                    { '--lc-hover-tint': `[[[ return states["${lightId}"]?.state==="on"?"transparent":"rgba(255,255,255,0.06)";]]]` },
+                    { '--hemma-card-hover-filter': `[[[ return states["${lightId}"]?.state==="on"?"none":"brightness(1.04)";]]]` },
+                    { '--lc-hover-tint': `[[[ return states["${lightId}"]?.state==="on"?"transparent":"rgba(255,255,255,0.03)";]]]` },
                     { border: 'none' },
                     { 'box-shadow': 'none' },
+                    { 'backdrop-filter': `[[[ return states["${lightId}"]?.state==="on"?"none":"var(--hemma-popup-tile-backdrop, none)";]]]` },
+                    { '-webkit-backdrop-filter': `[[[ return states["${lightId}"]?.state==="on"?"none":"var(--hemma-popup-tile-backdrop, none)";]]]` },
                     { 'border-radius': '26px' },
                     { cursor: 'pointer' },
                     { padding: '12px 12px' },
@@ -367,108 +603,15 @@ hemma_popup_light:
                   ],
                 },
               });
-  
-              /* Scene card */
-              const sceneIconMap = variables.scene_icons || {};
-  
-              const makeSceneCard = (sceneId) => {
-                const _scGk = JSON.stringify(groupId);
-                const _scId = JSON.stringify(sceneId);
-                /* Only a mapped icon URL is known at build time, so the light tile's
-                   mask tint is wired up only then; scenes falling back to their mdi
-                   icon get the same tint through ha-icon's color instead. */
-                const _scIcon = sceneIconMap[sceneId] || null;
-                const _scMaskCss = _scIcon
-                  ? '#img-cell img{opacity:0!important;}div#img-cell::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;background-color:var(--sc-clr,#ffffff)!important;-webkit-mask-image:url(' + JSON.stringify(_scIcon) + ')!important;-webkit-mask-repeat:no-repeat!important;-webkit-mask-position:center!important;-webkit-mask-size:auto 58%!important;mask-image:url(' + JSON.stringify(_scIcon) + ')!important;mask-repeat:no-repeat!important;mask-position:center!important;mask-size:auto 58%!important;opacity:var(--sc-io,1)!important;pointer-events:none!important;transform:translateZ(0)!important;}'
-                  : '';
-                const _scActiveSnip = `
-                  const _sca = (() => {
-                    if (window._hemmaActiveScene?.[${_scGk}] !== ${_scId}) return false;
-                    const _snp = window._hemmaSceneSnap?.[${_scGk}];
-                    if (!_snp) return true;
-                    return ${_lightIds}.every(id => {
-                      const s = states[id]; if (!s) return true;
-                      const c = s.state+'|'+(s.attributes?.brightness??'')+'|'+(s.attributes?.color_temp??'')+'|'+JSON.stringify(s.attributes?.rgb_color??null);
-                      return c === _snp[id];
-                    });
-                  })();
-                `;
-                return {
-                  type: 'custom:button-card',
-                  entity: sceneId,
-                  tap_action: {
-                    action: 'fire-dom-event',
-                    event_data: { hemma_lf_scene_tap: sceneId, hemma_lf_gid: groupId },
-                  },
-                  haptic: 'medium',
-                  show_icon: true,
-                  show_entity_picture: true,
-                  entity_picture: `[[[ return ${JSON.stringify(_scIcon)} || states[${_scId}]?.attributes?.entity_picture || undefined; ]]]`,
-                  show_name: true,
-                  show_state: false,
-                  show_label: false,
-                  extra_styles: ':host{--hemma-card-hover-filter:brightness(1.10);width:100%!important;max-width:none!important;display:block!important;box-sizing:border-box!important;--button-card-ripple-color:transparent!important;--button-card-ripple-hover-color:transparent!important;--ha-ripple-color:transparent!important;--ha-ripple-hover-color:transparent!important;}ha-card{transition:background 0.45s ease,transform var(--hemma-popup-tile-hover-duration,0.2s) ease,filter var(--hemma-popup-tile-hover-duration,0.2s) ease!important;transform:scale(1)!important;}ha-card:hover{transform:scale(var(--hemma-popup-tile-hover-scale,1.01))!important;}ha-card:active{transform:scale(1)!important;}@media (hover:hover){ha-card:hover{filter:var(--hemma-card-hover-filter,brightness(1.06))!important;}ha-card:hover::after{background:var(--sc-hover-tint,rgba(255,255,255,0.06))!important;}}ha-card::before{display:none!important;}ha-card::after{content:""!important;position:absolute!important;inset:0!important;border-radius:inherit!important;background:transparent!important;transition:background var(--hemma-popup-tile-hover-duration,0.2s) ease!important;pointer-events:none!important;}ha-ripple{display:none!important;}div#img-cell{position:relative!important;overflow:hidden!important;transition:transform var(--hemma-popup-tile-hover-duration,0.2s) ease!important;}div#img-cell::before{display:none!important;}div#img-cell:hover,div#img-cell:active{transform:scale(1.03)!important;}ha-icon{--mdc-icon-size:22px!important;color:var(--sc-clr,#ffffff)!important;opacity:var(--sc-io,1)!important;}#img-cell img{width:60%!important;height:60%!important;object-fit:contain!important;opacity:var(--sc-io,1)!important;}' + _scMaskCss,
-                  styles: {
-                    card: [
-                      { background: `[[[ ${_scActiveSnip} return _sca?"${_lc.onBg}":"${_lc.offBg}"; ]]]` },
-                      { '--sc-nc': `[[[ ${_scActiveSnip} return _sca?"${_lc.onName}":"${_lc.offName}"; ]]]` },
-                      { '--sc-io': `[[[ return "1"; ]]]` },
-                      { '--sc-clr': `[[[ ${_scActiveSnip} return _sca?"#ffffff":"var(--hemma-color-yellow, #FFCC00)"; ]]]` },
-                      { '--hemma-card-hover-filter': `[[[ ${_scActiveSnip} return _sca?"none":"brightness(1.10)"; ]]]` },
-                      { '--sc-hover-tint': `[[[ ${_scActiveSnip} return _sca?"transparent":"rgba(255,255,255,0.06)"; ]]]` },
-                      { border: 'none' },
-                      { 'box-shadow': 'none' },
-                      { 'border-radius': '26px' },
-                      { cursor: 'pointer' },
-                      { padding: '12px 12px' },
-                      { width: '100%' },
-                    ],
-                    grid: [
-                      { 'grid-template-areas': '"i n"' },
-                      { 'grid-template-columns': 'auto 1fr' },
-                      { 'column-gap': '10px' },
-                      { 'align-items': 'center' },
-                    ],
-                    img_cell: [
-                      { background: `[[[ ${_scActiveSnip} return _sca?"var(--hemma-color-yellow,#FFCC00)":"rgba(255,255,255,0.10)"; ]]]` },
-                      { 'border-radius': '50%' },
-                      { width: '38px' },
-                      { height: '38px' },
-                      { 'min-width': '38px' },
-                      { display: 'flex' },
-                      { 'align-items': 'center' },
-                      { 'justify-content': 'center' },
-                      { 'align-self': 'center' },
-                    ],
-                    entity_picture: [
-                      { width: '60%' },
-                      { height: '60%' },
-                      { 'object-fit': 'contain' },
-                    ],
-                    name: [
-                      { 'font-size': '14px' },
-                      { 'font-weight': '500' },
-                      { color: 'var(--sc-nc)' },
-                      { 'text-align': 'left' },
-                      { 'justify-self': 'start' },
-                      { 'align-self': 'center' },
-                      { 'line-height': '1.2' },
-                      { overflow: 'hidden' },
-                      { 'text-overflow': 'ellipsis' },
-                      { 'white-space': 'nowrap' },
-                    ],
-                  },
-                };
-              };
-  
+
               /* Room section: label + light cards */
-              const makeRoomSection = (room, roomIdx) => {
+              const makeRoomSection = (room, roomIdx, delayMs) => {
                 const ids = room.lights;
                 if (!ids || !ids.length) return null;
-                const C = isDesktop ? 4 : 2;
+                const C = isDesktop ? Math.min(_deskCols, ids.length) : 2;
                 const fields = {};
                 const fstyle = {};
-  
+
                 const rsInitSnip = `
                   window._hemmaLPRooms = window._hemmaLPRooms || {};
                   window._hemmaLPRooms[${gidKey}] = window._hemmaLPRooms[${gidKey}] || [];
@@ -486,18 +629,21 @@ hemma_popup_light:
                 `;
                 fields.rs_init = `[[[ ${rsInitSnip} ]]]`;
                 fstyle.rs_init = [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }];
-  
-                fields.rs_lbl = '<span style="font-size:15px;font-weight:500;color:rgba(255,255,255,0.82);'
-                  + 'font-family:var(--primary-font-family,system-ui);letter-spacing:0.01em;display:block;padding-bottom:4px;">'
+
+                fields.rs_lbl = '<span style="font-size:17px;font-weight:700;'
+                  + 'color:rgba(255,255,255,0.95);'
+                  + 'font-family:var(--primary-font-family,system-ui);'
+                  + 'letter-spacing:-0.01em;display:block;padding-bottom:12px;'
+                  + 'text-shadow:0 1px 3px rgba(0,0,0,0.35);">'
                   + room.name + '</span>';
                 fstyle.rs_lbl = [{ 'justify-self': 'start' }];
-  
+
                 ids.forEach((id, j) => {
                   const t = 'rs_t' + j;
                   fields[t] = { card: makeLightCard(id) };
                   fstyle[t] = [{ 'justify-self': 'stretch' }, { 'text-align': 'left' }];
                 });
-  
+
                 let areas = '"' + Array(C).fill('rs_init').join(' ') + '" "' + Array(C).fill('rs_lbl').join(' ') + '"';
                 let rsPhIdx = 0;
                 const rowCount = Math.ceil(ids.length / C);
@@ -517,21 +663,27 @@ hemma_popup_light:
                   }
                   areas += ' "' + row + '"';
                 }
-  
+
                 return {
                   type: 'custom:button-card',
                   entity: groupId,
                   tap_action: { action: 'none' },
                   show_icon: false, show_name: false, show_label: false, show_state: false,
+                  extra_styles: sectionEnter(delayMs || 0),
                   card_mod: { style: ghostStyle },
                   styles: {
                     card: [
-                      { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                      { padding: isDesktop ? '8px 24px 8px 24px' : '8px 14px 12px 14px' },
+                      { background: 'transparent' }, { border: 'none' },
+                      { 'box-shadow': 'none' },
+                      { margin: isDesktop ? '0 0 26px 0' : '0 0 20px 0' },
+                      { padding: isDesktop ? '0' : '0 14px' },
                     ],
                     grid: [
                       { 'grid-template-areas': areas },
-                      { 'grid-template-columns': 'repeat(' + C + ', minmax(0,1fr))' },
+                      { 'grid-template-columns': isDesktop
+                          ? 'repeat(' + C + ', minmax(0, ' + TILE_W + 'px))'
+                          : 'repeat(' + C + ', minmax(0,1fr))' },
+                      { 'justify-content': 'start' },
                       { gap: '10px' },
                       { 'align-items': 'start' },
                     ],
@@ -540,359 +692,19 @@ hemma_popup_light:
                   custom_fields: fields,
                 };
               };
-  
-              /* Scenes section */
-              const makeScenesSection = (sceneList) => {
-                if (!sceneList || !sceneList.length) return null;
-                const gk = JSON.stringify(groupId);
-                const _scN = rooms.length;
-  
-                const scSecInitSnip = `
-                  window._hemmaLPRooms = window._hemmaLPRooms || {};
-                  window._hemmaLPRooms[${gk}] = window._hemmaLPRooms[${gk}] || [];
-                  window._hemmaLPRooms[${gk}][${_scN}] = this;
-                  const _scSelf = (window._hemmaLF?.[${gk}] !== undefined) ? window._hemmaLF[${gk}] : -1;
-                  if (_scSelf !== -1) {
-                    this.style.transition='none'; this.style.maxHeight='0px'; this.style.overflow='hidden';
-                    this.style.opacity='0'; this.style.transform='none'; this.style.pointerEvents='none';
-                  } else {
-                    this.style.transition='none'; this.style.maxHeight=''; this.style.overflow='';
-                    this.style.opacity='1'; this.style.transform='none'; this.style.pointerEvents='';
-                  }
-                  return '';
-                `;
-  
-                const scLblHtml = '<span style="font-size:15px;font-weight:500;color:rgba(255,255,255,0.82);'
-                  + 'font-family:var(--primary-font-family,system-ui);letter-spacing:0.01em;display:block;padding-bottom:4px;">Scenes</span>';
-  
-                const scLblInitSnip = `
-                  window._hemmaLPRooms = window._hemmaLPRooms || {};
-                  window._hemmaLPRooms[${gk}] = window._hemmaLPRooms[${gk}] || [];
-                  window._hemmaLPRooms[${gk}][${_scN}] = this;
-                  window._hemmaScLbl = window._hemmaScLbl || {};
-                  window._hemmaScLbl[${gk}] = this;
-                  const _scSelf = (window._hemmaLF?.[${gk}] !== undefined) ? window._hemmaLF[${gk}] : -1;
-                  if (_scSelf !== -1) {
-                    this.style.transition='none'; this.style.maxHeight='0px'; this.style.overflow='hidden';
-                    this.style.opacity='0'; this.style.transform='none'; this.style.pointerEvents='none';
-                  } else {
-                    this.style.transition='none'; this.style.maxHeight=''; this.style.overflow='';
-                    this.style.opacity='1'; this.style.transform='none'; this.style.pointerEvents='';
-                  }
-                  this.style.setProperty('--sc-lbl-pb', '12px');
-                  return '';
-                `;
-  
-                const svgChevron = '<svg id="sc_arrow" viewBox="0 0 8 13" width="9" height="13" fill="none"'
-                  + ' stroke="rgba(255,255,255,0.6)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"'
-                  + ' style="flex-shrink:0;overflow:visible;transform:rotate(var(--sc-rot,0deg));transition:transform 0.2s ease;">'
-                  + '<path d="M1.5 1.5 L6.5 6.5 L1.5 11.5"/>'
-                  + '</svg>';
-  
-                if (!isDesktop) {
-                  // Mobile
-                  const ALWAYS_N = Math.min(2, sceneList.length);
-                  const moreScenes = sceneList.slice(ALWAYS_N);
-                  const hasMobileMore = moreScenes.length > 0;
-  
-                  const scLblHtmlRow = '<div style="display:flex;align-items:center;gap:6px;padding-bottom:4px;">'
-                    + '<span style="font-size:15px;font-weight:500;color:rgba(255,255,255,0.82);font-family:var(--primary-font-family,system-ui);letter-spacing:0.01em;line-height:1.2;">Scenes</span>'
-                    + (hasMobileMore ? svgChevron : '')
-                    + '</div>';
-  
-                  const scLblFields = {};
-                  const scLblFStyle = {};
-  
-                  scLblFields.sc_init = `[[[ ${scLblInitSnip} ]]]`;
-                  scLblFStyle.sc_init = [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }];
-  
-                  scLblFields.sc_lbl = scLblHtmlRow;
-                  scLblFStyle.sc_lbl = [{ 'justify-self': 'start' }, { 'grid-column': 'span 2' }];
-  
-                  for (let j = 0; j < ALWAYS_N; j++) {
-                    scLblFields['sc_at' + j] = { card: makeSceneCard(sceneList[j]) };
-                    scLblFStyle['sc_at' + j] = [{ 'justify-self': 'stretch' }];
-                  }
-  
-                  if (ALWAYS_N === 1) {
-                    scLblFields.sc_alph = '<div></div>';
-                    scLblFStyle.sc_alph = [{ 'justify-self': 'stretch' }];
-                  }
-  
-                  const scLblTileRow = ALWAYS_N === 1 ? '"sc_at0 sc_alph"' : '"sc_at0 sc_at1"';
-                  const scLblAreas = '"sc_init sc_init" "sc_lbl sc_lbl" ' + scLblTileRow;
-  
-                  const scLabelCard = {
-                    type: 'custom:button-card',
-                    entity: groupId,
-                    tap_action: hasMobileMore
-                      ? { action: 'fire-dom-event', event_data: { hemma_sc_toggle: groupId } }
-                      : { action: 'none' },
-                    show_icon: false, show_name: false, show_label: false, show_state: false,
-                    card_mod: { style: ghostStyle + '\n#grid { overflow: visible !important; }\n#sc_lbl { overflow: visible !important; }' },
-                    styles: {
-                      card: [
-                        { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                        { padding: hasMobileMore ? '8px 14px var(--sc-lbl-pb, 12px) 14px' : '8px 14px 12px 14px' },
-                        ...(hasMobileMore ? [{ cursor: 'pointer' }] : []),
-                      ],
-                      grid: [
-                        { 'grid-template-areas': scLblAreas },
-                        { 'grid-template-columns': 'repeat(2, minmax(0,1fr))' },
-                        { gap: '10px' },
-                        { 'align-items': 'start' },
-                      ],
-                      custom_fields: scLblFStyle,
-                    },
-                    custom_fields: scLblFields,
-                  };
-  
-                  if (!hasMobileMore) {
-                    return scLabelCard;
-                  }
-  
-                  const scGridFields = {};
-                  const scGridFStyle = {};
-  
-                  const scGridInitSnip = `
-                    window._hemmaScGrid = window._hemmaScGrid || {};
-                    window._hemmaScGrid[${gk}] = this;
-                    this.style.maxHeight = '0px'; this.style.overflow = 'hidden'; this.style.opacity = '0';
-                    return '';
-                  `;
-                  scGridFields.sc_ginit = `[[[ ${scGridInitSnip} ]]]`;
-                  scGridFStyle.sc_ginit = [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }];
-  
-                  moreScenes.forEach((id, j) => {
-                    scGridFields['sc_mt' + j] = { card: makeSceneCard(id) };
-                    scGridFStyle['sc_mt' + j] = [{ 'justify-self': 'stretch' }];
-                  });
-  
-                  let scGridAreas = '"sc_ginit sc_ginit"';
-                  let scGridPhIdx = 0;
-                  const scMoreRowCount = Math.ceil(moreScenes.length / 2);
-                  for (let r = 0; r < scMoreRowCount; r++) {
-                    let row = '';
-                    for (let c = 0; c < 2; c++) {
-                      const idx = r * 2 + c;
-                      if (c > 0) row += ' ';
-                      if (idx < moreScenes.length) {
-                        row += 'sc_mt' + idx;
-                      } else {
-                        const ph = 'sc_mph' + scGridPhIdx++;
-                        row += ph;
-                        scGridFields[ph] = '<div></div>';
-                        scGridFStyle[ph] = [{ 'justify-self': 'stretch' }];
-                      }
-                    }
-                    scGridAreas += ' "' + row + '"';
-                  }
-  
-                  const scGridCard = {
-                    type: 'custom:button-card',
-                    entity: groupId,
-                    tap_action: { action: 'none' },
-                    show_icon: false, show_name: false, show_label: false, show_state: false,
-                    card_mod: { style: ghostStyle },
-                    styles: {
-                      card: [
-                        { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                        { padding: '0 14px 12px 14px' },
-                      ],
-                      grid: [
-                        { 'grid-template-areas': scGridAreas },
-                        { 'grid-template-columns': 'repeat(2, minmax(0,1fr))' },
-                        { gap: '10px' },
-                        { 'align-items': 'start' },
-                      ],
-                      custom_fields: scGridFStyle,
-                    },
-                    custom_fields: scGridFields,
-                  };
-  
-                  return { type: 'vertical-stack', cards: [scLabelCard, scGridCard] };
-                }
-  
-                // Desktop
-                const C = 4;
-                const ALWAYS_N_D = C; // 4 = 1 row of 4
-                const moreDesktop = sceneList.slice(ALWAYS_N_D);
-                const hasDesktopMore = moreDesktop.length > 0;
-  
-                if (!hasDesktopMore) {
-                  const fields = {};
-                  const fstyle = {};
-                  fields.sc_init = `[[[ ${scSecInitSnip} ]]]`;
-                  fstyle.sc_init = [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }];
-                  fields.sc_lbl = scLblHtml;
-                  fstyle.sc_lbl = [{ 'justify-self': 'start' }];
-                  sceneList.forEach((id, j) => {
-                    fields['sc_t' + j] = { card: makeSceneCard(id) };
-                    fstyle['sc_t' + j] = [{ 'justify-self': 'stretch' }, { 'text-align': 'left' }];
-                  });
-                  let areas = '"' + Array(C).fill('sc_init').join(' ') + '" "' + Array(C).fill('sc_lbl').join(' ') + '"';
-                  let scPhIdx = 0;
-                  const rowCount = Math.ceil(sceneList.length / C);
-                  for (let r = 0; r < rowCount; r++) {
-                    let row = '';
-                    for (let c = 0; c < C; c++) {
-                      const idx = r * C + c;
-                      if (c > 0) row += ' ';
-                      if (idx < sceneList.length) {
-                        row += 'sc_t' + idx;
-                      } else {
-                        const ph = 'sc_ph' + scPhIdx++;
-                        row += ph;
-                        fields[ph] = '<div></div>';
-                        fstyle[ph] = [{ 'justify-self': 'stretch' }];
-                      }
-                    }
-                    areas += ' "' + row + '"';
-                  }
-                  return {
-                    type: 'custom:button-card',
-                    entity: groupId,
-                    tap_action: { action: 'none' },
-                    show_icon: false, show_name: false, show_label: false, show_state: false,
-                    card_mod: { style: ghostStyle },
-                    styles: {
-                      card: [
-                        { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                        { padding: '8px 24px 8px 24px' },
-                      ],
-                      grid: [
-                        { 'grid-template-areas': areas },
-                        { 'grid-template-columns': 'repeat(' + C + ', minmax(0,1fr))' },
-                        { gap: '10px' },
-                        { 'align-items': 'start' },
-                      ],
-                      custom_fields: fstyle,
-                    },
-                    custom_fields: fields,
-                  };
-                }
-  
-                const scLblHtmlDeskCollapsible = '<div style="display:flex;align-items:center;gap:6px;">'
-                  + '<span style="font-size:15px;font-weight:500;color:rgba(255,255,255,0.82);font-family:var(--primary-font-family,system-ui);letter-spacing:0.01em;line-height:1.2;">Scenes</span>'
-                  + svgChevron
-                  + '</div>';
-  
-                const deskHFields = {};
-                const deskHFStyle = {};
-                deskHFields.sc_init = `[[[ ${scLblInitSnip} ]]]`;
-                deskHFStyle.sc_init = [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }];
-                deskHFields.sc_lbl = scLblHtmlDeskCollapsible;
-                deskHFStyle.sc_lbl = [{ 'justify-self': 'start' }, { 'grid-column': 'span ' + C }];
-  
-                const alwaysDesk = sceneList.slice(0, ALWAYS_N_D);
-                alwaysDesk.forEach((id, j) => {
-                  deskHFields['sc_at' + j] = { card: makeSceneCard(id) };
-                  deskHFStyle['sc_at' + j] = [{ 'justify-self': 'stretch' }];
-                });
-  
-                let deskHAreas = '"' + Array(C).fill('sc_init').join(' ') + '" "' + Array(C).fill('sc_lbl').join(' ') + '"';
-                for (let r = 0; r < 1; r++) {
-                  let row = '';
-                  for (let c = 0; c < C; c++) { if (c > 0) row += ' '; row += 'sc_at' + (r * C + c); }
-                  deskHAreas += ' "' + row + '"';
-                }
-  
-                const desktopHeaderCard = {
-                  type: 'custom:button-card',
-                  entity: groupId,
-                  tap_action: { action: 'fire-dom-event', event_data: { hemma_sc_toggle: groupId } },
-                  show_icon: false, show_name: false, show_label: false, show_state: false,
-                  card_mod: { style: ghostStyle + '\n#grid { overflow: visible !important; }\n#sc_lbl { overflow: visible !important; }' },
-                  styles: {
-                    card: [
-                      { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                      { padding: '8px 24px 10px 24px' }, { cursor: 'pointer' },
-                    ],
-                    grid: [
-                      { 'grid-template-areas': deskHAreas },
-                      { 'grid-template-columns': 'repeat(' + C + ', minmax(0,1fr))' },
-                      { gap: '10px' },
-                      { 'align-items': 'start' },
-                    ],
-                    custom_fields: deskHFStyle,
-                  },
-                  custom_fields: deskHFields,
-                };
-  
-                // Desktop grid card
-                const deskGFields = {};
-                const deskGFStyle = {};
-                const deskGridInitSnip = `
-                  window._hemmaScGrid = window._hemmaScGrid || {};
-                  window._hemmaScGrid[${gk}] = this;
-                  this.style.maxHeight = '0px'; this.style.overflow = 'hidden'; this.style.opacity = '0';
-                  return '';
-                `;
-                deskGFields.sc_ginit = `[[[ ${deskGridInitSnip} ]]]`;
-                deskGFStyle.sc_ginit = [{ position: 'absolute' }, { top: '0' }, { left: '0' }, { height: '0' }, { width: '0' }, { overflow: 'hidden' }, { 'pointer-events': 'none' }];
-  
-                moreDesktop.forEach((id, j) => {
-                  deskGFields['sc_mt' + j] = { card: makeSceneCard(id) };
-                  deskGFStyle['sc_mt' + j] = [{ 'justify-self': 'stretch' }];
-                });
-  
-                let deskGAreas = '';
-                let deskGPhIdx = 0;
-                const deskMoreRowCount = Math.ceil(moreDesktop.length / C);
-                for (let r = 0; r < deskMoreRowCount; r++) {
-                  let row = '';
-                  for (let c = 0; c < C; c++) {
-                    const idx = r * C + c;
-                    if (c > 0) row += ' ';
-                    if (idx < moreDesktop.length) {
-                      row += 'sc_mt' + idx;
-                    } else {
-                      const ph = 'sc_dgph' + deskGPhIdx++;
-                      row += ph;
-                      deskGFields[ph] = '<div></div>';
-                      deskGFStyle[ph] = [{ 'justify-self': 'stretch' }];
-                    }
-                  }
-                  deskGAreas += ' "' + row + '"';
-                }
-  
-                const desktopGridCard = {
-                  type: 'custom:button-card',
-                  entity: groupId,
-                  tap_action: { action: 'none' },
-                  show_icon: false, show_name: false, show_label: false, show_state: false,
-                  card_mod: { style: ghostStyle },
-                  styles: {
-                    card: [
-                      { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                      { padding: '0 24px 8px 24px' },
-                    ],
-                    grid: [
-                      { 'grid-template-areas': deskGAreas },
-                      { 'grid-template-columns': 'repeat(' + C + ', minmax(0,1fr))' },
-                      { gap: '10px' },
-                      { 'align-items': 'start' },
-                    ],
-                    custom_fields: deskGFStyle,
-                  },
-                  custom_fields: deskGFields,
-                };
-  
-                return { type: 'vertical-stack', cards: [desktopHeaderCard, desktopGridCard] };
-              };
-  
-              const makeFlatGrid = (ids) => {
+
+              const makeFlatGrid = (ids, delayMs) => {
                 if (!ids || !ids.length) return null;
-                const C = isDesktop ? 4 : 2;
+                const C = isDesktop ? Math.min(_deskCols, ids.length) : 2;
                 const fields = {};
                 const fstyle = {};
-  
+
                 ids.forEach((id, i) => {
                   const t = 'fg_t' + i;
                   fields[t] = { card: makeLightCard(id) };
                   fstyle[t] = [{ 'justify-self': 'stretch' }, { 'text-align': 'left' }];
                 });
-  
+
                 let areas = '';
                 let fgPhIdx = 0;
                 const rowCount = Math.ceil(ids.length / C);
@@ -912,21 +724,25 @@ hemma_popup_light:
                   }
                   areas += (r > 0 ? ' ' : '') + '"' + row + '"';
                 }
-  
+
                 return {
                   type: 'custom:button-card',
                   entity: groupId,
                   tap_action: { action: 'none' },
                   show_icon: false, show_name: false, show_label: false, show_state: false,
+                  extra_styles: sectionEnter(delayMs || 0),
                   card_mod: { style: ghostStyle },
                   styles: {
                     card: [
-                      { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                      { padding: isDesktop ? '26px 24px 24px 24px' : '22px 14px 20px 14px' },
+                      { background: 'transparent' }, { border: 'none' },
+                      { 'box-shadow': 'none' }, { padding: '0' },
                     ],
                     grid: [
                       { 'grid-template-areas': areas },
-                      { 'grid-template-columns': 'repeat(' + C + ', minmax(0,1fr))' },
+                      { 'grid-template-columns': isDesktop
+                          ? 'repeat(' + C + ', minmax(0, ' + TILE_W + 'px))'
+                          : 'repeat(' + C + ', minmax(0,1fr))' },
+                      { 'justify-content': 'start' },
                       { gap: '10px' },
                       { 'align-items': 'start' },
                     ],
@@ -935,14 +751,94 @@ hemma_popup_light:
                   custom_fields: fields,
                 };
               };
-  
-              const makeFilterPills = (rooms) => {
+
+              const makeFilterPills = (rooms, delayMs) => {
                 const _n  = rooms.length;
                 const _gk = JSON.stringify(groupId);
-  
+
                 const pillsInitSnip = `
                   window._hemmaLPR_pills = window._hemmaLPR_pills || {};
                   window._hemmaLPR_pills[${_gk}] = this.shadowRoot;
+                  /* The popup dismisses on a background tap, and its listener is
+                     a click on .content - an ancestor of this row. Reading the
+                     tap back out of the composed path was unreliable: the pill's
+                     own card re-renders on tap, so what the path holds by then
+                     is not what was on screen when it was pressed. The row says
+                     so directly instead. Bubble phase only, and click only - the
+                     action handler is a body-level singleton working off pointer
+                     events, and swallowing those leaves a stuck hold circle. */
+                  this.setAttribute('data-hemma-nodismiss', '');
+                  /* The shift is a REFLOW, not an animation. Every pill is a
+                     nested button-card that lays out a beat after the row does,
+                     and the row is centered - so each pill that arrives at its
+                     real width pushes the center left and drags the ones
+                     already painted with it. Nothing eases because nothing is
+                     animating; you are watching layout settle.
+                     Held invisible until it has, then the entrance plays. */
+                  /* styles.card re-stamps visibility:hidden on EVERY render, so
+                     the reveal has to run every time too - guarding it with the
+                     intro flag meant toggling a light re-rendered the row and
+                     nothing ever brought it back. Only the entrance animation
+                     is once. ha-card is usually not in the shadow root yet when
+                     this field evaluates, so wait for it. */
+                  {
+                    const _first = !this._hemmaPillIntro;
+                    this._hemmaPillIntro = true;
+                    if (_first) this._hemmaPillT0 = performance.now();
+                    const _self = this;
+                    /* One loop at a time. Every render started another, and the
+                       row re-renders on every brightness change. */
+                    if (_self._hemmaPillRaf) cancelAnimationFrame(_self._hemmaPillRaf);
+                    if (_self._hemmaPillNet) clearTimeout(_self._hemmaPillNet);
+                    const _show = function (pc) {
+                      if (_first) {
+                        /* Restart the entrance BEFORE revealing it, or the row
+                           paints at full opacity for a frame and the animation
+                           takes it back to zero. Resumed at the phase it would
+                           have reached rather than from zero: the row is
+                           invisible while it settles, and replaying the whole
+                           320ms afterwards is what put the pills a beat behind
+                           the close control. Longhands only - the animation
+                           shorthand would drop the delay with it. */
+                        const _t0 = _self._hemmaPillT0;
+                        const _el = _t0 ? Math.min(Math.round(performance.now() - _t0), 320) : 0;
+                        pc.style.animationName = 'none';
+                        void pc.offsetWidth;
+                        pc.style.animationDelay = '-' + _el + 'ms';
+                        pc.style.animationName = '';
+                      }
+                      pc.style.visibility = 'visible';
+                    };
+                    let _tries = 0;
+                    const _hold = function () {
+                      const _pc = _self.shadowRoot && _self.shadowRoot.querySelector('ha-card');
+                      if (!_pc) {
+                        if (_tries++ < 240) _self._hemmaPillRaf = requestAnimationFrame(_hold);
+                        return;
+                      }
+                      _self._hemmaPillRaf = requestAnimationFrame(function () {
+                        _self._hemmaPillRaf = requestAnimationFrame(function () { _show(_pc); });
+                      });
+                    };
+                    _hold();
+                    /* Whatever happens above, the row is never left invisible.
+                       The old 40-frame cap could expire on a slow first paint
+                       and the pills then stayed hidden until the popup reopened. */
+                    let _netTries = 0;
+                    const _net = function () {
+                      const pc = _self.shadowRoot && _self.shadowRoot.querySelector('ha-card');
+                      if (pc) {
+                        if (pc.style.visibility !== 'visible') pc.style.visibility = 'visible';
+                        return;
+                      }
+                      if (_netTries++ < 20) _self._hemmaPillNet = setTimeout(_net, 150);
+                    };
+                    _self._hemmaPillNet = setTimeout(_net, 1200);
+                  }
+                  if (!this._hemmaPillStop) {
+                    this._hemmaPillStop = true;
+                    this.addEventListener('click', function (e) { e.stopPropagation(); });
+                  }
                   const _pf = window._hemmaLF?.[${_gk}];
                   const _psel = (_pf !== undefined) ? _pf : -1;
                   const _pn = ${_n};
@@ -957,7 +853,7 @@ hemma_popup_light:
                   for (let _ppi = 0; _ppi < _pn; _ppi++) { _pSV(_psr.querySelector('#pill_' + _ppi), _psel === _ppi); }
                   return '';
                 `;
-  
+
                 const makePill = (label, action, idx) => ({
                   type: 'custom:button-card',
                   tap_action: {
@@ -969,10 +865,8 @@ hemma_popup_light:
                   show_icon: false, show_name: true, show_label: false, show_state: false,
                   card_mod: {
                     style: [
-                      isDesktop
-                        ? ':host { display: block !important; width: 100% !important; --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; }'
-                        : ':host { display: inline-flex !important; width: auto !important; --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; }',
-                      'ha-card { border: none !important; border-radius: 999px !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; cursor: pointer !important; position: relative !important; overflow: hidden !important; transition: background 0.2s ease, transform var(--hemma-popup-tile-hover-duration, 0.2s) ease !important; }',
+                      ':host { display: inline-flex !important; width: auto !important; --ha-card-box-shadow: none !important; --button-card-box-shadow: none !important; --button-card-box-shadow-hover: none !important; }',
+                      'ha-card { border: none !important; border-radius: 999px !important; box-shadow: var(--hemma-popup-plate-shadow, none) !important; backdrop-filter: var(--hemma-popup-tile-backdrop, none) !important; -webkit-backdrop-filter: var(--hemma-popup-tile-backdrop, none) !important; will-change: auto !important; cursor: pointer !important; position: relative !important; overflow: hidden !important; transition: background 0.2s ease, transform var(--hemma-popup-tile-hover-duration, 0.2s) ease !important; }',
                       'ha-card::after { content: "" !important; position: absolute !important; inset: 0 !important; border-radius: inherit !important; background: transparent !important; transition: background var(--hemma-popup-tile-hover-duration, 0.2s) ease !important; pointer-events: none !important; }',
                       '#name { transition: color 0.2s ease !important; }',
                       'ha-card:hover { transform: scale(var(--hemma-popup-tile-hover-scale, 1.01)) !important; }',
@@ -986,7 +880,10 @@ hemma_popup_light:
                     card: [
                       { background: `var(--hp-bg, ${_hp.inactBg})` },
                       { border: 'none' },
-                      { 'border-radius': '999px' }, { 'box-shadow': 'none' },
+                      { 'border-radius': '999px' },
+                      { 'backdrop-filter': 'var(--hemma-popup-tile-backdrop, none)' },
+                      { '-webkit-backdrop-filter': 'var(--hemma-popup-tile-backdrop, none)' },
+                      { 'box-shadow': 'var(--hemma-popup-plate-shadow, none)' },
                       { padding: isDesktop ? '13px 20px' : '11px 15px' },
                       { 'white-space': 'nowrap' },
                     ],
@@ -998,77 +895,80 @@ hemma_popup_light:
                     ],
                   },
                 });
-  
+
                 const pillFields = {};
                 const pillFStyle = {};
-  
+
                 pillFields.pills_init = `[[[ ${pillsInitSnip} ]]]`;
 
                 pillFStyle.pills_init = isDesktop
                   ? [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }]
                   : [{ display: 'none' }];
-  
+
                 pillFields.pill_all = { card: makePill('All', 'all', -1) };
-                pillFStyle.pill_all = isDesktop
-                  ? [{ flex: '1 1 0px' }, { 'align-self': 'center' }, { 'margin-left': '-6px' }]
-                  : [{ flex: '0 0 auto' }, { 'align-self': 'center' }];
-  
+                pillFStyle.pill_all = [{ flex: '0 0 auto' }, { 'align-self': 'center' }];
+
                 rooms.forEach((room, i) => {
                   const pid = 'pill_' + i;
                   pillFields[pid] = { card: makePill(room.name, 'toggle', i) };
-                  pillFStyle[pid] = isDesktop
-                    ? [{ flex: '1 1 0px' }, { 'align-self': 'center' }]
-                    : [{ flex: '0 0 auto' }, { 'align-self': 'center' }];
+                  pillFStyle[pid] = [{ flex: '0 0 auto' }, { 'align-self': 'center' }];
                 });
-  
-                pillFields.pill_sp = '<span></span>';
-                pillFStyle.pill_sp = isDesktop
-                  ? [{ 'justify-self': 'stretch' }]
-                  : [{ display: 'none' }];
-  
-                const pillIds  = ['pills_init', 'pill_all', ...rooms.map((_, i) => 'pill_' + i), 'pill_sp'];
-                const pillArea = '"' + pillIds.join(' ') + '"';
-                const pillCols = ['0', 'auto', ...rooms.map(() => 'auto'), '1fr'].join(' ');
 
+                pillFields.pill_sp = '<span></span>';
+                pillFStyle.pill_sp = [{ display: 'none' }];
+
+                /* One row that scrolls sideways rather than wrapping into three
+                   lines - a home with a dozen rooms is the case that breaks a
+                   wrapping row. `safe center` so the first pill is still
+                   reachable once the row is wider than the popup; plain center
+                   pushes the overflow off the leading edge where it cannot be
+                   scrolled back to. */
                 const pillRowStyle = ghostStyle
-                  + '\n#container { align-items: center !important; }'
-                  + '\n#container > div { overflow: visible !important; }'
-                  + '\n#pills_init, #pill_sp { display: none !important; }'
-                  + (isDesktop ? '' :
-                      '\n#container { display: flex !important; flex-wrap: wrap !important; row-gap: 10px !important; column-gap: 10px !important; justify-content: flex-start !important; }'
-                    + '\n#container > div { flex: 0 0 auto !important; }');
+                  + '\n#container { display: flex !important; flex-wrap: nowrap !important;'
+                  + ' gap: 10px !important; align-items: center !important;'
+                  + ' justify-content: center !important;'
+                  + ' justify-content: safe center !important;'
+                  + ' overflow-x: auto !important; overflow-y: visible !important;'
+                  + ' scrollbar-width: none !important;'
+                  + ' -webkit-overflow-scrolling: touch !important; }'
+                  + '\n#container::-webkit-scrollbar { display: none !important; }'
+                  + '\n#container > div { flex: 0 0 auto !important; overflow: visible !important; }'
+                  + '\n#pills_init, #pill_sp { display: none !important; }';
 
                 return {
                   type: 'custom:button-card',
                   entity: groupId,
                   tap_action: { action: 'none' },
                   show_icon: false, show_name: false, show_label: false, show_state: false,
+                  extra_styles: rowEnter(delayMs || 0),
                   card_mod: { style: pillRowStyle },
                   styles: {
                     card: [
-                      { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                      { padding: isDesktop ? '26px 24px 6px 24px' : '22px 14px 6px 8px' },
+                      { background: 'transparent' }, { border: 'none' },
+                      { 'box-shadow': 'none' },
+                      /* Hidden on frame one, in an inline style, because the
+                         row re-centers as each nested pill card lays out and
+                         that settling is visible. The init below reveals it
+                         once it has stopped moving. Hiding it from JS after the
+                         first paint is what made it blink. */
+                      { visibility: 'hidden' },
+                      { margin: '0' },
+                      { padding: isDesktop ? '4px 22px 18px 22px' : '22px 14px 14px 14px' },
                     ],
-                    grid: isDesktop
-                      ? [
-                          { 'grid-template-areas': pillArea },
-                          { 'grid-template-columns': pillCols },
-                          { gap: '10px' },
-                          { 'align-items': 'center' },
-                        ]
-                      : [
-                          { display: 'flex' },
-                          { 'flex-wrap': 'wrap' },
-                          { gap: '10px' },
-                          { 'align-items': 'center' },
-                          { 'justify-content': 'flex-start' },
-                        ],
+                    grid: [
+                      { display: 'flex' },
+                      { 'flex-wrap': 'nowrap' },
+                      { gap: '10px' },
+                      { 'align-items': 'center' },
+                      { 'justify-content': 'center' },
+                      { 'overflow-x': 'auto' },
+                    ],
                     custom_fields: pillFStyle,
                   },
                   custom_fields: pillFields,
                 };
               };
-  
+
               const swipeGuardSnip = `
                 if (!this._hemmaSwipeGuardSetup) {
                   this._hemmaSwipeGuardSetup = true;
@@ -1093,17 +993,42 @@ hemma_popup_light:
                   }, { passive: true });
                 }
               `;
-  
+
               if (!rooms) {
-                const grid = makeFlatGrid(lightIds);
-  
+                const flatHeadField = `[[[ ${_countSnip}
+                  const _UI = window._hemmaUI;
+                  const _w = oc === 0 ? 'Off' : (oc === tot ? 'All on' : oc + ' on');
+                  return (_UI && _UI.headline)
+                    ? _UI.headline({ title: ${JSON.stringify(roomName)}, state: _w,
+                                     barTitle: true }) : '';
+                ]]]`;
+                const flatHead = {
+                  type: 'custom:button-card',
+                  entity: groupId,
+                  tap_action: { action: 'none' },
+                  show_icon: false, show_name: false, show_label: false, show_state: false,
+                  card_mod: { style: ghostStyle },
+                  styles: {
+                    card: [{ background: 'transparent' }, { border: 'none' },
+                           { 'box-shadow': 'none' },
+                           { padding: isDesktop ? '4px 22px 12px 22px' : '2px 14px 10px 14px' }],
+                    grid: [{ 'grid-template-areas': '"lp_head"' },
+                           { 'grid-template-columns': 'minmax(0, 1fr)' }],
+                    custom_fields: { lp_head: [{ 'justify-self': 'stretch' },
+                                               { overflow: 'visible' }] },
+                  },
+                  custom_fields: { lp_head: flatHeadField },
+                };
+                const grid = makeFlatGrid(lightIds, nextPlateDelay());
+
                 const flatInitSnip = `
                   ${swipeGuardSnip}
                   if (window.innerWidth < 769) {
                     const _fhEl = this;
                     const _fhDrawer = () => {
                       const _w = _fhEl.getRootNode()?.host?.parentNode?.parentNode?.parentNode;
-                      return _w?.shadowRoot?.querySelector('wa-drawer')
+                      return window.hemmaPopup?.surface
+                          || _w?.shadowRoot?.querySelector('wa-drawer')
                           || _fhEl.closest?.('ha-adaptive-dialog')?.shadowRoot?.querySelector('wa-drawer')
                           || null;
                     };
@@ -1117,9 +1042,9 @@ hemma_popup_light:
                   }
                   return '';
                 `;
-  
+
                 headerCard.custom_fields.f_init = `[[[ ${flatInitSnip} ]]]`;
-  
+
                 return {
                   type: 'vertical-stack',
                   cards: [
@@ -1128,32 +1053,30 @@ hemma_popup_light:
                   ],
                 };
               }
-  
+
               const outerInitSnip = `
                 const _gid = ${gidKey};
                 const _n   = ${n};
-                const _hasScenes = ${hasScenes ? 'true' : 'false'};
                 ${swipeGuardSnip}
                 window._hemmaLF = window._hemmaLF || {};
                 if (window._hemmaLF[_gid] === undefined) {
                   window._hemmaLF[_gid] = ${initialFilter};
                 }
-  
+
                 const _getHad = () => this.getRootNode()?.host?.parentNode?.parentNode?.parentNode;
                 const _applyHeightFix = (_h) => {
-                  if (!_h) return;
-                  const _wd = _h.shadowRoot?.querySelector('wa-drawer');
+                  const _wd = window.hemmaPopup?.surface || _h?.shadowRoot?.querySelector('wa-drawer');
                   if (!_wd?.style) return;
-                  const _fh = 'calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh)';
+                  const _fh = 'calc(100dvh - env(safe-area-inset-top, 0px))';
                   _wd.classList.remove('hemma-h-auto');
                   _wd.style.setProperty('--size', _fh);
                   _wd.style.setProperty('height', _fh);
                   _wd.style.setProperty('min-height', _fh);
                 };
-  
+
                 const _hadEarly = _getHad();
                 if (window.innerWidth < 769) _applyHeightFix(_hadEarly);
-  
+
                 function _sv(el, isSel) {
                   if (!el) return;
                   if (isSel) {
@@ -1187,116 +1110,65 @@ hemma_popup_light:
                   const _sel2 = window._hemmaLF[_gid] !== undefined ? window._hemmaLF[_gid] : -1;
                   const _rLIds = ${_roomLIds};
                   const _aLIds = ${_lightIds};
-                  const _aIds = (_sel2 === -1 || _sel2 === ${n}) ? _aLIds : (_rLIds[_sel2] || _aLIds);
+                  const _aIds = (_sel2 === -1) ? _aLIds : (_rLIds[_sel2] || _aLIds);
                   const _states = _h?.states || {};
                   const _oc = _aIds.filter(id => _states[id]?.state === 'on').length;
+                  /* The filter lives in a window variable that no template
+                     re-reads, so the toggle's own state is repainted here. */
                   const _hc = _be.shadowRoot?.querySelector('ha-card');
                   if (_hc) {
-                    _hc.style.setProperty('--pill-fill', _oc > 0 ? '#ffffff' : 'var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))');
+                    /* --pill-fill is what the toggle paints with now; the old
+                       --lp-pwr-bg is kept for the flat variant. */
+                    _hc.style.setProperty('--pill-fill', _oc > 0
+                      ? '#ffffff'
+                      : 'var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))');
+                    _hc.style.setProperty('--lp-pwr-bg', _oc > 0
+                      ? 'var(--hemma-entity-background-active, rgba(255,255,255,1))'
+                      : 'var(--hemma-popup-row-fill, rgba(12,14,19,0.62))');
                   }
-                  const _img = _be.shadowRoot?.querySelector('img');
+                  const _img = _be.shadowRoot?.querySelector('.lp-pwr, img');
                   if (_img) {
                     _img.style.filter = _oc > 0 ? 'brightness(0)' : 'brightness(0) invert(1)';
+                    _img.style.opacity = _oc > 0 ? '0.85' : '0.92';
                   }
                 }
 
                 if (window._hemmaLHandlers && window._hemmaLHandlers[_gid]) {
                   document.removeEventListener('ll-custom', window._hemmaLHandlers[_gid]);
                 }
-  
+
                 const _handler = function(e) {
                   const d = (e.detail && e.detail.event_data) ? e.detail.event_data : (e.detail || {});
-  
+
+                  /* Claim the tap. The popup dismisses on a background tap, and
+                     nothing about the event itself could be trusted to say this
+                     one belonged to a control: the pill's card re-renders while
+                     the tap is still being dispatched, so the path, the nodes in
+                     it and the coordinates are all stale by the time the popup
+                     looks. This runs for certain - it is what applies the filter
+                     - so it is what says so. */
+                  if (d.hemma_lf_gid === _gid || d.hemma_lf_badge_tap === _gid) {
+                    window._hemmaSuppressDismiss = Date.now() + 600;
+                  }
+
                   if (d.hemma_lf_badge_tap === _gid) {
                     const _ha = document.querySelector('home-assistant');
                     if (!_ha?.hass) return;
                     const _curSel = window._hemmaLF[_gid] !== undefined ? window._hemmaLF[_gid] : -1;
-                    const _ent = (_curSel === -1 || _curSel === _n) ? _gid : (${_tidsJson}[_curSel] || _gid);
+                    const _ent = (_curSel === -1) ? _gid : (${_tidsJson}[_curSel] || _gid);
                     _ha.hass.callService('script', 'hemma_light_smart_toggle', { light_entity: _ent });
                     return;
                   }
-  
-                  if (_hasScenes && d.hemma_lf_scene_tap && d.hemma_lf_gid === _gid) {
-                    const _sid = d.hemma_lf_scene_tap;
-                    const _ha = document.querySelector('home-assistant');
-                    if (!_ha?.hass) return;
-                    _ha.hass.callService('scene', 'turn_on', { entity_id: _sid, transition: 4 });
-                    window._hemmaActiveScene = window._hemmaActiveScene || {};
-                    window._hemmaActiveScene[_gid] = _sid;
-                    window._hemmaSceneSnap = window._hemmaSceneSnap || {};
-                    delete window._hemmaSceneSnap[_gid];
-                    setTimeout(() => {
-                      const h = document.querySelector('home-assistant')?.hass;
-                      if (!h || window._hemmaActiveScene?.[_gid] !== _sid) return;
-                      const snap = {};
-                      ${_lightIds}.forEach(id => {
-                        const s = h.states[id]; if (!s) return;
-                        snap[id] = s.state+'|'+(s.attributes?.brightness??'')+'|'+(s.attributes?.color_temp??'')+'|'+JSON.stringify(s.attributes?.rgb_color??null);
-                      });
-                      window._hemmaSceneSnap[_gid] = snap;
-                    }, 2500);
-                    return;
-                  }
-  
-                  if (_hasScenes && d.hemma_sc_toggle === _gid) {
-                    const _sg = window._hemmaScGrid?.[_gid];
-                    const _sl = window._hemmaScLbl?.[_gid];
-                    if (_sg) {
-                      const _wasCollapsed = _sg.style.maxHeight === '0px';
-                      if (_wasCollapsed) {
-                        _sg.style.overflow = 'hidden';
-                        _sg.style.opacity = '0';
-                        _sg.style.transform = 'translateY(-6px)';
-                        _sg.style.transition = 'none';
-                        _sg.style.maxHeight = '0px';
-                        requestAnimationFrame(function(){ requestAnimationFrame(function(){
-                          const _nh = _sg.scrollHeight + 'px';
-                          _sg.style.transition = 'max-height 0.25s cubic-bezier(0.25,0.46,0.45,0.94),opacity 0.22s ease,transform 0.22s ease';
-                          _sg.style.maxHeight = _nh;
-                          _sg.style.opacity = '1';
-                          _sg.style.transform = 'none';
-                          setTimeout(function(){
-                            _sg.style.maxHeight = '';
-                            _sg.style.overflow = '';
-                            _sg.style.transition = '';
-                          }, 280);
-                        }); });
-                        if (_sl) { _sl.style.setProperty('--sc-rot', '90deg'); _sl.style.setProperty('--sc-lbl-pb', '0px'); }
-                      } else {
-                        const _ch = _sg.offsetHeight + 'px';
-                        _sg.style.maxHeight = _ch;
-                        _sg.style.overflow = 'hidden';
-                        _sg.style.pointerEvents = 'none';
-                        requestAnimationFrame(function(){
-                          _sg.style.transition = 'max-height 0.2s cubic-bezier(0.55,0,0.1,1),opacity 0.15s ease';
-                          _sg.style.maxHeight = '0px';
-                          _sg.style.opacity = '0';
-                          setTimeout(function(){
-                            _sg.style.transition = '';
-                            _sg.style.transform = 'none';
-                            _sg.style.pointerEvents = '';
-                          }, 220);
-                        });
-                        if (_sl) { _sl.style.setProperty('--sc-rot', '0deg'); _sl.style.setProperty('--sc-lbl-pb', '12px'); }
-                      }
-                      setTimeout(function(){ _applyHeightFix(_getHad()); }, 50);
-                    }
-                    return;
-                  }
-  
+
                   if (d.hemma_lf_gid !== _gid) return;
-  
+
                   function _hShow(el){if(!el)return;
-                    el.style.pointerEvents='none';
-                    el.style.willChange='transform,opacity';
-                    el.style.transition='none';
+                    el.style.transition='';el.style.willChange='';
                     el.style.maxHeight='';el.style.overflow='';
-                    el.style.opacity='0';el.style.transform='translateY(12px)';
-                    requestAnimationFrame(function(){requestAnimationFrame(function(){
-                      el.style.transition='opacity 0.28s ease,transform 0.28s cubic-bezier(0.25,0.46,0.45,0.94)';
-                      el.style.opacity='1';el.style.transform='none';
-                      setTimeout(function(){el.style.transition='';el.style.willChange='';el.style.pointerEvents='';},350);
-                    });});
+                    el.style.opacity='1';el.style.transform='none';el.style.pointerEvents='';
+                    const _c=el.shadowRoot&&el.shadowRoot.querySelector('ha-card');
+                    if(_c){_c.style.animation='none';void _c.offsetWidth;
+                      _c.style.animation='';_c.style.animationDelay='0ms';}
                   }
                   function _hHide(el){if(!el)return;
                     el.style.pointerEvents='none';
@@ -1318,16 +1190,6 @@ hemma_popup_light:
                       if (!wasVisible && willBeVisible) _hShow(rd);
                       else if (wasVisible && !willBeVisible) _hHide(rd);
                     }
-                    if (prevSel === -1 && _hasScenes) {
-                      const _scLblEl = window._hemmaLPRooms?.[_gid]?.[_n] || null;
-                      if (_scLblEl) _hHide(_scLblEl);
-                      const _scGridEl = window._hemmaScGrid?.[_gid];
-                      if (_scGridEl) {
-                        window._hemmaScWasOpen = window._hemmaScWasOpen || {};
-                        window._hemmaScWasOpen[_gid] = _scGridEl.style.maxHeight !== '0px';
-                        _scGridEl.style.maxHeight = '0px'; _scGridEl.style.overflow = 'hidden'; _scGridEl.style.opacity = '0';
-                      }
-                    }
                     _refreshBadge();
                     if (window.innerWidth < 769) _applyHeightFix(_getHad());
                   } else if (action === 'all') {
@@ -1339,25 +1201,13 @@ hemma_popup_light:
                         _hShow(rd);
                       }
                     }
-                    if (_hasScenes) {
-                      const _scLblEl = window._hemmaLPRooms?.[_gid]?.[_n] || null;
-                      if (_scLblEl) _hShow(_scLblEl);
-                      const _scGridEl = window._hemmaScGrid?.[_gid];
-                      if (_scGridEl && window._hemmaScWasOpen?.[_gid]) {
-                        requestAnimationFrame(function(){ requestAnimationFrame(function(){
-                          _scGridEl.style.transition = 'opacity 0.25s ease';
-                          _scGridEl.style.maxHeight = ''; _scGridEl.style.overflow = ''; _scGridEl.style.opacity = '1';
-                          setTimeout(function(){ _scGridEl.style.transition = ''; }, 280);
-                        }); });
-                      }
-                    }
                     _refreshBadge();
                     if (window.innerWidth < 769) _applyHeightFix(_getHad());
                   }
 
                   _updatePills();
                 };
-  
+
                 window._hemmaLHandlers = window._hemmaLHandlers || {};
                 window._hemmaLHandlers[_gid] = _handler;
                 document.addEventListener('ll-custom', _handler);
@@ -1378,7 +1228,7 @@ hemma_popup_light:
 
                 setTimeout(function() {
                   const _sel = window._hemmaLF[_gid];
-  
+
                   if (_sel !== -1) {
                     for (let i = 0; i < _n; i++) {
                       const rd = window._hemmaLPRooms?.[_gid]?.[i] || null;
@@ -1390,29 +1240,30 @@ hemma_popup_light:
                       }
                     }
                   }
-  
+
                   _updatePills();
                   setTimeout(function() { _updatePills(); }, 250);
 
                   window._hemmaLPRbadgeEl = window._hemmaLPRbadgeEl || {};
-                  const _hbd = this.shadowRoot?.querySelector('#hdr_b');
-                  window._hemmaLPRbadgeEl[_gid] = _hbd?.firstElementChild || null;
+
 
                   const _had = _getHad();
 
-                  if (_had) {
-                    _had._hemmaLFClose = _had._hemmaLFClose || {};
-                    if (!_had._hemmaLFClose[_gid]) {
-                      _had._hemmaLFClose[_gid] = true;
-                      _had.addEventListener('closed', function() {
-                        if (window._hemmaLF) delete window._hemmaLF[_gid];
-                        if (_had._hemmaLFClose) delete _had._hemmaLFClose[_gid];
-                        if (window._hemmaLPRbadgeEl) delete window._hemmaLPRbadgeEl[_gid];
-                        if (window._hemmaLFStateSub && window._hemmaLFStateSub[_gid]) { try { window._hemmaLFStateSub[_gid](); } catch(e) {} delete window._hemmaLFStateSub[_gid]; }
-                      }, { once: true });
-                    }
+                  window._hemmaLFClose = window._hemmaLFClose || {};
+                  if (!window._hemmaLFClose[_gid]) {
+                    window._hemmaLFClose[_gid] = function() {
+                      if (window._hemmaLF) delete window._hemmaLF[_gid];
+                      if (window._hemmaLPRbadgeEl) delete window._hemmaLPRbadgeEl[_gid];
+                      if (window._hemmaLFStateSub && window._hemmaLFStateSub[_gid]) {
+                        try { window._hemmaLFStateSub[_gid](); } catch(e) {}
+                        delete window._hemmaLFStateSub[_gid];
+                      }
+                      document.removeEventListener('hemma-popup-closed', window._hemmaLFClose[_gid]);
+                      delete window._hemmaLFClose[_gid];
+                    };
+                    document.addEventListener('hemma-popup-closed', window._hemmaLFClose[_gid]);
                   }
-  
+
                   if (window.innerWidth < 769) {
                     _applyHeightFix(_had);
                     setTimeout(() => _applyHeightFix(_had), 300);
@@ -1421,104 +1272,202 @@ hemma_popup_light:
                 }.bind(this), 20);
                 return '';
               `;
-  
+
               headerCard.custom_fields.f_init = `[[[ ${outerInitSnip} ]]]`;
-  
-              const stackCards = [headerCard, makeFilterPills(rooms)];
-              if (hasScenes) {
-                const scSec = makeScenesSection(sceneIds);
-                if (scSec) stackCards.push(scSec);
-              }
+
+              const stackCards = [headerCard, makeFilterPills(rooms, nextPlateDelay())];
               rooms.forEach((room, i) => {
-                const sec = makeRoomSection(room, i);
+                const sec = makeRoomSection(room, i, nextPlateDelay());
                 if (sec) stackCards.push(sec);
               });
-  
+
               return { type: 'vertical-stack', cards: stackCards };
               }; // end window._hemmaLPC
         }
         return '';
       ]]]
-
   styles:
     custom_fields:
       lpc_init:
-        - display: none
-        - position: absolute
-        - height: "0"
-        - width: "0"
-        - overflow: hidden
-        - pointer-events: none
-
+      - display: none
+      - position: absolute
+      - height: '0'
+      - width: '0'
+      - overflow: hidden
+      - pointer-events: none
   tap_action:
     haptic: light
-    action: >
+    action: |
       [[[
-        return typeof window.browser_mod !== 'undefined' ? 'fire-dom-event' : 'more-info';
+        return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
-    browser_mod:
-      service: browser_mod.popup
-      data:
-        tag: '[[[ return (entity?.entity_id || "hemma_light").replace(/\./g, "_") + "_popup"; ]]]'
-        title: ""
-        dismissable: true
-        adaptive: true
-        size: auto
-        style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
-        popup_styles:
-          - style: all
-            styles: |
-              :host {
-                --dialog-surface-margin-top: 100px;
-                --ha-ripple-hover-opacity: 0;
-                --ha-ripple-pressed-opacity: 0.04;
-                opacity: 0;
-                animation: hemma-popup-reveal 0s 0.8s ease forwards;
-              }
-              @keyframes hemma-popup-reveal { to { opacity: 1; } }
-              .content .container > * {
-                width: 100% !important;
-                max-width: none !important;
-                box-sizing: border-box !important;
-              }
-              .content .container {
-                scrollbar-width: none;
-                overscroll-behavior: contain;
-                touch-action: pan-y;
-                padding-bottom: 24px !important;
-              }
-              .content .container::-webkit-scrollbar {
-                display: none;
-              }
-              @media (max-width: 768px) {
-                :host {
-                  --dialog-surface-margin-top: 0px;
-                }
-                wa-drawer {
-                  --size: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                  height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                }
-                .content .container {
-                  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - 8dvh) !important;
-                }
-                wa-drawer.hemma-h-auto {
-                  --size: var(--ha-bottom-sheet-height, auto) !important;
-                  height: auto !important;
-                  min-height: 0 !important;
-                }
-                wa-drawer.hemma-h-auto .content .container {
-                  min-height: 0 !important;
-                }
-              }
+    hemma_popup: &hemma_light_popup
+      title: |
+        [[[
+          const _hdr = typeof window._hemmaLPC === 'function' ? window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables, 'header') : null;
+          return (_hdr && _hdr.title) || 'Light Control';
+        ]]]
+      header_actions: |
+        [[[
+          const _hdr = typeof window._hemmaLPC === 'function' ? window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables, 'header') : null;
+          return (_hdr && _hdr.actions) || null;
+        ]]]
+      dismissable: true
+      dismiss_on_background: true
+      style: |
+        [[[
+          const _hdr = typeof window._hemmaLPC === 'function' ? window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables, 'header') : null;
+          const _w = (_hdr && _hdr.width) || 880;
+          return '--popup-min-width: min(' + _w + 'px, 92vw); --popup-max-width: min(' + _w + 'px, 92vw);';
+        ]]]
+      popup_styles:
+      - style: all
+        styles: |
+          /* No pane. The rooms stand on the room photo as separate cards, the
+             way visionOS puts windows in a space rather than panels inside one
+             window. The blur is still there - it belongs to the scrim, which
+             is a sibling of the surface and so survives the pane going
+             transparent. */
+          --hemma-popup-tint: transparent;
+          --hemma-popup-gutter-wide: 22px;
+          /* The close control's box starts at the bar's padding and the
+             content starts at its own gutter; they line up only when the
+             two are the same number. */
+          /* The popups have no pane, so headings and captions sit straight
+             on the room. 6px is enough behind a panel and not enough behind
+             bare text - this is scoped to the pane-less popups rather than
+             raised globally, so the cover and lock sheets keep the lighter
+             scrim they are built against. */
+          --hemma-popup-scrim-backdrop: blur(22px) saturate(1.5);
+          --hemma-popup-backdrop: none;
+          --hemma-popup-shadow: none;
+          /* The grain is two pseudo-elements on .glass blending overlay and
+             screen. They keep painting after the tint goes transparent, and a
+             screen blend over noise is a pale panel where the pane used to be. */
+          /* Removed, not hidden: at opacity 0 the blend layer is invisible
+             and costs the same as a visible one. */
+          --hemma-popup-grain-content: none;
+          --hemma-popup-grain: 0;
+          --hemma-popup-grain-dark: 0;
+          --hemma-popup-scrim: rgba(0, 0, 0, 0.26);
 
-        content: |
-          [[[
-            return typeof window._hemmaLPC === 'function'
-              ? window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables)
-              : null;
-          ]]]
+          /* No chart to wait for, so the plates arrive as soon as they build. */
+          --hemma-popup-plate-enter:
+            hemma-plate-in 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+          @media (prefers-reduced-motion: reduce) {
+            --hemma-popup-plate-enter: none;
+          }
 
+          --hemma-popup-hero-label-size: 15px;
+          --hemma-popup-row-radius: 26px;
+          --hemma-popup-plate-backdrop: blur(24px) saturate(180%);
+          /* The tiles and the room pills do blur - they are small, and an
+             inactive tile with no blur reads as a hole rather than a control.
+             Separate from the plate knob so this can go on its own. */
+          --hemma-popup-tile-backdrop: blur(24px) saturate(180%);
+          --hemma-popup-row-fill: rgba(12, 14, 19, 0.62);
+          --hemma-popup-chart-fill: rgba(10, 12, 16, 0.68);
+          /* The theme lifts every ha-card with filter: brightness(1.01) on
+             hover, and a filter on an ancestor makes every backdrop-filter
+             inside it inert - hovering the space around a plate knocked the
+             frost out of it. Killed popup-wide; each plate re-declares its
+             own shadow. */
+          --hemma-card-hover-filter: none;
+          --hemma-hover-filter: none;
+          --hemma-card-hover-shadow: none;
+          /* Lifted, not slabbed: one wide soft pass carries the height, one
+             short contact pass keeps the edge off the room. */
+          --hemma-popup-plate-shadow:
+            0 18px 40px -22px rgba(0, 0, 0, 0.50),
+            0 2px 8px -5px rgba(0, 0, 0, 0.28);
+
+          /* Nothing bare on the room but the close control, and that control
+             is itself a glass object. The title is clipped rather than
+             removed so a screen reader still gets it - the header widget
+             below carries it on screen. */
+          /* The sheet's drag handle keeps working; only the little bar
+             that advertises it goes. Nothing else on these popups is a hint. */
+          --hemma-popup-grabber: transparent;
+
+          /* The chrome arrives with the first plate instead of being there
+             on frame one while everything under it fades in. */
+          --hemma-popup-chrome-enter:
+            hemma-popup-chrome-in 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+          .content { animation: none; }
+          /* The title lives in the bar now, centered and level with the
+             close control, so it is no longer hidden. */
+          .header-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+          /* The toggle sits with the close rather than opposite it: two
+             controls that belong to the same popup read as a pair, and the
+             state reads left-to-right off the button it describes. The title
+             is absolutely centered on the bar either way. */
+          .header-actions {
+            order: 0;
+            margin-left: 10px;
+            margin-right: auto;
+            padding-right: 0;
+          }
+          .header-close {
+            border-radius: 50%;
+            background: var(--hemma-popup-row-fill, rgba(255, 255, 255, 0.10));
+            backdrop-filter: var(--hemma-popup-plate-backdrop, none);
+            -webkit-backdrop-filter: var(--hemma-popup-plate-backdrop, none);
+            box-shadow: var(--hemma-popup-plate-shadow, none);
+          }
+
+          ha-adaptive-dialog, ha-dialog, wa-drawer {
+            --ha-card-backdrop-filter: none;
+            --ha-card-background: transparent;
+            --card-background-color: transparent;
+            --ha-card-box-shadow: none;
+            --ha-card-border-width: 0px;
+          }
+
+          .content .container > * {
+            width: 100% !important;
+            max-width: none !important;
+            box-sizing: border-box !important;
+          }
+          .content .container {
+            scrollbar-width: none;
+            overscroll-behavior: contain;
+            touch-action: pan-y;
+            padding: 0 22px 24px 22px !important;
+          }
+          @media (max-width: 768px) {
+            .content .container { padding: 0 0 24px 0 !important; }
+            .header-actions { margin-left: auto !important; margin-right: 0 !important; }
+          }
+          .content .container::-webkit-scrollbar {
+            display: none;
+          }
+          @media (max-width: 768px) {
+          wa-drawer {
+              --size: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+              height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+              min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+          }
+          .content .container {
+              min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
+          }
+          wa-drawer.hemma-h-auto {
+              --size: var(--ha-bottom-sheet-height, auto) !important;
+              height: auto !important;
+              min-height: 0 !important;
+          }
+          wa-drawer.hemma-h-auto .content .container {
+              min-height: 0 !important;
+          }
+          }
+      content: |
+        [[[
+          return typeof window._hemmaLPC === 'function'
+            ? window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables)
+            : null;
+        ]]]
+  hold_action:
+    action: none
+    hemma_popup: *hemma_light_popup
   icon_tap_action:
     haptic: light
     action: more-info

@@ -1,66 +1,3 @@
-# /config/dashboards/templates/button_cards/cards/hemma_entity_actions.yaml
-#
-# A hemma_entity card with up to two configurable action buttons in a right-side rail.
-# Originally contributed by @hostand.
-#
-# The rail renders each action as its own flat button. A button whose entity is in an
-# "on"-like state fills with its domain accent color; an unavailable or missing entity
-# renders dimmed. Disabling an action (or leaving its entity unset) removes that capsule
-# entirely, and disabling both collapses the rail so the card reflows to normal padding.
-#
-# Usage:
-# - type: custom:button-card
-#   template: hemma_entity_actions
-#   entity: sensor.fridge_status
-#   name: Fridge
-#   variables:
-#     icon: fridge
-#
-#     action_1_entity: switch.fridge_mode
-#     action_1_icon: mdi:fridge-outline
-#     action_1_action: toggle
-#
-#     action_2_entity: switch.fridge_super_cool
-#     action_2_icon: mdi:snowflake
-#     action_2_action: toggle
-#
-# Variables (N = 1 or 2):
-#   icon                       Icon for the main hemma_entity tile (see hemma_entity).
-#   svg_path                   Base path for bare-name SVG icons. Default /local/hemma/icons.
-#
-#   action_N_enabled           true (default) / false. A falsey value hides the button.
-#   action_N_entity            Entity the button acts on. Required - no entity, no button.
-#   action_N_icon              mdi:xxx, a bare SVG name resolved against svg_path,
-#                              or an explicit /local/... , http(s)://... , .svg/.png/.webp path.
-#                              Defaults to the entity's own icon attribute, then mdi:help-circle.
-#   action_N_active_color      Optional CSS color for the active fill. Defaults to a color
-#                              derived from the entity's domain.
-#
-#   action_N_action            One of:
-#     more-info    (default)   Opens the more-info dialog for action_N_entity.
-#     toggle                   Calls <domain>.toggle on action_N_entity.
-#     call-service             Calls action_N_service with action_N_service_data.
-#                              entity_id defaults to action_N_entity if not in the data.
-#     navigate                 Pushes action_N_navigation_path.
-#
-#   action_N_service           "domain.service", required for the call-service action.
-#   action_N_service_data      Mapping passed to the service. Default {}.
-#   action_N_navigation_path   Dashboard path, required for the navigate action.
-#
-# Card-level active state:
-#   The tile's own active state follows its `entity:` as normal - the action buttons light up
-#   independently of it. If the tile's entity is a passive sensor that never reads as active,
-#   inherit hemma_entity's active_entities hook to let the action entities drive the whole card:
-#
-#     variables:
-#       active_entities:
-#         - switch.fridge_mode
-#         - switch.fridge_super_cool
-#       active_entities_mode: all   # all = both on; any (default) = either on
-#
-#   These are deliberately listed explicitly rather than wired up from action_N_entity
-#   automatically, so the card can key off entities that aren't buttons, and so a tile with a
-#   meaningful status sensor can keep using it.
 
 hemma_entity_actions:
   template:
@@ -87,31 +24,59 @@ hemma_entity_actions:
       ]]]
     svg_path: /local/hemma/icons
 
+    # The compact phone tile puts the name in the top right corner, which is
+    # where the action glyphs go. hemma-core's HEMMA_TEMPLATE_SIZES carries the
+    # matching entry so hemmaCardSize agrees from the RAW config, before
+    # button-card has merged this in.
+    # Mirrored in hemma-core's HEMMA_TEMPLATE_SIZES, which reads the RAW config.
+    size: large
+
     # action_N_icon is deliberately EMPTY, not mdi:help-circle. renderIcon reads
     # `iconRaw || the entity's own icon attribute || mdi:help-circle`, and a
     # declared default is never falsy - so declaring the question mark here made
     # both fallbacks dead code and every unset button drew a question mark.
 
+    # Shared overlay state. A bare input_boolean cannot say WHICH tile was
+    # tapped, so the companion input_text carries the entity and every gate
+    # checks both. See feedback_shared_overlay_needs_active_entity_guard.
+    actions_toggle_helper: input_boolean.hemma_actions_overlay
+    actions_active_helper: input_text.hemma_actions_active_entity
+
     action_1_enabled: true
     action_1_entity:
+    action_1_label:
     action_1_icon:
     action_1_action: more-info
-    action_1_active_color:
     action_1_navigation_path:
     action_1_service:
     action_1_service_data: {}
 
     action_2_enabled: true
     action_2_entity:
+    action_2_label:
     action_2_icon:
     action_2_action: more-info
-    action_2_active_color:
     action_2_navigation_path:
     action_2_service:
     action_2_service_data: {}
 
   tap_action:
-    action: more-info
+    haptic: light
+    action: |
+      [[[
+        return window._hemmaActions?.isOpen(variables, states, entity?.entity_id)
+          ? 'call-service' : 'more-info';
+      ]]]
+    service: script.turn_on
+    service_data:
+      entity_id: script.hemma_actions_overlay_toggle
+      variables:
+        # Device-scoped, so the helper pair (one for the whole install) can only
+        # match the surface that was tapped. Safe to bake: this and the action
+        # above are evaluated in the same render, so if hemma-core were missing
+        # the action would already be more-info and this would go unused.
+        actions_entity_id: |
+          [[[ return window._hemmaActions?.openKey(entity?.entity_id) || entity?.entity_id; ]]]
 
   hold_action:
     action: none
@@ -121,341 +86,370 @@ hemma_entity_actions:
 
   styles:
     card:
-      - --hemma-actions-pad-right: |
-          [[[
-            const on = (idx) => {
-              const enabled = variables[`action_${idx}_enabled`];
-              const ok = (enabled === undefined || enabled === null) ? true :
-                (typeof enabled === 'boolean') ? enabled :
-                (typeof enabled === 'number') ? enabled !== 0 :
-                !['false','0','no','off','disabled'].includes(String(enabled).trim().toLowerCase());
-              return ok && !!variables[`action_${idx}_entity`];
-            };
-            const count = (on(1) ? 1 : 0) + (on(2) ? 1 : 0);
-            return count > 0
-              ? 'calc(var(--hemma-actions-rail-w) + var(--hemma-actions-rail-inset))'
-              : 'var(--hemma-actions-pad)';
-          ]]]
-      - padding: >
-          var(--hemma-actions-pad)
-          var(--hemma-actions-pad-right)
-          var(--hemma-actions-pad)
-          var(--hemma-actions-pad)
+      - padding: var(--hemma-actions-pad)
       - position: relative
       - overflow: hidden !important
 
+    name:
+      - opacity: |
+          [[[
+            return window._hemmaActions?.isOpen(variables, states, entity.entity_id) ? '0' : '1';
+          ]]]
+      - transition: opacity 0.18s ease
+
+    state:
+      - opacity: |
+          [[[
+            return window._hemmaActions?.isOpen(variables, states, entity.entity_id) ? '0' : '1';
+          ]]]
+      - transition: opacity 0.18s ease
+
     custom_fields:
-      side_actions:
+      more:
         - display: |
-            [[[
-              const on = (idx) => {
-                const enabled = variables[`action_${idx}_enabled`];
-                const ok = (enabled === undefined || enabled === null) ? true :
-                  (typeof enabled === 'boolean') ? enabled :
-                  (typeof enabled === 'number') ? enabled !== 0 :
-                  !['false','0','no','off','disabled'].includes(String(enabled).trim().toLowerCase());
-                return ok && !!variables[`action_${idx}_entity`];
-              };
-              return (on(1) || on(2)) ? 'flex' : 'none';
-            ]]]
-        - flex-direction: column
-        - justify-content: center
-        - gap: var(--hemma-actions-gap)
+            [[[ return window._hemmaActions?.any(variables) ? 'block' : 'none'; ]]]
         - position: absolute
-        - top: calc(var(--hemma-actions-pad) - 2px)
-        - right: var(--hemma-actions-rail-inset)
-        - bottom: calc(var(--hemma-actions-pad) - 2px)
-        - width: var(--hemma-actions-rail-w)
-        - min-width: var(--hemma-actions-rail-w)
-        - z-index: 8
+        - z-index: 9
+        - overflow: hidden
+        - box-sizing: border-box
         - padding: 0
         - margin: 0
-        - background: transparent
-        - overflow: visible
-        - pointer-events: auto
+        - border-radius: 50%
+        - top: |
+            [[[ return window._hemmaActions?.moreGeom(variables, entity?.state)?.top || ''; ]]]
+        - right: |
+            [[[ return window._hemmaActions?.moreGeom(variables, entity?.state)?.right || ''; ]]]
+        - width: |
+            [[[ return window._hemmaActions?.moreGeom(variables, entity?.state)?.width || ''; ]]]
+        - height: |
+            [[[ return window._hemmaActions?.moreGeom(variables, entity?.state)?.height || ''; ]]]
+        - background-size: |
+            [[[
+              return window._hemmaActions?.isOpen(variables, states, entity?.entity_id)
+                ? '100% 100%' : '0% 0%';
+            ]]]
+        - transition-property: background-size, right, top
+        - transition-duration: 0.24s, var(--hemma-actions-corner-shift, 0.26s), var(--hemma-actions-corner-shift, 0.26s)
+        - transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1)
+      pill_1:
+        - display: |
+            [[[ return window._hemmaActions?.enabled(variables, 1) ? 'block' : 'none'; ]]]
+        - position: absolute
+        - z-index: 8
+        - overflow: hidden
+        - box-sizing: border-box
+        - padding: 0
+        - margin: 0
+        - border-radius: var(--hemma-actions-btn-radius)
+        - top: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 1)?.top || ''; ]]]
+        - right: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 1)?.right || ''; ]]]
+        - width: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 1)?.width || ''; ]]]
+        - height: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 1)?.height || ''; ]]]
+        - opacity: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 1);
+              return m ? m.opacity : '1';
+            ]]]
+        - transform: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 1);
+              return m ? m.transform : 'none';
+            ]]]
+        - pointer-events: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 1);
+              return m ? m.pointerEvents : 'auto';
+            ]]]
+        - transition-property: opacity, transform
+        - transition-duration: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 1);
+              if (!m) return '';
+              return [m.duration, m.duration].join(', ');
+            ]]]
+        - transition-timing-function: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 1);
+              if (!m) return '';
+              return [m.easing, m.easing].join(', ');
+            ]]]
+        - transition-delay: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 1);
+              if (!m) return '';
+              return [m.delay, m.delay].join(', ');
+            ]]]
+      pill_2:
+        - display: |
+            [[[ return window._hemmaActions?.enabled(variables, 2) ? 'block' : 'none'; ]]]
+        - position: absolute
+        - z-index: 8
+        - overflow: hidden
+        - box-sizing: border-box
+        - padding: 0
+        - margin: 0
+        - border-radius: var(--hemma-actions-btn-radius)
+        - top: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 2)?.top || ''; ]]]
+        - right: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 2)?.right || ''; ]]]
+        - width: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 2)?.width || ''; ]]]
+        - height: |
+            [[[ return window._hemmaActions?.pillGeom(variables, 2)?.height || ''; ]]]
+        - opacity: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 2);
+              return m ? m.opacity : '1';
+            ]]]
+        - transform: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 2);
+              return m ? m.transform : 'none';
+            ]]]
+        - pointer-events: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 2);
+              return m ? m.pointerEvents : 'auto';
+            ]]]
+        - transition-property: opacity, transform
+        - transition-duration: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 2);
+              if (!m) return '';
+              return [m.duration, m.duration].join(', ');
+            ]]]
+        - transition-timing-function: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 2);
+              if (!m) return '';
+              return [m.easing, m.easing].join(', ');
+            ]]]
+        - transition-delay: |
+            [[[
+              const m = window._hemmaActions?.motion(variables, states, entity.entity_id, 2);
+              if (!m) return '';
+              return [m.delay, m.delay].join(', ');
+            ]]]
 
   custom_fields:
-    side_actions: |
+    more: |
       [[[
-        const esc = (v) =>
-          String(v ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-
-        const getEntityStateClass = (eid) => {
-          if (!eid || !states[eid]) return 'unavailable';
-
-          const st = String(states[eid]?.state || '').toLowerCase().replace(/_/g, ' ');
-
-          const active = [
-            'on', 'open', 'opening', 'unlocked', 'unlocking',
-            'playing', 'buffering', 'home', 'connected', 'online',
-            'cooling', 'heating', 'cleaning', 'running', 'active'
-          ];
-
-          const bad = ['unknown', 'unavailable', 'none', ''];
-
-          if (bad.includes(st)) return 'unavailable';
-          if (active.includes(st)) return 'active';
-          return 'normal';
-        };
-
-        // Mirrors the domain accent map in hemma_entity so an active button reads the
-        // same color the tile's own icon circle would use for that domain.
-        const accentFor = (idx, eid) => {
-          const override = variables[`action_${idx}_active_color`];
-          if (override) return String(override);
-
-          const teal = 'var(--hemma-color-teal, #00c3d0)';
-          const byDomain = {
-            light:         'var(--hemma-color-yellow, #FFCC00)',
-            fan:           'var(--hemma-color-teal, #00C3D0)',
-            humidifier:    'var(--hemma-color-teal, #00C3D0)',
-            climate:       'var(--hemma-color-teal, #00C3D0)',
-            vacuum:        'var(--hemma-color-teal, #00C3D0)',
-            cover:         teal,
-            media_player:  teal,
-            lock:          teal,
-            switch:        teal,
-            input_boolean: teal,
-            script:        teal,
-            automation:    teal,
-          };
-
-          return byDomain[String(eid || '').split('.')[0]] || teal;
-        };
-
-        const renderIcon = (iconRaw, eid, cls) => {
-          const raw = String(iconRaw || states[eid]?.attributes?.icon || 'mdi:help-circle').trim();
-
-          if (raw.includes(':')) {
-            return `
-              <ha-icon
-                class="hemma-side-action-icon hemma-side-action-ha-icon ${cls}"
-                icon="${esc(raw)}">
-              </ha-icon>
-            `;
+        void states[variables.actions_toggle_helper];
+        void states[variables.actions_active_helper];
+        const A = window._hemmaActions;
+        if (!A) {
+          if (window._hemmaCoreWaiters !== null) {
+            (window._hemmaCoreWaiters = window._hemmaCoreWaiters || new Set()).add(this);
           }
+          return '';
+        }
+        A.bind(this, variables, hass);
+        return A.moreMarkup(variables, entity?.entity_id);
+      ]]]
 
-          if (
-            raw.startsWith('/') ||
-            raw.startsWith('http://') ||
-            raw.startsWith('https://') ||
-            raw.endsWith('.svg') ||
-            raw.endsWith('.png') ||
-            raw.endsWith('.webp')
-          ) {
-            return `
-              <img
-                class="hemma-side-action-icon hemma-side-action-svg ${cls}"
-                src="${esc(raw)}"
-                alt="">
-            `;
-          }
+    pill_1: |
+      [[[
+        const A = window._hemmaActions;
+        if (!A) return '';
+        A.bind(this, variables, hass);
+        const raw = this._config?.name;
+        const own = (typeof raw === 'string' && raw.indexOf('[[[') === -1)
+          ? raw : (entity?.attributes?.friendly_name || '');
+        return A.markup(variables, 1, states, own, hass);
+      ]]]
 
-          const base = String(variables.svg_path || '/local/hemma/icons').replace(/\/$/, '');
-          const src = `${base}/${raw}.svg`;
-
-          return `
-            <img
-              class="hemma-side-action-icon hemma-side-action-svg ${cls}"
-              src="${esc(src)}"
-              alt="">
-          `;
-        };
-
-        const isEnabled = (idx) => {
-          const enabled = variables[`action_${idx}_enabled`];
-          const eid = variables[`action_${idx}_entity`];
-
-          const ok = (enabled === undefined || enabled === null) ? true :
-            (typeof enabled === 'boolean') ? enabled :
-            (typeof enabled === 'number') ? enabled !== 0 :
-            !['false','0','no','off','disabled'].includes(String(enabled).trim().toLowerCase());
-
-          return ok && !!eid;
-        };
-
-        const runAction = (idx) => {
-          const eid = variables[`action_${idx}_entity`];
-          if (!eid) return;
-
-          // hass is REPLACED on every state update, and this handler is bound
-          // ONCE per element - the element is only rebuilt when the rendered
-          // HTML changes, which is exactly when the button's own state changes.
-          // So a button whose state does not change keeps the hass it was
-          // built with and acts through a snapshot that keeps going stale.
-          // Read the card's live reference at press time instead.
-          const H = (this && this._hass) || hass;
-
-          const action = variables[`action_${idx}_action`] || 'more-info';
-
-          if (action === 'more-info') {
-            this.dispatchEvent(new CustomEvent('hass-more-info', {
-              bubbles: true,
-              composed: true,
-              detail: { entityId: eid }
-            }));
-            return;
-          }
-
-          if (action === 'toggle') {
-            const domain = String(eid).split('.')[0];
-            if (!domain) return;
-            H.callService(domain, 'toggle', { entity_id: eid });
-            return;
-          }
-
-          if (action === 'call-service') {
-            const full = variables[`action_${idx}_service`];
-            if (!full || !String(full).includes('.')) return;
-
-            const [domain, service] = String(full).split('.');
-            const data = Object.assign({}, variables[`action_${idx}_service_data`] || {});
-
-            if (!data.entity_id) {
-              data.entity_id = eid;
-            }
-
-            H.callService(domain, service, data);
-            return;
-          }
-
-          if (action === 'navigate') {
-            const path = variables[`action_${idx}_navigation_path`];
-            if (!path) return;
-
-            history.pushState(null, '', path);
-            window.dispatchEvent(new Event('location-changed'));
-            return;
-          }
-        };
-
-        setTimeout(() => {
-          try {
-            const root = this.shadowRoot;
-            if (!root) return;
-
-            root.querySelectorAll('.hemma-side-action-button[data-action-index]').forEach((el) => {
-              if (el._hemmaSideBound) return;
-              el._hemmaSideBound = true;
-
-              el.addEventListener('click', (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                const idx = el.getAttribute('data-action-index');
-                runAction(idx);
-              });
-
-              el.addEventListener('pointerdown', (ev) => {
-                ev.stopPropagation();
-              });
-
-              ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach((type) => {
-                el.addEventListener(type, (ev) => {
-                  ev.stopPropagation();
-                }, { passive: true });
-              });
-            });
-          } catch(e) {}
-        }, 0);
-
-        const btn = (idx) => {
-          if (!isEnabled(idx)) return '';
-
-          const eid = variables[`action_${idx}_entity`];
-          const icon = variables[`action_${idx}_icon`];
-          const cls = getEntityStateClass(eid);
-          const label = states[eid]?.attributes?.friendly_name || eid;
-
-          return `
-            <div
-              class="hemma-side-action-button hemma-side-action-${idx} ${cls}"
-              data-action-index="${idx}"
-              style="--hemma-side-action-accent: ${esc(accentFor(idx, eid))};"
-              title="${esc(label)}">
-              ${renderIcon(icon, eid, cls)}
-            </div>
-          `;
-        };
-
-        return `${btn(1)}${btn(2)}`;
+    pill_2: |
+      [[[
+        const A = window._hemmaActions;
+        if (!A) return '';
+        A.bind(this, variables, hass);
+        const raw = this._config?.name;
+        const own = (typeof raw === 'string' && raw.indexOf('[[[') === -1)
+          ? raw : (entity?.attributes?.friendly_name || '');
+        return A.markup(variables, 2, states, own, hass);
       ]]]
 
   extra_styles: |
-    /* Responsive tokens */
     :host {
       --hemma-actions-pad: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px));
-      --hemma-actions-rail-w: 56px;
-      --hemma-actions-rail-inset: 22px;
-      --hemma-actions-gap: 6px;
-      --hemma-actions-btn-radius: 18px;
+      --hemma-actions-btn-radius: 13px;
       --hemma-actions-icon-size: 23px;
       --hemma-actions-svg-size: 20px;
+      --hemma-actions-corner-gap: 4px;
+      --hemma-actions-more-size: 21px;
+      --hemma-actions-more-offset: 16px;
+      --hemma-actions-more-fill-r: 18px;
+      --hemma-actions-corner-shift: 0.26s;
+      --hemma-actions-pill-h: 40px;
+      --hemma-actions-pill-gap: 8px;
+      --hemma-actions-pill-bottom: var(--hemma-actions-pad);
+      --hemma-actions-label-size: 15px;
+      /* FIT_REF_PX in hemma-core must equal this floor. */
+      --hemma-actions-label-min: 12px;
+      --hemma-actions-glyph-gap: 10px;
+      --hemma-actions-label-gap: 12px;
+
+      --hemma-actions-dur-in: 0.30s;
+      --hemma-actions-dur-out: 0.14s;
+      --hemma-actions-ease-in: cubic-bezier(0.32, 0.72, 0, 1);
+      --hemma-actions-ease-out: cubic-bezier(0.4, 0, 0.7, 1);
+      --hemma-actions-pill-scale: 0.94;
+      --hemma-actions-pill-rise: 6px;
+
+      --hemma-actions-press-more: 0.86;
+      --hemma-actions-press-pill: 0.97;
+      --hemma-actions-press-down: 0.12s;
+      --hemma-actions-press-up: 0.28s;
+      --hemma-actions-ease-press-down: cubic-bezier(0.2, 0, 0.4, 1);
+      --hemma-actions-ease-press-up: cubic-bezier(0.32, 0.72, 0, 1);
+    }
+
+    /* On ha-card, not :host: --hemma-icon-circle-size lives here and a :host
+       var cannot read one from a descendant. */
+    ha-card {
+      --hemma-actions-hit: var(--hemma-icon-circle-size, 40px);
+      /* The button is one fixed size everywhere; only its distance from the
+         corner follows the tile's own padding. --more-offset is half the dots
+         plus the gap that keeps the fill off the edge. */
+      --hemma-actions-more-inset: calc(
+        var(--hemma-actions-hit) / 2 - var(--hemma-actions-more-offset));
+      --hemma-actions-more-fill: radial-gradient(circle closest-side,
+        var(--hemma-actions-pill-bg) var(--hemma-actions-more-fill-r),
+        transparent calc(var(--hemma-actions-more-fill-r) + 0.5px));
+      --hemma-actions-pill-pad-start: calc(
+        (var(--hemma-actions-hit) - var(--hemma-actions-icon-size)) / 2);
+      --hemma-side-lit: var(--hemma-active-overlay-opacity, 0);
+      --hemma-actions-ink: color-mix(in srgb, #000 calc(var(--hemma-side-lit) * 100%), #fff);
+      --hemma-actions-pill-bg-on: color-mix(in srgb,
+        rgba(0, 0, 0, 0.20) calc(var(--hemma-side-lit) * 100%),
+        rgba(255, 255, 255, 0.26));
+      --hemma-actions-pill-bg: color-mix(in srgb,
+        rgba(0, 0, 0, 0.10) calc(var(--hemma-side-lit) * 100%),
+        rgba(255, 255, 255, 0.13));
+      --hemma-actions-pill-bg-hover: color-mix(in srgb,
+        rgba(0, 0, 0, 0.16) calc(var(--hemma-side-lit) * 100%),
+        rgba(255, 255, 255, 0.19));
     }
 
     @media (max-width: 767px), (max-height: 600px) {
+      .hemma-act-pill .hemma-act-glyphbox { display: none; }
+      .hemma-act-pill {
+        gap: 0;
+        --hemma-actions-label-inset: 0px;
+        --hemma-actions-pill-pad-start: 14px;
+      }
+
       :host {
-        --hemma-actions-rail-w: 56px;
-        --hemma-actions-rail-inset: 14px;
-        --hemma-actions-gap: 5px;
-        --hemma-actions-btn-radius: 15px;
+        --hemma-actions-btn-radius: 12px;
         --hemma-actions-icon-size: 22px;
         --hemma-actions-svg-size: 19px;
+        --hemma-actions-corner-gap: 2px;
+        --hemma-actions-pill-h: 30px;
+        --hemma-actions-pill-gap: 6px;
+        --hemma-actions-pill-bottom: 10px;
+        --hemma-actions-label-size: 14px;
       }
     }
 
-    #side_actions {
-      overflow: visible !important;
-      pointer-events: auto !important;
-    }
-
-    /* Buttons */
-    .hemma-side-action-button {
-      flex: 0 0 calc(50% - var(--hemma-actions-gap) / 2);
+    /* The press lives one level in: the pill wrapper's transform belongs to
+       the cross-fade. */
+    .hemma-act-hit {
       width: 100%;
-      min-width: 0;
-      min-height: 0;
-      box-sizing: border-box;
-
+      height: 100%;
       display: flex;
       align-items: center;
-      justify-content: center;
-
-      padding: 0;
-      margin: 0;
-
+      gap: var(--hemma-actions-glyph-gap, 10px);
+      box-sizing: border-box;
+      border-radius: inherit;
+      overflow: hidden;
       cursor: pointer;
-      pointer-events: auto;
       user-select: none;
       -webkit-tap-highlight-color: transparent;
 
-      /* An active card turns white, and a non-active button was white on
-         white: a 9% white fill holding a white glyph. Both follow the card's
-         OWN active signal - 0 while it is dark, 1 while it is lit, and the
-         hover value in between - so the chip tracks the card instead of this
-         file repeating the active test and drifting from it. */
-      --hemma-side-lit: var(--hemma-active-overlay-opacity, 0);
-      background: var(--hemma-entity-actions-btn-bg,
-        color-mix(in srgb,
-          rgba(0, 0, 0, 0.14) calc(var(--hemma-side-lit) * 100%),
-          rgba(255, 255, 255, 0.09)));
-      border-radius: var(--hemma-actions-btn-radius);
-      box-shadow: none;
+      transform: scale(1);
+      transition:
+        transform var(--hemma-actions-press-up, 0.28s)
+          var(--hemma-actions-ease-press-up, cubic-bezier(0.32, 0.72, 0, 1)),
+        background-color 0.18s ease;
+    }
+
+    .hemma-act-hit.pressed {
+      transform: scale(var(--hemma-act-press, 0.96));
+      background: var(--hemma-actions-pill-bg-hover);
+      transition:
+        transform var(--hemma-actions-press-down, 0.12s)
+          var(--hemma-actions-ease-press-down, cubic-bezier(0.2, 0, 0.4, 1)),
+        background-color var(--hemma-actions-press-down, 0.12s) ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hemma-act-hit, .hemma-act-hit.pressed { transform: none; }
+    }
+
+    .hemma-act-more {
+      justify-content: center;
+      background: transparent;
+      --hemma-act-press: var(--hemma-actions-press-more, 0.86);
+    }
+
+    .hemma-act-more.pressed {
+      background: radial-gradient(circle closest-side,
+        var(--hemma-actions-pill-bg-hover) var(--hemma-actions-more-fill-r),
+        transparent calc(var(--hemma-actions-more-fill-r) + 0.5px));
+    }
+
+    .hemma-act-dots {
+      display: block;
+      flex: none;
+      width: var(--hemma-actions-more-size);
+      height: var(--hemma-actions-more-size);
+      fill: var(--hemma-actions-ink);
+      opacity: 0.9;
+      pointer-events: none;
+    }
+
+    .hemma-act-pill {
+      background: var(--hemma-actions-pill-bg);
+      --hemma-act-press: var(--hemma-actions-press-pill, 0.97);
+      padding-inline-start: var(--hemma-actions-pill-pad-start);
+      padding-inline-end: var(--hemma-actions-label-gap, 12px);
+      /* The label sizes off 100cqi, which is the CONTENT box. */
+      container-type: inline-size;
+      --hemma-actions-label-inset: calc(
+        var(--hemma-actions-icon-size)
+        + var(--hemma-actions-glyph-gap, 10px));
+    }
+
+    .hemma-act-glyphbox {
+      flex: none;
+      display: grid;
+      place-items: center;
+      width: var(--hemma-actions-icon-size);
+      height: var(--hemma-actions-icon-size);
+    }
+
+    .hemma-act-label {
+      flex: 0 1 auto;
+      /* Without it the label refuses to shrink and clips mid-word. */
+      min-width: 0;
+      display: block;
+      line-height: 1.25;
+      white-space: nowrap;
       overflow: hidden;
-
-      transition: background-color 0.18s ease, transform 0.15s ease;
+      text-overflow: ellipsis;
+      font-size: var(--hemma-actions-label-size);
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      color: var(--hemma-actions-ink);
+      opacity: 0.9;
     }
 
-    .hemma-side-action-button.active {
-      background: var(--hemma-side-action-accent, var(--hemma-color-teal, #00c3d0));
-    }
-
-    /* Icons */
-    .hemma-side-action-icon {
+    .hemma-act-icon {
       display: block;
       object-fit: contain;
 
@@ -465,107 +459,52 @@ hemma_entity_actions:
       box-shadow: none !important;
       filter: none;
 
-      color: var(--primary-text-color);
-      opacity: 0.86;
+      color: var(--hemma-actions-ink);
+      opacity: 0.52;
 
       transition: color 0.18s ease, opacity 0.18s ease;
     }
 
-    .hemma-side-action-ha-icon {
+    /* HA's own hook; without it mdi glyphs ride a text baseline and sit low. */
+    .hemma-act-ha-icon {
       --mdc-icon-size: var(--hemma-actions-icon-size);
+      --ha-icon-display: block;
       width: var(--hemma-actions-icon-size);
       height: var(--hemma-actions-icon-size);
-      min-width: var(--hemma-actions-icon-size);
-      max-width: var(--hemma-actions-icon-size);
+      line-height: 0;
     }
 
-    /* An mdi glyph takes a color; a Hemma svg is an <img> and only takes a
-       filter, so invert() carries it the same distance. Both are overridden
-       below for a button that is ON, which keeps its white glyph on the
-       accent whatever the card is doing. */
-    .hemma-side-action-ha-icon {
-      color: color-mix(in srgb,
-        var(--hemma-entity-name-active, rgba(0, 0, 0, 0.88)) calc(var(--hemma-side-lit) * 100%),
-        var(--primary-text-color));
-    }
-
-    .hemma-side-action-svg {
+    .hemma-act-svg {
       filter: brightness(0) invert(calc(1 - var(--hemma-side-lit)));
       width: var(--hemma-actions-svg-size);
       height: var(--hemma-actions-svg-size);
-      min-width: var(--hemma-actions-svg-size);
-      max-width: var(--hemma-actions-svg-size);
       object-fit: contain;
     }
 
-    /* Active button */
-    .hemma-side-action-icon.active {
-      color: #fff;
+    .hemma-act-hit.active .hemma-act-icon {
       opacity: 1;
     }
 
-    .hemma-side-action-svg.active {
-      filter: brightness(0) invert(1);
+    .hemma-act-pill.active {
+      background: var(--hemma-actions-pill-bg-on);
     }
 
-    .hemma-side-action-icon.normal {
-      opacity: 0.82;
-    }
-
-    .hemma-side-action-icon.unavailable {
+    .hemma-act-hit.unavailable .hemma-act-icon {
       opacity: 0.35;
       color: var(--disabled-text-color);
-      filter: grayscale(1);
     }
 
-    /* grayscale(1) alone would drop the invert above and hand an unavailable
-       svg its own white fill back - invisible on a lit card, which is the
-       thing being fixed. */
-    .hemma-side-action-svg.unavailable {
-      filter: brightness(0) invert(calc(1 - var(--hemma-side-lit)));
+    .hemma-act-hit.unavailable .hemma-act-label {
+      opacity: 0.5;
     }
 
-    .hemma-side-action-button ha-icon,
-    .hemma-side-action-button img,
-    .hemma-side-action-button *,
-    #side_actions ha-icon,
-    #side_actions img {
-      background: transparent !important;
-      background-color: transparent !important;
-      border-radius: 0 !important;
-      box-shadow: none !important;
+    #glyph_1, #glyph_2, #pill_1, #pill_2 {
+      overflow: hidden !important;
     }
 
-    /* Interaction */
+    /* Hover only. Press is a pointerdown class: :active on touch lands late
+       and can stick. */
     @media (hover: hover) and (pointer: fine) {
-      /* A lift at BOTH ends, not "more of the resting fill". On a dark card
-         that means more white; on a lit one it means LESS black, because more
-         black there is a press, not a hover. Small either way: the chip has to
-         stay the same object, just lit. */
-      .hemma-side-action-button:hover {
-        background: var(--hemma-entity-actions-btn-bg-hover,
-          color-mix(in srgb,
-            rgba(0, 0, 0, 0.10) calc(var(--hemma-side-lit) * 100%),
-            rgba(255, 255, 255, 0.13)));
-      }
-
-      .hemma-side-action-button.active:hover {
-        background: var(--hemma-side-action-accent, var(--hemma-color-teal, #00c3d0));
-        filter: brightness(1.12);
-      }
-    }
-
-    .hemma-side-action-button:active {
-      transform: scale(0.96);
-    }
-
-    @media (hover: none) and (pointer: coarse) {
-      .hemma-side-action-button:active {
-        background: var(--hemma-entity-actions-btn-bg-hover, rgba(255, 255, 255, 0.16));
-      }
-
-      .hemma-side-action-button.active:active {
-        background: var(--hemma-side-action-accent, var(--hemma-color-teal, #00c3d0));
-        filter: brightness(1.12);
-      }
+      .hemma-act-more:hover { background: var(--hemma-actions-more-fill); }
+      .hemma-act-pill:hover { background: var(--hemma-actions-pill-bg-hover); }
     }

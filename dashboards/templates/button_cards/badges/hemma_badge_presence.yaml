@@ -1,5 +1,3 @@
-# Presence Badge
-# Shows person entity with home/away status
 hemma_badge_presence:
   template: [hemma_badge_base]
 

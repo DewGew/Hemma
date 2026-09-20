@@ -273,8 +273,6 @@ hemma_mobile_filter_badges:
               entity_1: '[[[ return variables.presence_entity_1 ]]]'
               entity_2: '[[[ return variables.presence_entity_2 ]]]'
 
-          # Media - always visible as a filter toggle.
-          # Live media info is shown separately in the sub-badges row.
           - type: custom:button-card
             template: hemma_badge_media_group
             entity: input_select.hemma_mobile_filter

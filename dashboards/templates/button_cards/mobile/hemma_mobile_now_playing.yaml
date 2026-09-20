@@ -1,17 +1,9 @@
-# Mobile Now Playing row
-# The dashboard's Now Playing section and its Media-popup column:
-#   np_title  - the "Now Playing" section header
-#   media_row - the horizontal, snap-scrolling row of full-width media tiles
-#   np_rail   - everything active except the primary tile, as a column,
-#               revealed only while the Media filter popup is open
 hemma_mobile_now_playing:
   show_icon: false
   show_name: false
   show_state: false
   show_label: false
   show_entity_picture: false
-  # Bound purely for the subscription - media_row/np_rail gate on the
-  # filter, and this seeds it into button-card's _monitoredEntities.
   entity: input_select.hemma_mobile_filter
 
   tap_action: {action: none}
@@ -53,8 +45,15 @@ hemma_mobile_now_playing:
           // draw empty rather than throwing on every template below.
           if (typeof window._hemmaNP !== 'function' && !window._hemmaNPNoCore) {
             window._hemmaNPNoCore = 1;
-            console.error('Hemma: hemma-core.js has not loaded, so Now Playing '
-              + 'cannot collect sources. Check the dashboard resource for it.');
+            // Not immediately: a module resource is still loading while the
+            // first render evaluates this, so the bare check cried wolf on
+            // every cold load and then latched, leaving a stale error in the
+            // console for a file that had in fact arrived.
+            setTimeout(function () {
+              if (typeof window._hemmaNP === 'function') return;
+              console.error('Hemma: hemma-core.js has not loaded, so Now Playing '
+                + 'cannot collect sources. Check the dashboard resource for it.');
+            }, 5000);
           }
           return true;
         ]]]
@@ -240,6 +239,16 @@ hemma_mobile_now_playing:
       - display: block
     custom_fields:
       np_title:
+        # The heading goes with the row it heads: nothing playing, no section.
+        - display: |
+            [[[
+              const filter = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+              if (filter === 'media') return 'block';
+              if (filter !== 'all') return 'none';
+              const npList = (typeof window._hemmaNPView === 'function')
+                ? window._hemmaNPView(states, variables.cfg) : [];
+              return npList.length ? 'block' : 'none';
+            ]]]
         - font-size: 18px
         - font-weight: 700
         - color: "#ffffff"
@@ -366,8 +375,6 @@ hemma_mobile_now_playing:
                     } catch (err) {}
                   }
                 };
-                // Two frames plus a task: the frames immediately after a heavy re-render are
-                // still busy, and starting the transition into a busy frame loses it again.
                 requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(settle, 0)));
               }
             }
@@ -629,8 +636,6 @@ hemma_mobile_now_playing:
                   && W._hemmaNPSlotState[id]._npHoldSrc
                   ? W._hemmaNPSlotState[id]._npHoldSrc.key : null;
                 const slot = plan[i] ? plan[i].key : null;
-                // Rank position in the live list. Was `liveList[i]`, which is meaningless now
-                // that a wrapper index is an identity, not a position.
                 const live = slot
                   ? (liveList.findIndex((x) => x && x.key === slot) + 1 || '-')
                   : null;

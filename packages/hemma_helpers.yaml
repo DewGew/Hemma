@@ -1,45 +1,3 @@
-# packages/hemma_helpers.yaml
-# ============================================================================
-# REQUIRED: Hemma Dashboard Helper Entities
-#
-# These helper entities are required for the Hemma dashboard to function.
-# Place this file in your /config/packages/ directory and ensure packages
-# are enabled in your configuration.yaml:
-#
-#   homeassistant:
-#     packages: !include_dir_named packages
-#
-# ENTITIES CREATED:
-#   - input_boolean.hemma_thermostat_overlay: Thermostat card temperature adjustment overlay
-#   - input_boolean.hemma_mobile_navigation: Mobile nav menu state
-#   - input_boolean.hemma_motion_badges: Show/hide motion sensor badges on navbar
-#   - input_select.hemma_expanded_row: Which sub-badge row is expanded (none/climate/presence/media)
-#   - input_number.hemma_thermostat_target_temperature: Thermostat target temp
-#   - input_select.hemma_thermostat_mode: Heat/Cool mode selector
-#   - input_text.hemma_thermostat_active_entity: entity_id of the thermostat card
-#     whose controls overlay is currently open (so only that card shows it)
-#   - input_boolean.hemma_dashboard_redirect: Phone -> mobile dashboard routing (on by default; turn off to disable)
-#   - input_boolean.hemma_now_playing_minimized / input_text.hemma_now_playing_pinned: Now Playing panel state
-#
-# SCRIPTS:
-#   - script.hemma_light_smart_toggle: Snapshot/restore light state on toggle
-#   - script.hemma_thermostat_overlay_toggle: Opens the thermostat controls overlay on one card only
-#
-# NETWORK RESTART CONFIRMATION (used by hemma_popup_network action tiles):
-#   - input_boolean.hemma_restart_confirm_1: Confirm state for action button 1
-#   - input_boolean.hemma_restart_confirm_2: Confirm state for action button 2
-#   - input_boolean.hemma_restart_done_1: Done/success state for action button 1 (auto-clears after 3s)
-#   - input_boolean.hemma_restart_done_2: Done/success state for action button 2 (auto-clears after 3s)
-#   - script.hemma_restart_toggle: Handles Restart → Confirm → Done flow for network action tiles
-#
-#   Wire up in your popup variables:
-#     action_1_confirm_helper: input_boolean.hemma_restart_confirm_1
-#     action_1_done_helper: input_boolean.hemma_restart_done_1
-#     action_2_confirm_helper: input_boolean.hemma_restart_confirm_2
-#     action_2_done_helper: input_boolean.hemma_restart_done_2
-#
-# OPTIONAL: Adjust min/max values for input_number to match your climate needs.
-# ============================================================================
 
 input_boolean:
   hemma_dashboard_redirect:
@@ -52,6 +10,10 @@ input_boolean:
 
   hemma_thermostat_overlay:
     name: Thermostat Overlay
+    initial: off
+
+  hemma_actions_overlay:
+    name: Entity Actions Overlay
     initial: off
 
   hemma_mobile_navigation:
@@ -89,8 +51,6 @@ input_text:
     initial: ""
     max: 32
 
-  # Motion sensor entity IDs for navbar badges (desktop + mobile).
-  # Leave initial as "" to disable the badge for that room.
   hemma_motion_living_room:
     name: "Hemma Motion - Living Room"
     initial: ""
@@ -104,6 +64,16 @@ input_text:
   hemma_thermostat_active_entity:
     name: "Hemma Thermostat - Active Entity"
     initial: ""
+
+  hemma_actions_active_entity:
+    name: "Hemma Entity Actions - Active Entity"
+    initial: ""
+
+input_datetime:
+  hemma_notifications_read:
+    name: "Hemma Notifications - Last Read"
+    has_date: true
+    has_time: true
 
 input_number:
   hemma_thermostat_target_temperature:
@@ -188,10 +158,6 @@ template:
             var(--hemma-badge-climate-color)
           {% endif %}
 
-      # Counts Plex items added in the last 7 days — drives the Recently Added badge.
-      # Requires the plex_recently_added HACS custom component:
-      # https://github.com/NemesisRE/sensor.plex_recently_added
-      # Configure sensor.recently_added_movies and sensor.recently_added_tv in your sensor config.
       - name: "Plex Recently Added Count"
         unique_id: plex_recently_added_count
         state: >
@@ -340,6 +306,41 @@ script:
           - service: input_boolean.turn_on
             data:
               entity_id: input_boolean.hemma_thermostat_overlay
+      - delay:
+          milliseconds: 400
+
+  # Entity actions toggle
+  hemma_actions_overlay_toggle:
+    alias: "Hemma - Entity Actions Overlay Toggle"
+    description: >
+      Open/close/switch for the hemma_entity_actions inline controls. Same
+      shape as the thermostat overlay: the boolean alone cannot say WHICH
+      card was tapped, so the companion input_text carries the entity and
+      every visibility gate checks both.
+    mode: single
+    fields:
+      actions_entity_id:
+        description: entity_id of the actions card that was tapped
+        required: true
+    sequence:
+      - if:
+          - condition: state
+            entity_id: input_boolean.hemma_actions_overlay
+            state: "on"
+          - condition: template
+            value_template: "{{ states('input_text.hemma_actions_active_entity') == actions_entity_id }}"
+        then:
+          - service: input_boolean.turn_off
+            data:
+              entity_id: input_boolean.hemma_actions_overlay
+        else:
+          - service: input_text.set_value
+            data:
+              entity_id: input_text.hemma_actions_active_entity
+              value: "{{ actions_entity_id }}"
+          - service: input_boolean.turn_on
+            data:
+              entity_id: input_boolean.hemma_actions_overlay
       - delay:
           milliseconds: 400
 

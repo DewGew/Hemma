@@ -13,9 +13,11 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
+from .assets import HemmaAssetsView
 from .images import HemmaImagesView
 from .templates import HemmaTemplatesView, rebuild_if_stale
 from .const import (
+    ASSETS_DIR,
     DOMAIN,
     PANEL_ICON,
     PANEL_TITLE,
@@ -58,10 +60,16 @@ async def _sync_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
     the user adds them. An entry still loading from /local is repointed rather
     than duplicated: two entries for one script run it twice.
     """
-    def _present() -> list[str]:
-        return [n for n in SHARED_SCRIPTS if os.path.isfile(os.path.join(scripts_dir, n))]
+    def _present() -> dict[str, int]:
+        found = {}
+        for n in SHARED_SCRIPTS:
+            path = os.path.join(scripts_dir, n)
+            if os.path.isfile(path):
+                found[n] = int(os.path.getmtime(path))
+        return found
 
-    names = await hass.async_add_executor_job(_present)
+    stamps = await hass.async_add_executor_job(_present)
+    names = list(stamps)
     if not names:
         _LOGGER.warning(
             "Hemma: no shared scripts found in %s; the dashboard needs them",
@@ -69,7 +77,7 @@ async def _sync_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
         )
         return
 
-    wanted = {n: f"{SCRIPTS_URL_BASE}/{n}" for n in names}
+    wanted = {n: f"{SCRIPTS_URL_BASE}/{n}?v={stamps[n]}" for n in names}
     res = _lovelace_resources(hass)
 
     if res is None or not hasattr(res, "async_create_item"):
@@ -96,18 +104,21 @@ async def _sync_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
     for name, url in wanted.items():
         if url in by_url:
             continue
-        legacy = next(
+        existing = next(
             (
                 i
                 for i in items
                 if str(i.get("url", "")).partition("?")[0].endswith("/" + name)
-                and str(i.get("url", "")).startswith("/local/")
+                and (
+                    str(i.get("url", "")).startswith("/local/")
+                    or str(i.get("url", "")).startswith(SCRIPTS_URL_BASE + "/")
+                )
             ),
             None,
         )
         try:
-            if legacy is not None:
-                await res.async_update_item(legacy["id"], {"url": url})
+            if existing is not None:
+                await res.async_update_item(existing["id"], {"url": url})
                 moved.append(name)
             else:
                 await res.async_create_item({"res_type": "module", "url": url})
@@ -131,7 +142,8 @@ async def _sync_script_resources(hass: HomeAssistant, scripts_dir: str) -> None:
     if added or moved:
         _LOGGER.info(
             "Hemma: registered %d and repointed %d dashboard resource(s); "
-            "refresh the browser once to load them",
+            "refresh the browser once to load them (the ?v= stamp is the file's "
+            "mtime, so an edited script gets a URL no cache can answer)",
             len(added),
             len(moved),
         )
@@ -141,14 +153,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Register the panel assets and the sidebar entry."""
     panel_dir = hass.config.path(f"custom_components/{DOMAIN}/panel")
 
-    # The bundle is derived from the template tree; rebuild it before the panel
-    # can serve a stale copy into a dashboard Save.
+    # The bundle is derived from the template tree, so rebuild before the panel loads.
     await hass.async_add_executor_job(rebuild_if_stale, hass.config.config_dir)
 
     scripts_dir = hass.config.path(SCRIPTS_DIR)
 
-    # One call is atomic, so on a reload the already-registered panel path took
-    # the scripts path with it. cache_headers=False keeps the URL stable.
     for url, path in (
         (URL_BASE, panel_dir),
         (SCRIPTS_URL_BASE, scripts_dir),
@@ -162,8 +171,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await _sync_script_resources(hass, scripts_dir)
 
-    # The panel URL carries the file mtime so editing the JS busts the browser's
-    # module cache without needing a version bump or a manual hard refresh.
     def _stamp() -> int:
         try:
             return int(os.path.getmtime(os.path.join(panel_dir, "hemma-panel.js")))
@@ -173,6 +180,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     stamp = await hass.async_add_executor_job(_stamp)
 
     if not hass.data.get(f"{DOMAIN}_views"):
+        hass.http.register_view(HemmaAssetsView(hass.config.path(ASSETS_DIR)))
         hass.http.register_view(HemmaImagesView())
         hass.http.register_view(HemmaTemplatesView())
         hass.data[f"{DOMAIN}_views"] = True

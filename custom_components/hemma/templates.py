@@ -24,9 +24,6 @@ TEMPLATE_DIR = "dashboards/templates/button_cards"
 BUNDLE = "custom_components/hemma/panel/hemma-templates.json"
 
 
-# Directories under the template tree that are NOT part of the product. HA's
-# !include_dir_merge_named is recursive, so a draft left here is parsed into the
-# template namespace and shipped into every dashboard the panel saves.
 EXCLUDE_DIRS = ("new popups (untested)",)
 
 
@@ -77,8 +74,6 @@ def _build(source: str, mobile_source: str) -> dict:
     if not templates:
         raise ValueError(f"no button_card_templates in {source}")
 
-    # HA merged the whole tree, excluded directories included, so drop their
-    # keys back out before anything is shipped into a dashboard.
     for name in _excluded_keys(os.path.dirname(os.path.dirname(source))):
         templates.pop(name, None)
 
@@ -99,11 +94,6 @@ def _build(source: str, mobile_source: str) -> dict:
             "layout": home["layout"],
             "nav": cards[1],
         },
-        # The phone half's scaffold. This is the FOURTH place that builds this
-        # bundle - tools/, dashboards/tools/, the harness copy, and here - and
-        # this one runs on every integration reload. Without it, every reload
-        # silently stripped the mobile scaffold and the panel lost the ability
-        # to create or preview a phone layout.
         "mobile": _mobile_scaffold(mobile_source),
     }
 
@@ -158,20 +148,13 @@ def rebuild_if_stale(config_dir: str) -> bool:
         _LOGGER.debug("Hemma: no template source, keeping the shipped bundle")
         return False
 
-    # The mobile example feeds the bundle now, so a change to it has to
-    # count as making the bundle stale.
     newest = _newest_mtime(source, os.path.join(config_dir, SOURCE_MOBILE), tree)
     try:
         current = os.path.getmtime(out)
     except OSError:
         current = 0.0
 
-    # An mtime check alone trusts whoever wrote the bundle last to have written
-    # all of it. Four other copies of this builder exist - two under tools/, the
-    # harness copy, and whatever a scratch checkout is carrying - and one of them
-    # not knowing about a key writes a fresh-looking bundle with that key gone.
-    # That is how the phone scaffold kept disappearing between reloads. Missing
-    # a key we know belongs there counts as stale no matter how new the file is.
+    # An mtime check alone trusts whoever wrote the bundle last to have finished.
     if current >= newest and _bundle_is_whole(out):
         return False
 

@@ -220,9 +220,6 @@ hemma_popup_recently_added:
             + 'box-shadow:none!important;'
             + '-webkit-backdrop-filter:none!important;'
             + 'backdrop-filter:none!important;'
-            // The theme sets will-change: filter, transform on every ha-card,
-            // which makes every backdrop-filter inside it inert - the shelves
-            // ask for frost and this wrapper is what would take it away.
             + 'will-change:auto!important;'
             + 'padding:0!important;'
             + 'border-radius:0!important;'
@@ -260,8 +257,6 @@ hemma_popup_recently_added:
             const toCard = (item) => ({
               image: resolveUrl(item.fanart || item.art || item.poster),
               rating: clean(item.rating) || null,
-              // Films only: a show's year is the show's, not the episode's, and
-              // the second row already carries the episode it belongs to.
               year: item._isTV ? null
                 : ((String(item.aired || '').match(/^(\d{4})/) || [])[1] || null),
               // A show leads with its show name; a film with its own.
@@ -278,8 +273,6 @@ hemma_popup_recently_added:
                   })()
                 : (clean(item.genres) || null),
               watched: showWatched && (item.flag === false || item.flag === 'false'),
-              // Only the detail shows these: the tile has room for two lines
-              // and the summary is what you open the detail to read.
               summary: clean(item.summary) || null,
               runtime: item.runtime ? item.runtime + ' min' : null,
               added: ago(item.airdate),
@@ -316,9 +309,6 @@ hemma_popup_recently_added:
 
             const uiCard = {
               type: 'custom:button-card',
-              // Transparent, or this nested ha-card lays a second
-              // backdrop-filter over the popup's own and the block it
-              // covers reads a shade off from everything around it.
               card_mod: { style: transparentStyles },
               tap_action: { action: 'none' },
               show_icon: false, show_name: false, show_label: false, show_state: false,
@@ -326,9 +316,6 @@ hemma_popup_recently_added:
               styles: {
                 card: [
                   { background: 'transparent' }, { border: 'none' }, { 'box-shadow': 'none' },
-                  // No horizontal padding: mediaRow lays its own 26px gutter, and
-                  // two gutters put the tiles 52px in while the close control sat
-                  // at 26. One gutter, one left edge.
                   { padding: '16px 0 20px 0' }, { 'border-radius': '0' },
                 ],
                 grid: [

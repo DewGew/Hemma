@@ -1,18 +1,3 @@
-# Thermostat Card
-# Shows current temperature in a colored puck (teal = cooling, yellow = heating)
-# over the room name/state. Tap toggles an overlay (driven by the shared
-# input_boolean.hemma_thermostat_overlay, gated per-card by
-# input_text.hemma_thermostat_active_entity) that slides in +/- controls and a
-# "Set" button over the card, targeting input_number.hemma_thermostat_target_temperature.
-# Only the card matching the active entity shows its overlay; tapping a
-# different thermostat card switches the overlay to that card instead.
-#
-# Variables:
-#   thermostat_toggle_helper - input_boolean that drives the +/- overlay (shared
-#                              across all thermostat cards; input_text.hemma_thermostat_active_entity
-#                              says WHICH card's overlay is actually showing)
-#   temp_sensor              - optional separate sensor for the puck reading
-#                              (falls back to the climate entity's own current_temperature)
 hemma_thermostat:
   template: [hemma_entity]
   show_entity_picture: false
@@ -61,7 +46,7 @@ hemma_thermostat:
     service_data:
       entity_id: script.hemma_thermostat_overlay_toggle
       variables:
-        thermostat_entity_id: '[[[ return entity.entity_id ]]]'
+        thermostat_entity_id: '[[[ return window.hemmaOverlayKey?.(entity?.entity_id) ?? entity?.entity_id ]]]'
 
   custom_fields:
     temp_puck: |
@@ -99,7 +84,7 @@ hemma_thermostat:
       card:
         type: custom:button-card
         template: [hemma_default]
-        entity: '[[[ return entity.entity_id ]]]'
+        entity: '[[[ return entity?.entity_id ]]]'
         show_entity_picture: false
         show_icon: false
         show_state: true
@@ -117,7 +102,7 @@ hemma_thermostat:
           service_data:
             entity_id: script.hemma_thermostat_overlay_toggle
             variables:
-              thermostat_entity_id: '[[[ return entity.entity_id ]]]'
+              thermostat_entity_id: '[[[ return window.hemmaOverlayKey?.(entity?.entity_id) ?? entity?.entity_id ]]]'
 
         extra_styles: |
           :host {
@@ -303,6 +288,18 @@ hemma_thermostat:
       background-image: var(--thermo-icon-down);
       background-position: center calc(50% + 1px);
     }
+    /* 22px on a 44px-tall button is exactly half its height, which is a full
+       oval. 16px keeps it clearly a squircle while sitting a shade rounder
+       than the entity-actions pills (13px on 40px, a 0.325 ratio, against
+       0.364 here).
+       A real media query, not a matchMedia snapshot baked into an inline
+       style - that goes stale on rotation. */
+    ha-card { --thermo-btn-radius: 16px; }
+
+    @media (max-width: 767px), (max-height: 600px) {
+      ha-card { --thermo-btn-radius: 15px; }
+    }
+
     /* Hover/press */
     @media (hover: hover) {
       #ctl_up:hover,
@@ -321,7 +318,8 @@ hemma_thermostat:
       background-image: none;
       filter: none;
       font-size: var(--thermo-set-font, 18px);
-      font-weight: 700;
+      font-weight: 600;
+      letter-spacing: -0.005em;
       line-height: 1.15;
       color: var(--thermo-set-color, #fff);
     }
@@ -362,7 +360,7 @@ hemma_thermostat:
           ]]]
       - --thermo-btn-bg: |
           [[[
-            return ['cool','heat'].includes(entity?.state) ? 'rgba(0,0,0,0.13)' : 'rgba(255,255,255,0.13)';
+            return ['cool','heat'].includes(entity?.state) ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.13)';
           ]]]
       - --thermo-btn-hover-scale: '1.02'
       - --thermo-btn-press-scale: '0.92'
@@ -372,10 +370,8 @@ hemma_thermostat:
           ]]]
       - --thermo-btn-bg-hover: |
           [[[
-            return ['cool','heat'].includes(entity?.state) ? 'rgba(0,0,0,0.165)' : 'rgba(255,255,255,0.165)';
+            return ['cool','heat'].includes(entity?.state) ? 'rgba(0,0,0,0.16)' : 'rgba(255,255,255,0.19)';
           ]]]
-      # The chevrons are a white SVG flipped to solid black by brightness(0)
-      # when the card is active, so the label has to be full strength beside them.
       - --thermo-set-color: |
           [[[
             return ['cool','heat'].includes(entity?.state) ? 'rgba(0,0,0,0.92)' : '#fff';
@@ -384,17 +380,7 @@ hemma_thermostat:
           [[[
             return ['cool','heat'].includes(entity?.state) ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.13)';
           ]]]
-      - --thermo-btn-rim: |
-          [[[
-            return ['cool','heat'].includes(entity?.state)
-              ? 'inset 0 1px .5px -0.5px rgba(255,255,255,0.30), inset 0 -1px .5px -0.5px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.07)'
-              : 'inset 0 1px .5px -0.5px rgba(255,255,255,0.42), inset 0 -1px .5px -0.5px rgba(255,255,255,0.18), inset 0 3px 6px -3px rgba(255,255,255,0.16), 0 2px 6px rgba(0,0,0,0.16)';
-          ]]]
-      - --thermo-btn-radius: |
-          [[[
-            const isMobile = window.matchMedia('(max-width: 767px), (max-height: 600px)').matches;
-            return isMobile ? '18px' : '22px';
-          ]]]
+      - --thermo-btn-rim: none
       - --thermo-pad: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
       - --thermo-rail-top: calc(var(--thermo-pad) - 2px)
       - --thermo-btn-h: "calc((100% - 2 * var(--thermo-pad) + 4px - 2 * var(--thermo-btn-gap, 6px)) / 3)"
@@ -419,23 +405,23 @@ hemma_thermostat:
       - --thermo-set-font: |
           [[[
             const isMobile = window.matchMedia('(max-width: 767px), (max-height: 600px)').matches;
-            return isMobile ? '14px' : '15px';
+            return isMobile ? '13px' : '14px';
           ]]]
       - --thermo-ease: |
           [[[
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             return on
-              ? 'linear(0, 0.04331, 0.1493, 0.2881, 0.4371, 0.5809, 0.7096, 0.818, 0.9041, 0.9686, 1.014, 1.042, 1.058, 1.063, 1.062, 1.056, 1.047, 1.038, 1.029, 1.02, 1.013, 1.007, 1.003, 0.9997, 0.9977, 0.9965, 1)'
+              ? 'linear(0, 0.05115, 0.1717, 0.32292, 0.47842, 0.62184, 0.74441, 0.84277, 0.91719, 0.97007, 1.00493, 1.02558, 1.03567, 1.03841, 1.03645, 1.03182, 1.02601, 1.02003, 1.01453, 1.00982, 1.00604, 1.00318, 1.00115, 0.99981, 0.99902, 0.99863, 1)'
               : 'cubic-bezier(.4, 0, .7, .35)';
           ]]]
       - --thermo-dur-move: |
           [[[
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             return on ? '0.27s' : '0.16s';
           ]]]
       - --thermo-dur-fade: |
           [[[
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             return on ? '0.08s' : '0.05s';
           ]]]
       - --thermostat-overlay-text-name: |
@@ -457,12 +443,12 @@ hemma_thermostat:
       - opacity: |
           [[[
             if (!variables.has_controls) return "1";
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             return on ? "0" : "1";
           ]]]
       - transition: |
           [[[
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             const commit = !!(window._hemmaThermoCommit && Date.now() - window._hemmaThermoCommit < 1500);
             return on ? 'opacity 0.1s ease' : (commit ? 'opacity 0.16s ease 0.20s' : 'opacity 0.10s ease 0.11s');
           ]]]
@@ -470,12 +456,12 @@ hemma_thermostat:
       - opacity: |
           [[[
             if (!variables.has_controls) return "0.85";
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             return on ? "0" : "0.85";
           ]]]
       - transition: |
           [[[
-            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+            const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
             const commit = !!(window._hemmaThermoCommit && Date.now() - window._hemmaThermoCommit < 1500);
             return on ? 'opacity 0.1s ease' : (commit ? 'opacity 0.16s ease 0.20s' : 'opacity 0.10s ease 0.11s');
           ]]]
@@ -484,8 +470,6 @@ hemma_thermostat:
       temp_puck:
         - position: |
             [[[ return variables.has_controls ? 'absolute' : 'static'; ]]]
-        # margin-top is the only nudge, same as #img-cell - the -2px used to be
-        # in `top` as well and double-counted.
         - top: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
         - left: var(--hemma-entity-inner-pad-current, var(--hemma-entity-inner-pad-desktop, 20px))
         - align-self: var(--hemma-tile-icon-align, start)
@@ -497,28 +481,28 @@ hemma_thermostat:
         - transform-origin: 100% 50%
         - opacity: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
-              return on ? '0' : '1';
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
+              return on ? '0' : 'var(--hemma-toggle-opacity, 0.65)';
             ]]]
         - transform: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'scale(0.72)' : 'scale(1)';
             ]]]
         - pointer-events: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'none' : 'auto';
             ]]]
         - transition: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               const commit = !!(window._hemmaThermoCommit && Date.now() - window._hemmaThermoCommit < 1500);
               return on
                 ? 'opacity 0.09s linear, transform 0.12s ease'
                 : commit
-                  ? 'opacity 0.10s linear 0.25s, transform 0.26s linear(0, 0.06508, 0.2196, 0.4123, 0.6059, 0.7767, 0.9123, 1.009, 1.07, 1.1, 1.107, 1.098, 1.081, 1.06, 1.04, 1.022, 1.008, 0.998, 0.992, 0.9892, 0.9886, 0.9897, 0.9916, 0.9938, 0.996, 0.9979, 1) 0.25s'
-                  : 'opacity 0.10s linear 0.10s, transform 0.26s linear(0, 0.06508, 0.2196, 0.4123, 0.6059, 0.7767, 0.9123, 1.009, 1.07, 1.1, 1.107, 1.098, 1.081, 1.06, 1.04, 1.022, 1.008, 0.998, 0.992, 0.9892, 0.9886, 0.9897, 0.9916, 0.9938, 0.996, 0.9979, 1) 0.10s';
+                  ? 'opacity 0.10s linear 0.25s, transform 0.26s linear(0, 0.05115, 0.1717, 0.32292, 0.47842, 0.62184, 0.74441, 0.84277, 0.91719, 0.97007, 1.00493, 1.02558, 1.03567, 1.03841, 1.03645, 1.03182, 1.02601, 1.02003, 1.01453, 1.00982, 1.00604, 1.00318, 1.00115, 0.99981, 0.99902, 0.99863, 1) 0.25s'
+                  : 'opacity 0.10s linear 0.10s, transform 0.26s linear(0, 0.05115, 0.1717, 0.32292, 0.47842, 0.62184, 0.74441, 0.84277, 0.91719, 0.97007, 1.00493, 1.02558, 1.03567, 1.03841, 1.03645, 1.03182, 1.02601, 1.02003, 1.01453, 1.00982, 1.00604, 1.00318, 1.00115, 0.99981, 0.99902, 0.99863, 1) 0.10s';
             ]]]
 
       target_temperature:
@@ -529,17 +513,17 @@ hemma_thermostat:
             [[[ return variables.has_controls ? 'block' : 'none'; ]]]
         - pointer-events: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? "auto" : "none";
             ]]]
         - opacity: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? '1' : '0';
             ]]]
         - transition: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'opacity 0.18s ease 0.10s' : 'opacity 0.10s ease';
             ]]]
 
@@ -554,32 +538,32 @@ hemma_thermostat:
             [[[ return variables.has_controls ? 'block' : 'none'; ]]]
         - pointer-events: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'auto' : 'none';
             ]]]
         - opacity: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? '1' : '0';
             ]]]
         - top: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-rail-top, 18px)' : 'var(--thermo-toggle-top)';
             ]]]
         - width: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--rail-w, 56px)' : 'var(--thermo-toggle-w, 46px)';
             ]]]
         - height: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-btn-h, 44px)' : 'var(--thermo-toggle-h, 26px)';
             ]]]
         - border-radius: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-btn-radius, 22px)' : 'var(--thermo-toggle-r, 13px)';
             ]]]
         - transition-property: top, width, height, border-radius, opacity, background-color, transform
@@ -587,7 +571,7 @@ hemma_thermostat:
         - transition-timing-function: "var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), linear, ease, ease"
         - transition-delay: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               const commit = !!(window._hemmaThermoCommit && Date.now() - window._hemmaThermoCommit < 1500);
               const move = on ? 0 * 0.018 : (commit ? 0.030 : 0.050);
               const fade = on ? move : move + 0.10;
@@ -606,32 +590,32 @@ hemma_thermostat:
             [[[ return variables.has_controls ? 'block' : 'none'; ]]]
         - pointer-events: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'auto' : 'none';
             ]]]
         - opacity: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? '1' : '0';
             ]]]
         - top: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'calc(var(--thermo-rail-top, 18px) + (var(--thermo-btn-h, 44px) + var(--thermo-btn-gap, 6px)))' : 'var(--thermo-toggle-top)';
             ]]]
         - width: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--rail-w, 56px)' : 'var(--thermo-toggle-w, 46px)';
             ]]]
         - height: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-btn-h, 44px)' : 'var(--thermo-toggle-h, 26px)';
             ]]]
         - border-radius: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-btn-radius, 22px)' : 'var(--thermo-toggle-r, 13px)';
             ]]]
         - transition-property: top, width, height, border-radius, opacity, background-color, transform
@@ -639,7 +623,7 @@ hemma_thermostat:
         - transition-timing-function: "var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), linear, ease, ease"
         - transition-delay: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               const commit = !!(window._hemmaThermoCommit && Date.now() - window._hemmaThermoCommit < 1500);
               const move = on ? 1 * 0.018 : (commit ? 0.200 : 0.025);
               const fade = on ? move : move + 0.10;
@@ -658,32 +642,32 @@ hemma_thermostat:
             [[[ return variables.has_controls ? 'block' : 'none'; ]]]
         - pointer-events: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'auto' : 'none';
             ]]]
         - opacity: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? '1' : '0';
             ]]]
         - top: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'calc(var(--thermo-rail-top, 18px) + 2 * (var(--thermo-btn-h, 44px) + var(--thermo-btn-gap, 6px)))' : 'var(--thermo-toggle-top)';
             ]]]
         - width: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--rail-w, 56px)' : 'var(--thermo-toggle-w, 46px)';
             ]]]
         - height: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-btn-h, 44px)' : 'var(--thermo-toggle-h, 26px)';
             ]]]
         - border-radius: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               return on ? 'var(--thermo-btn-radius, 22px)' : 'var(--thermo-toggle-r, 13px)';
             ]]]
         - transition-property: top, width, height, border-radius, opacity, background-color, transform
@@ -691,7 +675,7 @@ hemma_thermostat:
         - transition-timing-function: "var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), var(--thermo-ease, ease-out), linear, ease, ease"
         - transition-delay: |
             [[[
-              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === entity.entity_id;
+              const on = states[variables.thermostat_toggle_helper]?.state === "on" && states['input_text.hemma_thermostat_active_entity']?.state === (window.hemmaOverlayKey?.(entity.entity_id) ?? entity.entity_id);
               const commit = !!(window._hemmaThermoCommit && Date.now() - window._hemmaThermoCommit < 1500);
               const move = on ? 2 * 0.018 : (commit ? 0.000 : 0.000);
               const fade = on ? move : move + 0.10;

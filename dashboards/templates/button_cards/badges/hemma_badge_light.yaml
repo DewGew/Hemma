@@ -1,10 +1,5 @@
-# Light Badge
-# Shows individual light entity with on/off state and brightness.
-# Tap: group entity → opens full multi-room light popup, pre-selecting this room
-#      individual light → more-info
-# Hold: toggle via script.hemma_light_smart_toggle
 hemma_badge_light:
-  template: [hemma_badge_base]
+  template: [hemma_badge_base, hemma_popup_light]
 
   variables:
     enabled: true
@@ -22,65 +17,18 @@ hemma_badge_light:
         const members = entity?.entity_id ? states[entity.entity_id]?.attributes?.entity_id : null;
         return Array.isArray(members) && members.length > 0 ? 'fire-dom-event' : 'more-info';
       ]]]
-    entity: '[[[ return entity.entity_id ]]]'
-    hemma_popup:
-      title: ""
-      dismissable: true
-      style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
-      popup_styles:
-        - style: all
-          styles: |
-            .content .container > * {
-              width: 100% !important;
-              max-width: none !important;
-              box-sizing: border-box !important;
-            }
-            .content .container {
-              scrollbar-width: none;
-              overscroll-behavior: contain;
-              touch-action: pan-y;
-              padding-bottom: 24px !important;
-            }
-            .content .container::-webkit-scrollbar {
-              display: none;
-            }
-            @media (max-width: 768px) {
-            wa-drawer {
-                --size: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-                height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-            }
-            .content .container {
-                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-            }
-            wa-drawer.hemma-h-auto {
-                --size: var(--ha-bottom-sheet-height, auto) !important;
-                height: auto !important;
-                min-height: 0 !important;
-            }
-            wa-drawer.hemma-h-auto .content .container {
-                min-height: 0 !important;
-            }
-            }
-      content: |
-        [[[
-          const _h = typeof hass !== 'undefined' ? hass : null;
-          if (typeof window._hemmaLPC === 'function') {
-            return window._hemmaLPC(entity, states, _h, {
-              popup_group: entity?.entity_id || null,
-              lights: [],
-              group_rooms: true,
-            });
-          }
-          return null;
-        ]]]
+    entity: '[[[ return entity?.entity_id ]]]'
+
+  icon_tap_action:
+    action: none
+
   hold_action:
     action: call-service
     service: script.turn_on
     service_data:
       entity_id: script.hemma_light_smart_toggle
       variables:
-        light_entity: '[[[ return entity.entity_id ]]]'
+        light_entity: '[[[ return entity?.entity_id ]]]'
 
   double_tap_action:
     action: none
@@ -112,8 +60,6 @@ hemma_badge_light:
     ]]]
 
   styles:
-    # Has to be here: the base sets overflow:hidden inline with !important,
-    # so an extra_styles override never wins.
     img_cell:
       - overflow: visible !important
 
@@ -159,8 +105,6 @@ hemma_badge_light:
       const _h  = typeof hass !== 'undefined' ? hass : null;
       const members = entity?.attributes?.entity_id;
 
-      // Room light groups are renamed to a bare "Lights" in the registry, so a
-      // group badge takes its area name; member lights keep their own name.
       const areaName = () => {
         const ents = _h?.entities || {};
         const reg = ents[eid] || (ents.get && ents.get(eid)) || null;

@@ -1,136 +1,319 @@
-// ── Chrome right reserve ─────────────────────────────────────────────────────
-// MEASURED, not derived from config: deciding the settings button's inset from
-// cached state dropped it on top of the waveform. What is drawn cannot
-// disagree with itself.
-(function () {
-  // One 34px control plus one gap. Every chrome button steps by the same
-  // amount, so no two of them can end up a different distance apart.
-  var SIZE = 34;
-  var GAP = 12;
-  var STEP = SIZE + GAP;
-  var last = null;
-  // Where the dots have to sit to clear the waveform, once measured. The
-  // waveform is drawn by the Now Playing header, whose box is not the gutter,
-  // so its position cannot be derived from this side.
-  var waveTarget = null;
+window.hemmaMenuGlass = {
+  radius: 'var(--hemma-menu-radius, var(--ha-card-border-radius, 28px))',
 
-  function find(sel) {
-    var out = null;
-    (function walk(root, depth) {
-      if (!root || out || depth > 14 || !root.querySelectorAll) return;
-      var hit = root.querySelector(sel);
-      if (hit) { out = hit; return; }
-      root.querySelectorAll('*').forEach(function (el) {
-        if (!out && el.shadowRoot) walk(el.shadowRoot, depth + 1);
+  _ensure: function () {
+    if (document.getElementById('hemma-menu-radius-style')) return;
+    var st = document.createElement('style');
+    st.id = 'hemma-menu-radius-style';
+    st.textContent = '.hemma-menu-glass,.hemma-menu-glass *{'
+      + 'scrollbar-width:none;-ms-overflow-style:none;}'
+      + '.hemma-menu-glass ::-webkit-scrollbar{display:none;width:0;height:0;}'
+      // The panel's menus, not the card radius: a dropdown is chrome and reads as
+      // a different object from the cards it floats over.
+      + '.hemma-menu-glass{--hemma-menu-radius:'
+      + ' var(--hemma-menu-radius-desktop, 16px);'
+      + '--hemma-menu-pane-auto: rgba(30,33,38,0.30);'
+      + '--hemma-popup-chev-opacity: .35;'
+      + '--hemma-menu-shadow: var(--hemma-elevation-floating, 0 8px 20px rgba(0,0,0,0.13));}'
+      + '@media (max-width: 767px), (max-height: 500px){'
+      + '.hemma-menu-glass{--hemma-menu-radius:'
+      + ' var(--hemma-tile-radius-phone, 26px);'
+      + '--hemma-menu-pane-auto: rgba(30,33,38,0.44);'
+      + '--hemma-popup-chev-opacity: .55;'
+      // The phone floats over a busy photo and needs a little more.
+      + '--hemma-menu-shadow: var(--hemma-elevation-floating-phone, 0 10px 26px rgba(0,0,0,0.18));}}';
+    (document.head || document.documentElement).appendChild(st);
+  },
+
+  _vars: ['--hemma-menu-pane', '--hemma-menu-edge', '--hemma-menu-rim-top',
+    '--hemma-menu-rim-bottom', '--ha-card-border-radius',
+    '--hemma-tile-radius-phone',
+    '--hemma-popup-ui-good', '--hemma-popup-ui-warn', '--hemma-popup-ui-bad',
+    '--hemma-elevation-floating', '--hemma-elevation-floating-phone',
+    '--hemma-popup-ui-action', '--hemma-color-teal', '--hemma-color-blue',
+    '--hemma-color-green', '--hemma-color-purple', '--hemma-color-yellow',
+    '--hemma-u'],
+
+  _theme: function (el) {
+    var src = document.querySelector('home-assistant');
+    if (!src) return;
+    try {
+      var cs = window.getComputedStyle(src);
+      this._vars.forEach(function (n) {
+        var v = cs.getPropertyValue(n);
+        if (v && v.trim()) el.style.setProperty(n, v.trim());
       });
-    })(document, 0);
-    return out;
-  }
+    } catch (e) {}
+  },
 
-  function findAll(sel) {
-    var out = [];
-    (function walk(root, depth) {
-      if (!root || depth > 14 || !root.querySelectorAll) return;
-      root.querySelectorAll(sel).forEach(function (el) {
-        if (out.indexOf(el) === -1) out.push(el);
-      });
-      root.querySelectorAll('*').forEach(function (el) {
-        if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
-      });
-    })(document, 0);
-    return out;
-  }
+  apply: function (el) {
+    var b = 'blur(40px) saturate(170%)';
+    this._ensure();
+    el.classList.add('hemma-menu-glass');
+    this._theme(el);
+    el.style.borderRadius = this.radius;
+    el.style.color = '#fff';
+    el.style.backgroundColor = 'var(--hemma-menu-pane,'
+      + ' var(--hemma-menu-pane-auto, rgba(30,33,38,0.30)))';
+    el.style.backgroundImage = 'none';
+    el.style.backdropFilter = b;
+    el.style.webkitBackdropFilter = b;
+    var edge = 'var(--hemma-menu-edge, rgba(0,0,0,0.11))';
+    var rimT = 'var(--hemma-menu-rim-top, rgba(255,255,255,0.26))';
+    var rimB = 'var(--hemma-menu-rim-bottom, rgba(255,255,255,0.16))';
+    el.style.boxShadow = 'inset 0 1px 0 ' + rimT + ','
+      + ' inset 0 -1px 0 ' + rimB + ','
+      + ' inset 1px 0 0 ' + edge + ','
+      + ' inset -1px 0 0 ' + edge + ','
+      + ' var(--hemma-menu-shadow, 0 8px 20px rgba(0,0,0,0.13))';
+  },
 
-  function showing(sel) {
-    var w = find(sel);
-    if (!w) return false;
-    var r = w.getBoundingClientRect();
-    if (r.width < 6 || r.height < 6) return false;
-    var cs = getComputedStyle(w);
-    if (cs.visibility === 'hidden' || cs.display === 'none') return false;
-    return parseFloat(cs.opacity || '1') > 0.05;
-  }
-
-  // The shift is written on the slot ITSELF, not inherited from :root: a
-  // transition fires off the element's own inline style change, and an
-  // ancestor's custom property has not reliably started one here before.
-  function shift(sel, px) {
-    findAll(sel).forEach(function (el) {
-      // Only the fixed chrome row slides. The phone puts its bell in an
-      // absolutely positioned corner that has nothing to make room for.
-      if (getComputedStyle(el).position !== 'fixed') return;
-      var v = px + 'px';
-      if (el.style.getPropertyValue('--hemma-chrome-shift') !== v) {
-        el.style.setProperty('--hemma-chrome-shift', v);
-      }
+  enter: function (el) {
+    el.style.opacity = '0';
+    el.style.transformOrigin = 'top right';
+    el.style.transform = 'scale(0.92) translateY(-8px)';
+    requestAnimationFrame(function () {
+      el.style.transition = 'opacity 200ms cubic-bezier(0.32,0.72,0,1),'
+        + ' transform 260ms cubic-bezier(0.32,0.72,0,1)';
+      el.style.transform = 'scale(1) translateY(0)';
+      el.style.opacity = '1';
     });
-  }
+  },
 
-  function fixedSlot(sel) {
-    var out = null;
-    findAll(sel).forEach(function (el) {
-      if (!out && getComputedStyle(el).position === 'fixed') out = el;
-    });
-    return out;
-  }
+  exit: function (el, done) {
+    el.style.transition = 'opacity 150ms cubic-bezier(0.4,0,1,1),'
+      + ' transform 170ms cubic-bezier(0.4,0,1,1)';
+    el.style.transform = 'scale(0.95) translateY(-6px)';
+    el.style.opacity = '0';
+    setTimeout(function () { if (done) done(); }, 190);
+  },
 
-  // How far the dots must travel to leave exactly GAP beside the waveform.
-  // Returns null while the waveform is still scaling in: measuring then would
-  // line the dots up against a size it is about to stop being.
-  function measureWave() {
-    var wave = find('.np-head-wave');
-    var slot = fixedSlot('#settings') || fixedSlot('#notifications');
-    if (!wave || !slot) return null;
-    var r = wave.getBoundingClientRect();
-    if (!r.width || Math.abs(r.width - wave.offsetWidth) > 1) return null;
-    // The resolved `right` rather than the live rect: the slot may be
-    // mid-transition, and its rest position is what this is measured against.
-    var inset = parseFloat(getComputedStyle(slot).right);
-    if (!isFinite(inset)) return null;
-    return Math.max(0, Math.round((window.innerWidth - inset) - (r.left - GAP)));
-  }
-
-  function sync() {
-    var waveOn = showing('.np-head-wave');
-    var settingsOn = showing('.hemma-settings');
-
-    // Right to left: the waveform owns the gutter when it is there, otherwise
-    // the dots slide out to take it, and the bell follows either way.
-    if (waveOn) {
-      var m = measureWave();
-      if (m != null) waveTarget = m;
+  dropTop: function (rect, gap) {
+    var y = rect.bottom;
+    var bar = this._navRow();
+    if (bar) {
+      var r = bar.getBoundingClientRect();
+      if (r.height && r.top <= rect.bottom) y = Math.max(y, r.bottom);
     }
-    var settingsShift = waveOn ? (waveTarget != null ? waveTarget : STEP) : 0;
-    var bellShift = settingsShift + (settingsOn ? STEP : 0);
+    return Math.round(y + (gap == null ? 10 : gap));
+  },
 
-    var key = settingsShift + '|' + bellShift;
-    // Only on change: rewriting inline styles every tick has broken native UI
-    // elsewhere in this dashboard.
-    if (key === last) return;
-    last = key;
-    shift('#settings', settingsShift);
-    shift('#notifications', bellShift);
+  _navRow: function () {
+    if (this._row && this._row.isConnected) return this._row;
+    this._row = null;
+    var walk = function (root, depth) {
+      if (!root || depth > 12 || !root.querySelectorAll) return null;
+      var hit = root.querySelector('hemma-nav-bar');
+      if (hit && hit.shadowRoot) return hit.shadowRoot.querySelector('.bar');
+      var kids = root.querySelectorAll('*');
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i].shadowRoot) {
+          var f = walk(kids[i].shadowRoot, depth + 1);
+          if (f) return f;
+        }
+      }
+      return null;
+    };
+    try { this._row = walk(document, 0); } catch (e) {}
+    return this._row;
+  },
+
+  lockScroll: function (panel, list) {
+    if (!panel || panel._hemmaScrollLocked) return;
+    panel._hemmaScrollLocked = true;
+    panel.style.overscrollBehavior = 'contain';
+
+    var y = 0;
+    panel.addEventListener('touchstart', function (ev) {
+      y = ev.touches && ev.touches[0] ? ev.touches[0].clientY : 0;
+    }, { passive: true });
+
+    // Non-passive: the whole point is to be able to preventDefault.
+    panel.addEventListener('touchmove', function (ev) {
+      if (!ev.touches || ev.touches.length !== 1) return;
+      var dy = ev.touches[0].clientY - y;
+      y = ev.touches[0].clientY;
+
+      if (!list || !list.contains(ev.target)) { ev.preventDefault(); return; }
+
+      var over = list.scrollHeight - list.clientHeight;
+      if (over <= 0) { ev.preventDefault(); return; }
+
+      var atTop = list.scrollTop <= 0;
+      var atEnd = list.scrollTop >= over - 1;
+      if ((dy > 0 && atTop) || (dy < 0 && atEnd)) ev.preventDefault();
+    }, { passive: false });
+  },
+};
+
+
+(function () {
+  if (window._hemmaSidebarSurface) return;
+  window._hemmaSidebarSurface = true;
+
+  var ID = 'hemma-sidebar-surface';
+
+  var FILL = 'var(--hemma-sidebar-fill, rgba(0,0,0,0.42))';
+  var BLUR = 'var(--hemma-sidebar-backdrop, blur(20px) saturate(1.2))';
+  var SCRIM = 'var(--hemma-sidebar-scrim, rgba(0,0,0,0.24))';
+
+  var SURFACE = [
+    '  background-color: ' + FILL + ' !important;',
+    '  -webkit-backdrop-filter: ' + BLUR + ';',
+    '  backdrop-filter: ' + BLUR + ';',
+    '  border: none !important;',
+    '  box-shadow: none !important;',
+  ].join('\n');
+
+  var DRAWER_CSS = [
+    '.sidebar-shell {', SURFACE, '}',
+    'wa-drawer::part(dialog) {', SURFACE, '}',
+  ].join('\n');
+
+  /* The element that actually paints the modal panel. */
+  var PANEL_CSS = [
+    '.drawer {', SURFACE, '}',
+    '.drawer::backdrop { background-color: ' + SCRIM + '; }',
+  ].join('\n');
+
+  function sheet(root, css) {
+    if (!root) return false;
+    var el = root.querySelector('#' + ID);
+    if (el) { if (el.textContent !== css) el.textContent = css; return true; }
+    var s = document.createElement('style');
+    s.id = ID;
+    s.textContent = css;
+    root.appendChild(s);
+    return true;
   }
 
-  function boot() {
-    sync();
-    setInterval(sync, 400);
-    window.addEventListener('location-changed', function () { setTimeout(sync, 60); }, true);
-    window.addEventListener('popstate', function () { setTimeout(sync, 60); }, true);
-    window.addEventListener('resize', sync);
+  function findDeep(root, tag, depth) {
+    if (!root || depth > 10 || !root.querySelector) return null;
+    var hit = root.querySelector(tag);
+    if (hit) return hit;
+    var kids = root.querySelectorAll('*');
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].shadowRoot) {
+        var f = findDeep(kids[i].shadowRoot, tag, depth + 1);
+        if (f) return f;
+      }
+    }
+    return null;
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
+  var _observed = null;
+
+  function apply() {
+    var drawer = findDeep(document, 'ha-drawer', 0);
+    if (!drawer || !drawer.shadowRoot) return false;
+    sheet(drawer.shadowRoot, DRAWER_CSS);
+
+    if (_observed !== drawer.shadowRoot) {
+      _observed = drawer.shadowRoot;
+      new MutationObserver(function () { apply(); })
+        .observe(drawer.shadowRoot, { childList: true, subtree: true });
+    }
+
+    var wa = drawer.shadowRoot.querySelector('wa-drawer');
+    if (wa) {
+      wa.style.setProperty('--wa-color-surface-raised', FILL);
+      wa.style.setProperty('--wa-color-overlay-modal', SCRIM);
+      if (wa.shadowRoot) sheet(wa.shadowRoot, PANEL_CSS);
+    }
+    return true;
   }
+
+  var tries = 0;
+  (function tick() {
+    apply();
+    if (++tries < 20) setTimeout(tick, tries < 6 ? 250 : 1500);
+  })();
+  window.addEventListener('hass-drawer-opened', apply, true);
+  window.addEventListener('location-changed', apply, true);
 })();
 
-// ── Energy badge gate ────────────────────────────────────────────────────────
-// Any energy source counts, not just a whole-room power meter. ONE definition:
-// the dashboard checked this in six places and the preview in a seventh, and
-// they have to agree or the preview lies.
+(function () {
+  if (window._hemmaHeaderHide) return;
+  window._hemmaHeaderHide = true;
+
+  var ID = 'hemma-header-hide';
+  var CSS = '.header { display: none !important; }';
+  var OFF = /[?&](hemma_header=1|disable_km)/.test(location.search);
+  // kiosk-mode's breakpoint, so one dashboard reads the same under either.
+  var NARROW = window.matchMedia('(max-width: 812px)');
+
+  function findDeep(root, tag, depth) {
+    if (!root || depth > 10 || !root.querySelector) return null;
+    var hit = root.querySelector(tag);
+    if (hit) return hit;
+    var kids = root.querySelectorAll('*');
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].shadowRoot) {
+        var f = findDeep(kids[i].shadowRoot, tag, depth + 1);
+        if (f) return f;
+      }
+    }
+    return null;
+  }
+
+  var _root = null;
+  function huiRoot() {
+    if (_root && _root.isConnected && _root.shadowRoot) return _root;
+    _root = findDeep(document, 'hui-root', 0);
+    return _root;
+  }
+
+  function wanted(cfg) {
+    var km = cfg && cfg.kiosk_mode;
+    if (!km) return false;
+    var m = km.mobile_settings;
+    if (m && m.hide_header !== undefined && NARROW.matches) return !!m.hide_header;
+    return !!km.hide_header;
+  }
+
+  var _sr = null;
+  var _head = null;
+
+  function apply() {
+    var root = huiRoot();
+    var sr = root && root.shadowRoot;
+    if (!sr) return false;
+
+    if (_sr !== sr) {
+      _sr = sr;
+      new MutationObserver(function () { apply(); }).observe(sr, { childList: true });
+    }
+    var head = sr.querySelector('.header');
+    if (head && _head !== head) {
+      _head = head;
+      new MutationObserver(function () { apply(); }).observe(head, { childList: true, subtree: true });
+    }
+
+    var ll = root.lovelace || {};
+    var on = !OFF && !ll.editMode && wanted(ll.config);
+    var el = sr.querySelector('#' + ID);
+    if (on === !!el) return true;
+    if (!on) { el.remove(); return true; }
+    var st = document.createElement('style');
+    st.id = ID;
+    st.textContent = CSS;
+    sr.appendChild(st);
+    return true;
+  }
+
+  function kick() {
+    var n = 0;
+    (function tick() {
+      apply();
+      if (++n < 12) setTimeout(tick, n < 5 ? 200 : 1200);
+    })();
+  }
+  kick();
+  window.addEventListener('location-changed', kick, true);
+  window.addEventListener('popstate', kick, true);
+  NARROW.addEventListener('change', apply);
+})();
+
 (function () {
   if (window._hemmaEnergyOn) return;
   window._hemmaEnergyOn = function (V) {
@@ -157,6 +340,214 @@
     window.HEMMA_TEMPLATE_SIZES = {};
   }
 
+  window.hemmaDeviceId = function () {
+    try {
+      var k = 'hemma_device_id';
+      var v = localStorage.getItem(k);
+      if (!v) {
+        v = Math.random().toString(36).slice(2, 8);
+        localStorage.setItem(k, v);
+      }
+      return v;
+    } catch (e) {
+      return 'nostore';
+    }
+  };
+
+  window.hemmaOverlayKey = function (eid) {
+    return window.hemmaDeviceId() + '|' + String(eid || '');
+  };
+
+  // A card can render before its variables resolve, so the weather entity is
+  // remembered - but per dashboard, and never on a Hemma-managed one, where
+  // the config is the whole truth. The unscoped key this replaces was shared
+  // by every dashboard, so a second dashboard with no weather inherited the
+  // first one's sensors.
+  var wxDash = function () {
+    return (window.location.pathname || '').split('/').filter(Boolean)[0] || '';
+  };
+  window.hemmaWx = function (variables, which) {
+    var v = variables || {};
+    var name = which === 'temp' ? 'weather_temp_sensor' : 'weather_entity';
+    var val = v[name] || '';
+    var key = 'hemma_' + name + ':' + wxDash();
+    try {
+      if (val) localStorage.setItem(key, val);
+      else if (v.hemma_ui_managed) localStorage.removeItem(key);
+    } catch (e) { /* private mode */ }
+    if (val) return val;
+    if (v.hemma_ui_managed) return '';
+    try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
+  };
+  // Cards saved before the scoping still read the shared key, so it is cleared
+  // on every load and the window cache is dropped whenever the dashboard changes.
+  try {
+    localStorage.removeItem('hemma_weather_entity');
+    localStorage.removeItem('hemma_weather_temp_sensor');
+  } catch (e) { /* private mode */ }
+  setInterval(function () {
+    var d = wxDash();
+    if (window._hemmaWxDash === d) return;
+    window._hemmaWxDash = d;
+    window._hemmaWx = null;
+    window._hemmaWxTemp = null;
+    try {
+      localStorage.removeItem('hemma_weather_entity');
+      localStorage.removeItem('hemma_weather_temp_sensor');
+    } catch (e) { /* private mode */ }
+  }, 1000);
+
+  window.HEMMA_DOMAIN_GLYPH = {
+    light: 'light', switch: 'plug', input_boolean: 'plug',
+    fan: 'fan', climate: 'thermostat', humidifier: 'humidifier',
+    media_player: 'speaker', lock: 'lock-fill', cover: 'curtain-open',
+    vacuum: 'vacuum', script: 'scenes', scene: 'scenes',
+    automation: 'scenes', button: 'power_on', input_button: 'power_on',
+    binary_sensor: 'motion', remote: 'tv', water_heater: 'hot_water',
+    valve: 'curtain-open', siren: 'motion',
+  };
+
+  window.hemmaDomainGlyph = function (eid) {
+    var dom = String(eid || '').split('.')[0];
+    return window.HEMMA_DOMAIN_GLYPH[dom] || 'default';
+  };
+
+  window.HEMMA_MDI = {
+    alert: 'mdi:alert', automation: 'mdi:robot', binary_sensor: 'mdi:radiobox-blank',
+    button: 'mdi:gesture-tap-button', calendar: 'mdi:calendar', camera: 'mdi:video',
+    climate: 'mdi:thermostat', cover: 'mdi:window-shutter', fan: 'mdi:fan',
+    humidifier: 'mdi:air-humidifier', input_boolean: 'mdi:check-circle-outline',
+    input_button: 'mdi:gesture-tap-button', input_number: 'mdi:ray-vertex',
+    input_select: 'mdi:format-list-bulleted', input_text: 'mdi:form-textbox',
+    lawn_mower: 'mdi:robot-mower', light: 'mdi:lightbulb', lock: 'mdi:lock',
+    media_player: 'mdi:cast', number: 'mdi:ray-vertex', person: 'mdi:account',
+    remote: 'mdi:remote', scene: 'mdi:palette', script: 'mdi:script-text',
+    select: 'mdi:format-list-bulleted', sensor: 'mdi:eye', siren: 'mdi:bullhorn',
+    switch: 'mdi:toggle-switch-variant', text: 'mdi:form-textbox',
+    todo: 'mdi:clipboard-list', vacuum: 'mdi:robot-vacuum', valve: 'mdi:pipe-valve',
+    water_heater: 'mdi:water-boiler',
+  };
+
+  function mdiDefault(states, eid) {
+    var dom = String(eid || '').split('.')[0];
+    var st = states && states[eid];
+    var a = (st && st.attributes) || {};
+    var on = st && st.state === 'on';
+    var dc = a.device_class;
+
+    if (dom === 'switch') {
+      if (dc === 'outlet') return on ? 'mdi:power-plug' : 'mdi:power-plug-off';
+      return on ? 'mdi:toggle-switch-variant' : 'mdi:toggle-switch-variant-off';
+    }
+    if (dom === 'input_boolean') {
+      return on ? 'mdi:check-circle-outline' : 'mdi:close-circle-outline';
+    }
+    if (dom === 'automation') return on ? 'mdi:robot' : 'mdi:robot-off';
+    if (dom === 'lock') {
+      var ls = st && st.state;
+      if (ls === 'unlocked') return 'mdi:lock-open';
+      if (ls === 'jammed') return 'mdi:lock-alert';
+      return 'mdi:lock';
+    }
+    if (dom === 'media_player') {
+      if (dc === 'tv') return 'mdi:television';
+      if (dc === 'speaker') return 'mdi:speaker';
+      if (dc === 'receiver') return 'mdi:audio-video';
+      return st && st.state === 'playing' ? 'mdi:cast-connected' : 'mdi:cast';
+    }
+    return window.HEMMA_MDI[dom] || 'mdi:bookmark';
+  }
+
+  window.HEMMA_ICON_TR = window.HEMMA_ICON_TR || {};
+  var _trCards = [];
+  var TR_KEY = 'hemma_icon_tr_v1';
+
+  function trStore() {
+    try { return JSON.parse(localStorage.getItem(TR_KEY) || '{}') || {}; }
+    catch (e) { return {}; }
+  }
+
+  function trVersion(hass) {
+    return (hass && hass.config && hass.config.version) || '';
+  }
+
+  function trLoad(hass, integration) {
+    var all = trStore();
+    var hit = all[integration];
+    if (hit && hit.v === trVersion(hass)) return hit.icons;
+    return undefined;
+  }
+
+  function trSave(hass, integration, icons) {
+    try {
+      var all = trStore();
+      all[integration] = { v: trVersion(hass), icons: icons };
+      localStorage.setItem(TR_KEY, JSON.stringify(all));
+    } catch (e) {}
+  }
+
+  function fetchIconTr(hass, integration) {
+    if (window.HEMMA_ICON_TR[integration] !== undefined) return;
+    window.HEMMA_ICON_TR[integration] = null;
+    var send = hass.callWS
+      ? function (m) { return hass.callWS(m); }
+      : function (m) { return hass.connection.sendMessagePromise(m); };
+    try {
+      send({ type: 'frontend/get_icons', category: 'entity', integration: integration })
+        .then(function (res) {
+          var r = res && res.resources;
+          var icons = (r && r[integration]) || null;
+          window.HEMMA_ICON_TR[integration] = icons;
+          if (icons) trSave(hass, integration, icons);
+          _trCards.forEach(function (c) {
+            try { if (c && c.requestUpdate) c.requestUpdate(); } catch (e) {}
+          });
+        }, function () {});
+    } catch (e) {}
+  }
+
+  window.hemmaIconCardSeen = function (card) {
+    if (card && _trCards.indexOf(card) === -1) _trCards.push(card);
+  };
+
+  window.hemmaEntityIcon = function (hass, states, eid) {
+    if (!eid) return 'mdi:bookmark';
+    var reg = hass && hass.entities && hass.entities[eid];
+    if (reg && reg.icon) return reg.icon;
+
+    if (hass && reg && reg.platform && reg.translation_key) {
+      var tr = window.HEMMA_ICON_TR[reg.platform];
+      if (tr === undefined) {
+        var cached = trLoad(hass, reg.platform);
+        if (cached) {
+          tr = window.HEMMA_ICON_TR[reg.platform] = cached;
+          // Refreshed in the background, in case the integration changed.
+          setTimeout(function () {
+            window.HEMMA_ICON_TR[reg.platform] = undefined;
+            fetchIconTr(hass, reg.platform);
+            if (!window.HEMMA_ICON_TR[reg.platform]) window.HEMMA_ICON_TR[reg.platform] = cached;
+          }, 0);
+        } else {
+          fetchIconTr(hass, reg.platform);
+        }
+      }
+      if (tr) {
+        var dom = String(eid).split('.')[0];
+        var node = tr[dom] && tr[dom][reg.translation_key];
+        if (node) {
+          var st = states && states[eid];
+          var byState = node.state && st && node.state[st.state];
+          if (byState) return byState;
+          if (node.default) return node.default;
+        }
+      }
+    }
+    return mdiDefault(states, eid);
+  };
+
+  // Set outside the guard: a first-wins init would freeze this map at load.
+  window.HEMMA_TEMPLATE_SIZES.hemma_entity_actions = 'large';
+
   // Works off the RAW config: both callers run before button-card merges templates.
   if (typeof window.hemmaCardSize !== 'function') {
     window.hemmaCardSize = function (cfg) {
@@ -172,6 +563,343 @@
       return 'small';
     };
   }
+
+  window._hemmaActions = (function () {
+    var OFF = ['false', '0', 'no', 'off', 'disabled'];
+    var ON_STATES = [
+      'on', 'open', 'opening', 'unlocked', 'unlocking',
+      'playing', 'buffering', 'home', 'connected', 'online',
+      'cooling', 'heating', 'cleaning', 'running', 'active',
+    ];
+    var DEAD = ['unknown', 'unavailable', 'none', ''];
+
+    function esc(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function enabled(variables, idx) {
+      var v = variables['action_' + idx + '_enabled'];
+      var ok = (v === undefined || v === null) ? true
+        : (typeof v === 'boolean') ? v
+        : (typeof v === 'number') ? v !== 0
+        : OFF.indexOf(String(v).trim().toLowerCase()) === -1;
+      return ok && !!variables['action_' + idx + '_entity'];
+    }
+
+    function order(variables) {
+      return [1, 2].filter(function (i) { return enabled(variables, i); });
+    }
+
+    function any(variables) {
+      return enabled(variables, 1) || enabled(variables, 2);
+    }
+
+    // Counted from the end, so slot 0 is always the bottom pill.
+    function slot(variables, idx) {
+      var o = order(variables);
+      var p = o.indexOf(idx);
+      return p < 0 ? 0 : (o.length - 1 - p);
+    }
+
+    function stateClass(states, eid) {
+      if (!eid || !states[eid]) return 'unavailable';
+      var st = String(states[eid].state || '').toLowerCase().replace(/_/g, ' ');
+      if (DEAD.indexOf(st) !== -1) return 'unavailable';
+      return ON_STATES.indexOf(st) !== -1 ? 'active' : 'normal';
+    }
+
+    function glyph(variables, idx, states, cls, hass) {
+      var eid = variables['action_' + idx + '_entity'];
+      var attrs = (states[eid] && states[eid].attributes) || {};
+      var raw = String(variables['action_' + idx + '_icon'] || attrs.icon || '').trim();
+
+      if (!raw && window.hemmaEntityIcon) raw = window.hemmaEntityIcon(hass, states, eid);
+      if (!raw) raw = 'mdi:bookmark';
+
+      if (raw.indexOf(':') !== -1) {
+        return '<ha-icon class="hemma-act-icon hemma-act-ha-icon ' + cls + '"'
+          + ' icon="' + esc(raw) + '"></ha-icon>';
+      }
+
+      var src;
+      if (/^(\/|https?:\/\/)/.test(raw) || /\.(svg|png|webp)$/.test(raw)) {
+        src = raw;
+      } else {
+        var base = String(variables.svg_path || '/local/hemma/icons').replace(/\/$/, '');
+        src = base + '/' + raw + '.svg';
+      }
+      return '<img class="hemma-act-icon hemma-act-svg ' + cls + '" src="' + esc(src) + '" alt="">';
+    }
+
+    function label(variables, idx, states, prefix) {
+      var explicit = variables['action_' + idx + '_label'];
+      if (explicit) return String(explicit);
+
+      var eid = variables['action_' + idx + '_entity'];
+      var attrs = (states[eid] && states[eid].attributes) || {};
+      var name = String(attrs.friendly_name || eid || '');
+      var p = String(prefix || '').trim();
+
+      if (p && name.toLowerCase().indexOf(p.toLowerCase() + ' ') === 0) {
+        var rest = name.slice(p.length).trim();
+        if (rest) name = rest.charAt(0).toUpperCase() + rest.slice(1);
+      }
+      return name;
+    }
+
+    var FIT_REF_PX = 12;
+    var fitCtx = null;
+    var fitFam = null;
+
+    function fitEm(text, weight) {
+      if (!fitCtx) {
+        if (!document.createElement) return 0;
+        fitCtx = document.createElement('canvas').getContext('2d');
+      }
+      if (!fitFam) {
+        fitFam = getComputedStyle(document.documentElement)
+          .getPropertyValue('--primary-font-family').trim() || 'system-ui, sans-serif';
+      }
+      fitCtx.font = (weight || 500) + ' ' + FIT_REF_PX + 'px ' + fitFam;
+      return (fitCtx.measureText(String(text)).width / FIT_REF_PX) * 1.015;
+    }
+
+    function fitStyle(variables, states, prefix) {
+      var em = 0;
+      try {
+        order(variables).forEach(function (i) {
+          var w = fitEm(label(variables, i, states, prefix), 500);
+          if (w > em) em = w;
+        });
+      } catch (e) { return ''; }
+      if (!(em > 0)) return '';
+      return ' style="font-size:clamp(var(--hemma-actions-label-min, 12px),'
+        + ' calc((100cqi - var(--hemma-actions-label-inset, 0px)) / ' + em.toFixed(3) + '),'
+        + ' var(--hemma-actions-label-size, 15px))"';
+    }
+
+    function markup(variables, idx, states, prefix, hass) {
+      if (!enabled(variables, idx)) return '';
+      var cls = stateClass(states, variables['action_' + idx + '_entity']);
+      var text = label(variables, idx, states, prefix);
+      return '<div class="hemma-act-hit hemma-act-pill ' + cls + '" data-action-index="' + idx + '">'
+        + '<span class="hemma-act-glyphbox">' + glyph(variables, idx, states, cls, hass) + '</span>'
+        + '<span class="hemma-act-label"' + fitStyle(variables, states, prefix)
+        + '>' + esc(text) + '</span></div>';
+    }
+
+    var TOGGLE_SCRIPT = 'script.hemma_actions_overlay_toggle';
+
+    function moreMarkup(variables, eid) {
+      if (!any(variables)) return '';
+      return '<div class="hemma-act-hit hemma-act-more" role="button" aria-label="Actions"'
+        + ' data-more-key="' + esc(openKey(eid)) + '">'
+        + '<svg class="hemma-act-dots" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+        + '<circle cx="3" cy="12" r="2.5"></circle>'
+        + '<circle cx="12" cy="12" r="2.5"></circle>'
+        + '<circle cx="21" cy="12" r="2.5"></circle>'
+        + '</svg></div>';
+    }
+
+    function run(card, variables, idx, fallbackHass) {
+      var eid = variables['action_' + idx + '_entity'];
+      if (!eid) return;
+
+      var H = (card && card._hass) || fallbackHass;
+      if (!H) return;
+
+      var action = variables['action_' + idx + '_action'] || 'more-info';
+
+      if (action === 'more-info') {
+        card.dispatchEvent(new CustomEvent('hass-more-info', {
+          bubbles: true, composed: true, detail: { entityId: eid },
+        }));
+        return;
+      }
+
+      if (action === 'toggle') {
+        var domain = String(eid).split('.')[0];
+        if (domain) H.callService(domain, 'toggle', { entity_id: eid });
+        return;
+      }
+
+      if (action === 'call-service') {
+        var full = variables['action_' + idx + '_service'];
+        if (!full || String(full).indexOf('.') === -1) return;
+        var parts = String(full).split('.');
+        var data = Object.assign({}, variables['action_' + idx + '_service_data'] || {});
+        if (!data.entity_id) data.entity_id = eid;
+        H.callService(parts[0], parts[1], data);
+        return;
+      }
+
+      if (action === 'navigate') {
+        var path = variables['action_' + idx + '_navigation_path'];
+        if (!path) return;
+        history.pushState(null, '', path);
+        window.dispatchEvent(new CustomEvent('location-changed', { bubbles: true, composed: true }));
+      }
+    }
+
+    function armRelease() {
+      if (window._hemmaActReleaseArmed) return;
+      window._hemmaActReleaseArmed = true;
+      var clear = function () {
+        var held = window._hemmaActHeld;
+        window._hemmaActHeld = null;
+        if (held && held.classList) held.classList.remove('pressed');
+      };
+      ['pointerup', 'pointercancel', 'touchend', 'touchcancel', 'blur']
+        .forEach(function (t) { window.addEventListener(t, clear, true); });
+    }
+
+    function press(el, on) {
+      if (!el || !el.classList) return;
+      if (on) {
+        var prev = window._hemmaActHeld;
+        if (prev && prev !== el && prev.classList) prev.classList.remove('pressed');
+        window._hemmaActHeld = el;
+        el.classList.add('pressed');
+      } else {
+        if (window._hemmaActHeld === el) window._hemmaActHeld = null;
+        el.classList.remove('pressed');
+      }
+    }
+
+    function bind(card, variables, hass) {
+      armRelease();
+      // So a late icon-translation answer can ask this card to redraw.
+      if (window.hemmaIconCardSeen) window.hemmaIconCardSeen(card);
+      setTimeout(function () {
+        try {
+          var root = card && card.shadowRoot;
+          if (!root) return;
+          root.querySelectorAll('.hemma-act-hit').forEach(function (el) {
+            if (el._hemmaActBound) return;
+            el._hemmaActBound = true;
+
+            el.addEventListener('click', function (ev) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              var key = el.getAttribute('data-more-key');
+              if (key) {
+                var H = (card && card._hass) || hass;
+                if (H) H.callService('script', 'turn_on', {
+                  entity_id: TOGGLE_SCRIPT, variables: { actions_entity_id: key },
+                });
+                return;
+              }
+              run(card, variables, el.getAttribute('data-action-index'), hass);
+            });
+
+            el.addEventListener('pointerdown', function (ev) {
+              ev.stopPropagation();
+              press(el, true);
+              try {
+                window.dispatchEvent(new CustomEvent('haptic', { detail: 'light' }));
+              } catch (e) {}
+            });
+            ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (t) {
+              el.addEventListener(t, function () { press(el, false); });
+            });
+
+            ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (t) {
+              el.addEventListener(t, function (ev) { ev.stopPropagation(); }, { passive: true });
+            });
+          });
+        } catch (e) {}
+      }, 0);
+    }
+
+    function repeat(term, n) {
+      var out = '';
+      for (var i = 0; i < n; i++) out += term;
+      return out;
+    }
+
+    function deviceId() { return window.hemmaDeviceId(); }
+    function openKey(eid) { return window.hemmaOverlayKey(eid); }
+
+    function isOpen(variables, states, eid) {
+      var t = states[variables.actions_toggle_helper];
+      var a = states[variables.actions_active_helper];
+      return !!(t && t.state === 'on' && a && a.state === openKey(eid));
+    }
+
+    // Safari cannot evaluate calc() over a clamp(), so every length is a sum of whole variables.
+    function cornerWidth(variables, entityState) {
+      if (variables.show_progress) {
+        var active = variables.progress_active_states || [];
+        var st = String(entityState || '').toLowerCase();
+        if (active.indexOf(st) !== -1) return 'var(--hemma-progress-size-mq)';
+      }
+      if (variables.show_toggle) return 'var(--hemma-toggle-width)';
+      return null;
+    }
+
+    function moreGeom(variables, entityState) {
+      var corner = cornerWidth(variables, entityState);
+      var lineTop = 'var(--hemma-icon-center-y) - var(--hemma-actions-hit) / 2';
+      return {
+        top: corner
+          ? 'calc(' + lineTop + ')'
+          : 'calc(' + lineTop + ' - var(--hemma-actions-more-inset))',
+        right: corner
+          ? 'calc(var(--hemma-actions-pad) + ' + corner
+            + ' + var(--hemma-actions-corner-gap) - var(--hemma-actions-more-inset))'
+          : 'calc(var(--hemma-actions-pad) - var(--hemma-actions-more-inset))',
+        width: 'var(--hemma-actions-hit)',
+        height: 'var(--hemma-actions-hit)',
+      };
+    }
+
+    function pillGeom(variables, idx) {
+      var s = slot(variables, idx);
+      var n = Math.max(1, order(variables).length);
+      var h = 'max(24px, min(var(--hemma-actions-pill-h), calc((100% - var(--hemma-actions-pad)'
+        + ' - var(--hemma-icon-circle-size, 44px) - var(--hemma-actions-pill-clear, 10px)'
+        + ' - var(--hemma-actions-pill-bottom)' + repeat(' - var(--hemma-actions-pill-gap)', n - 1)
+        + ') / ' + n + ')))';
+      return {
+        top: 'calc(100% - var(--hemma-actions-pill-bottom)'
+          + repeat(' - ' + h, s + 1)
+          + repeat(' - var(--hemma-actions-pill-gap)', s) + ')',
+        right: 'var(--hemma-actions-pad)',
+        width: 'calc(100% - var(--hemma-actions-pad) - var(--hemma-actions-pad))',
+        height: h,
+      };
+    }
+
+    function motion(variables, states, eid, idx) {
+      var open = isOpen(variables, states, eid);
+      var s = slot(variables, idx);
+      var step = open ? s : (order(variables).length - 1 - s);
+      return {
+        opacity: open ? '1' : '0',
+        transform: open
+          ? 'scale(1) translateY(0)'
+          : 'scale(var(--hemma-actions-pill-scale, 0.94)) translateY(var(--hemma-actions-pill-rise, 6px))',
+        pointerEvents: open ? 'auto' : 'none',
+        duration: open
+          ? 'var(--hemma-actions-dur-in, 0.30s)'
+          : 'var(--hemma-actions-dur-out, 0.14s)',
+        easing: open
+          ? 'var(--hemma-actions-ease-in, cubic-bezier(0.32, 0.72, 0, 1))'
+          : 'var(--hemma-actions-ease-out, cubic-bezier(0.4, 0, 0.7, 1))',
+        delay: open ? (60 + step * 40) + 'ms' : (step * 25) + 'ms',
+      };
+    }
+
+    return {
+      enabled: enabled, any: any, order: order, slot: slot, stateClass: stateClass,
+      markup: markup, moreMarkup: moreMarkup, run: run, bind: bind, esc: esc,
+      isOpen: isOpen, motion: motion,
+      deviceId: deviceId, openKey: openKey,
+      cornerWidth: cornerWidth, moreGeom: moreGeom, pillGeom: pillGeom,
+    };
+  }());
 
   if (typeof window.hemmaStateFit !== 'function') {
     const emCache = new Map();
@@ -210,11 +938,7 @@
     };
   }
 
-  // Mirrors each template's variables.mobile_filter_category, so a card's
-  // category can be resolved from its template name alone.
   if (typeof window.hemmaPsnStateTitle !== 'function') {
-    // The states a PlayStation sensor reports INSTEAD of a game. Anything else
-    // its state says is the game.
     const PSN_NOT_A_TITLE = new Set([
       'playing', 'paused', 'idle', 'on', 'off', 'home', 'away', 'online',
       'offline', 'standby', 'unavailable', 'unknown', 'none', 'null', '',
@@ -222,24 +946,14 @@
     window.hemmaPsnStateTitle = (st) => !PSN_NOT_A_TITLE.has(String(st || '').trim());
   }
 
-  // Tapping the waveform calls a service, so nothing moved until HA had written
-  // the helper and pushed it back - a round trip before the animation could even
-  // start. The tap records an intent instead and the panel animates off that,
-  // reconciling when the real state lands.
   if (typeof window.hemmaOptimistic !== 'function') {
     const PENDING = (window._hemmaIntent = window._hemmaIntent || {});
-    // How long an unconfirmed intent is trusted. Past this the service call is
-    // assumed lost and the entity is the answer again.
     const TTL = 1500;
 
     window.hemmaIntend = (key, value) => {
       PENDING[key] = { value: value, at: Date.now() };
     };
 
-    // Forcing a button-card to re-render with no state change takes BOTH steps:
-    // shouldUpdate rejects a hass clone carrying identical states, and a bare
-    // requestUpdate never reaches render(). _config is a reactive @state, so
-    // marking it dirty is what actually re-evaluates the templates.
     window.hemmaKick = (el) => {
       if (!el) return;
       try {
@@ -249,9 +963,6 @@
       } catch (e) { /* the next state push will do it */ }
     };
 
-    // The value to render for `key`: the intent while it is newer than the
-    // entity's own last_changed, else the entity. An intent the state has
-    // already caught up with is dropped rather than left to expire.
     window.hemmaOptimistic = (key, state, actual) => {
       const p = PENDING[key];
       if (!p) return actual;
@@ -272,6 +983,7 @@
       hemma_humidifier:    'climate',
       hemma_light:         'lights',
       hemma_media:         'media',
+      hemma_game:          'media',
       hemma_energy:        'energy',
       hemma_lock:          'security',
       hemma_camera:        'security',
@@ -282,10 +994,6 @@
     };
   }
 
-  // Discord's game-database name and Steam's store name rarely match exactly:
-  // trademark marks, punctuation, and edition suffixes differ. Treat a whole-token
-  // prefix as the same game, but only when the remainder carries no digit, so
-  // "Portal" and "Portal 2" stay separate while "… Definitive Edition" folds in.
   if (typeof window._hemmaSameGame !== 'function') {
     window._hemmaSameGame = function (x, y) {
       const flat = (v) => String(v || '').toLowerCase()
@@ -301,9 +1009,6 @@
     };
   }
 
-  // Shared by the media badge row and the Now Playing panel so both agree on
-  // which PC sources are live and which duplicate is dropped. Returns at most
-  // one entry per source, already reconciled per V.duplicate_game.
   if (typeof window._hemmaPCSources !== 'function') {
     window._hemmaPCSources = function (states, V) {
       const norm = (x) => String(x ?? '').trim();
@@ -316,9 +1021,6 @@
         return (raw && String(raw).startsWith('http')) ? String(raw) : null;
       };
 
-      // One sensor carries the lot: its STATE is the presence, its attributes
-      // hold game, details and artwork. The older per-attribute entities still
-      // work and still win wherever they are set.
       const dcResolve = () => {
         const u = V.discord_user && states[V.discord_user];
         const a = (u && u.attributes) || {};
@@ -350,8 +1052,6 @@
         }
       }
 
-      // Steam the same way: steam_online's own sensor carries game and artwork
-      // on the account entity, so one field is enough.
       const stResolve = () => {
         const u = V.steam_account && states[V.steam_account];
         const a = (u && u.attributes) || {};
@@ -397,14 +1097,6 @@
     };
   }
 
-  // ── Now Playing collector ────────────────────────────────────────────────
-  // The ONE definition. It used to live here and in both Now Playing
-  // templates, all three behind `typeof !== 'function'`, so whichever
-  // rendered first won and this copy - the one a resource loads before any
-  // card renders - was the one nobody edited. Five fixes sat in the templates
-  // and never ran. Nothing else may define these.
-  // Who is hidden. The collector and the media badge both decide whether a
-  // Plex stream counts, so the rule lives in one place.
   if (typeof window._hemmaPlexHidden !== 'function') {
     window._hemmaPlexHidden = function (V, user) {
       const raw = String((V || {}).plex_hide_users || '');
@@ -433,10 +1125,6 @@
         } catch (e) { return full; }
       };
       const ms = (t) => { const n = t ? Date.parse(t) : NaN; return Number.isFinite(n) ? n : 0; };
-      // Discord's game-database name and Steam's store name rarely match exactly:
-      // trademark marks, punctuation, and edition suffixes differ. Treat a whole-token
-      // prefix as the same game, but only when the remainder carries no digit, so
-      // "Portal" and "Portal 2" stay separate while "… Definitive Edition" folds in.
       const sameGame = (x, y) => {
         const flat = (v) => String(v || '').toLowerCase()
           .replace(/[\u2122\u00ae\u00a9]/g, ' ')
@@ -530,10 +1218,6 @@
         if (!V['show_plex_' + i]) continue;
         const sid = V['plex_stream_' + i];
         const sState = sid && states[sid];
-        // buffering counts: pointed straight at a Tautulli session sensor, which
-        // reports it verbatim, a strict 'playing' test dropped the row. A
-        // wrapper template sensor collapses it, which is why this only showed
-        // up without one. The real filtering is the upstream check below.
         if (!sState) continue;
         const sSt = low(sState.state);
         if (sSt !== 'playing' && sSt !== 'buffering') continue;
@@ -574,9 +1258,6 @@
             'online', 'offline', 'standby', 'unavailable', 'unknown',
             'none', 'null', ''])));
         const attrTitle = norm(a.full_title || a.media_title || a.title);
-        // A sensor naming a game IN ITS STATE is telling us one is
-        // running - `st === 'playing'` can never be true for it, which
-        // left the row not-playing: no waveform, and bottom of the rank.
         const stateIsTitle = !attrTitle && !notATitle.has(st);
         const title = attrTitle || (stateIsTitle ? norm(s.state) : '');
         if (!title) continue;
@@ -584,22 +1265,12 @@
           key: 'psn' + i,
           kind: 'activity',
           entity: eid,
-          // The PlayStation integration splits one session across two
-          // entities: sensor.X carries the title, image.X the cover. The
-          // template sensor people are told to build is only those two
-          // married up, so marry them here and the integration's own
-          // sensor works on its own.
           art: abs(a.entity_picture_local || a.entity_picture || a.image_url
             || a.media_image_url
             || (function () {
               const iid = String(eid).replace(/^sensor\./, 'image.');
               const im = states[iid];
               const iat = (im && im.attributes) || {};
-              // entity_picture first; the image integration also
-              // publishes access_token, and the proxy URL is built from
-              // it exactly the way the frontend builds one. The state is
-              // the last-updated stamp, which busts the cache when the
-              // cover changes but the token does not.
               if (iat.entity_picture_local || iat.entity_picture) {
                 return iat.entity_picture_local || iat.entity_picture;
               }
@@ -653,12 +1324,7 @@
         }
       }
 
-      // ── Steam ─────────────────────────────────────────────────────
-      // steam_game is the gate; steam_online is an optional presence guard. The
-      // Steam API only reports a game when the profile's game details are public.
       if (V.show_steam && (V.steam_account || V.steam_game)) {
-        // The account sensor's state is the presence and its attributes carry
-        // game and artwork; the per-part entities still win where they are set.
         const stU = V.steam_account && states[V.steam_account];
         const stA = (stU && stU.attributes) || {};
         const stStatus = low(V.steam_online ? states[V.steam_online]?.state : stU?.state);
@@ -691,9 +1357,6 @@
         }
       }
 
-      // ── One game, two reporters ───────────────────────────────────
-      // Discord reports every launcher, so a Steam game arrives twice when both are
-      // wired. Keep one tile and let it inherit whatever the dropped row had.
       const dcRow = out.find((r) => r.key === 'discord');
       const stRow = out.find((r) => r.key === 'steam');
       if (dcRow && stRow && sameGame(dcRow.title, stRow.title)) {
@@ -727,11 +1390,6 @@
     };
   }
 
-  // --np-open flips immediately (exit animation fires on time), but tiles/chips keep last
-  // content briefly - otherwise the collapsing tile shows an empty placeholder.
-  // The card's own source set, which is what makes one Now Playing card a
-  // different card from another. Not the room's name: two rooms can name the
-  // same players, and a disabled card still has a configuration.
   if (typeof window._hemmaNPCfgKey !== 'function') {
     window._hemmaNPCfgKey = function (V) {
       const v = V || {};
@@ -746,10 +1404,6 @@
     };
   }
 
-  // Per-card scratch space. Every room card builds a Now Playing card and a
-  // page can hold a second dashboard's, so state keyed by anything the cards
-  // share - a slot name, a row key, nothing at all - is state they trample.
-  // Ask for it by name and it comes back scoped to the configuration.
   if (typeof window._hemmaNPStore !== 'function') {
     window._hemmaNPStore = function (V, name) {
       const all = window._hemmaNPStores = window._hemmaNPStores || {};
@@ -761,12 +1415,6 @@
   if (typeof window._hemmaNPView !== 'function') {
     window._hemmaNPView = function (states, V) {
       const live = window._hemmaNP(states, V);
-      // One hold PER CONFIGURATION. Every room card builds one of these -
-      // hemma_room's now_playing field is always present and merely disabled -
-      // and a page can carry a second dashboard's as well. Sharing one hold
-      // handed a card with no sources of its own another card's list for up to
-      // 900ms, which is the empty ghost tile beside the real one, and why only
-      // a reload cleared it.
       const st = window._hemmaNPStore(V, 'hold');
       if (live.length) { st.last = live; st.emptyAt = 0; return live; }
       if (st.last && st.last.length) {
@@ -781,15 +1429,22 @@
   // Memoised per render pass - avoids re-running the sweep for every consumer.
   if (typeof window._hemmaNP !== 'function') {
     window._hemmaNP = function (states, V) {
-      // Artwork belongs in the signature: Plex, PSN and Discord can publish a
-      // title before its image, and a title-only signature freezes art:null.
-      const artSig = (u) => String(u || '').split('?')[0];
+      const artSig = (u) => {
+        const t = String(u || '');
+        const q = t.indexOf('?');
+        if (q < 0) return t;
+        const rest = t.slice(q + 1).split('&')
+          .filter((p) => p.slice(0, 6) !== 'token=' && p.slice(0, 8) !== 'authSig=')
+          .sort().join('&');
+        return t.slice(0, q) + (rest ? '?' + rest : '');
+      };
       const parts = [];
       for (let i = 1; i <= 10; i++) {
         const e = V['show_media_player_' + i] && V['media_player_' + i];
         if (e) {
           const s = states[e]; const a = s?.attributes || {};
-          parts.push(e + s?.state + (a.media_title || '') + (a.media_position || '') +
+          parts.push(e + s?.state + (a.media_title || '') +
+            (a.media_position_updated_at || '') +
             artSig(a.entity_picture || a.media_image_url || a.media_album_cover_url || a.image_url));
         }
       }
@@ -804,19 +1459,11 @@
         const p = V['show_psn_' + i] && V['psn_' + i];
         if (p) {
           const pa = states[p]?.attributes || {};
-          // The sibling image.X entity has to be in here too. It is where
-          // the integration's cover lives, it arrives AFTER the title, and
-          // a signature blind to it froze art:null in the cache forever -
-          // which is the very failure the note at the top warns about.
-          // Reading it here is also what subscribes the card to it.
           const pim = states[String(p).replace(/^sensor\./, 'image.')];
           const pia = (pim && pim.attributes) || {};
           parts.push(p + states[p]?.state + (pa.full_title || '') +
             artSig(pa.entity_picture_local || pa.entity_picture || pa.image_url || pa.media_image_url) +
             artSig(pia.entity_picture_local || pia.entity_picture) +
-            // The image entity's own state is its last-updated stamp, so
-            // it changes whenever the cover does even when the token
-            // does not - and it is what subscribes the card to it.
             String(pim?.state || ''));
         }
       }
@@ -1002,8 +1649,6 @@
           k.departedAt = null;
         }
 
-        // Every source gets the same short departure hold, just so its exit
-        // animation has content to animate away with.
         let anyPending = false;
         for (const key of Object.keys(state.keys)) {
           if (rawByKey.has(key)) continue;
@@ -1025,19 +1670,11 @@
     }
 
 
-    // The phone's slot planner. Nine fixed wrappers; a source keeps its wrapper
-    // while it lives so a re-render cannot recycle one mid-animation, and a
-    // departing source keeps its own for EXIT_MS so it has something to animate
-    // out with. This lived in hemma_mobile_now_playing.yaml until the collector
-    // moved here and took it along by accident, leaving the phone with no Now
-    // Playing section at all.
     if (typeof window._hemmaNPPlan !== 'function') {
       window._hemmaNPPlan = function (states, V) {
         const EXIT_MS = 480;
         // Cap on waiting for artwork before opening an arrival anyway.
         const ART_CAP = 400;
-        // An arrival must paint at least one frame closed, or there is no start value to
-        // transition from and it appears fully formed.
         const OPEN_MIN = 60;
         const ANCHOR = 4;
         // Per card, like every other Now Playing store.
@@ -1109,8 +1746,6 @@
             fresh.push(k);
           }
 
-          // Anchor on the head so the leftmost (only fully visible) tile never changes
-          // wrapper. A new head takes the wrapper immediately left of the old head.
           let base = ANCHOR;
           if (order.length) {
             const head = order[0];
@@ -1257,10 +1892,6 @@
             pad_bottom: padBottom,
           },
           styles: {
-            /* One object, not five. The poster, the title, the progress and the
-               four detail tiles are all one thing - what is playing - so the
-               player is a single plate rather than a set of floating widgets.
-               The tiles inside it are panels of that object, not objects. */
             card: [
               { border: 'none' },
               { padding: '0' },
@@ -1655,18 +2286,9 @@
 
 // ── Mobile wallpaper ─────────────────────────────────────────────────────────
 (function () {
-  // Same breakpoints the card templates use for "mobile": narrow (phone
-  // portrait) OR short (phone landscape / very short windows).
   const MOBILE_MQ = window.matchMedia('(max-width: 767px), (max-height: 500px)');
-  const MOBILE_RE = /^\/dashboard-hemma-mobile(\/|$)/;
-  // Build marker: a missing --hemma-wallpaper-js in the console means an OLD
-  // cached script is serving this module and the theme's fallbacks are painting
-  // - silently, since they are valid CSS. Resources are pinned per file, so
-  // moving code between files means bumping BOTH pins.
+  const MOBILE_RE = /^\/[^/]*[-_]mobile(\/|$)/i;
   const WALLPAPER_JS = 3;
-  // Refuse to run twice. A stale hemma-redirect.js still ships its own copy of
-  // this module, and two of them would both publish variables and both paint
-  // <html>.
   if ((window.__hemmaWallpaperJs || 0) >= WALLPAPER_JS) return;
   window.__hemmaWallpaperJs = WALLPAPER_JS;
   try {
@@ -1674,8 +2296,7 @@
       '--hemma-wallpaper-js', String(WALLPAPER_JS));
   } catch (e) {}
 
-  // Phone landscape. MOBILE_MQ cannot stand in for this: 393x852 and 852x393
-  // both satisfy it, so it never fires on rotation.
+  // Phone landscape needs its own query: MOBILE_MQ matches 393x852 and 852x393 alike.
   const LANDSCAPE_MQ = window.matchMedia('(orientation: landscape) and (max-height: 500px)');
 
   // ── Background injection ─────────────────────────────────────────────────────
@@ -1690,10 +2311,7 @@
       + ' var(--hemma-mobile-hero-tint-bot, rgba(170,170,170,0.12))'
       + ` ${off('var(--hemma-mobile-hero-wash-mid, 34%)')},`
       + ` transparent ${off('var(--hemma-mobile-hero-wash-end, 70%)')}),`
-      // The mesh has to be here too, in the same order as the card's ::before.
-      // Without it <html> paints a clean wash+gradient and the card then adds the
-      // mesh on top a beat later, so the wallpaper visibly changes at the exact
-      // moment the cards appear.
+      // Same order as the card's ::before, or the two meshes disagree.
       + ' radial-gradient('
       + ' var(--hemma-mobile-hero-mesh-a-size, 120% 46%) at'
       + ' var(--hemma-mobile-hero-mesh-a-pos, 18% 58%),'
@@ -1717,10 +2335,6 @@
       + ' var(--hemma-mobile-hero-c-base, #3b352e)'
       + ` ${off('var(--hemma-mobile-hero-p-base, 100%)')}),`
       + ' var(--hemma-mobile-hero-img, url("/local/hemma/rooms/home-demo.jpg"))',
-    // Portrait sizes the photo by HEIGHT so the join sits in the same place on
-    // every phone. Landscape cannot: 28% of a short viewport is a photo only a
-    // quarter of the screen wide, a strip down the middle. There it goes
-    // width-driven, matching the card's own landscape media query.
     sizePortrait: '100% 100%, 100% 100%, 100% 100%, 100% 100%, auto '
       + off('var(--hemma-mobile-hero-height, 36.5%)'),
     sizeLandscape: '100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% auto',
@@ -1738,9 +2352,6 @@
       return;
     }
     h.style.backgroundImage    = BG.image;
-    // Read at paint time, not captured once: applyHtmlBackground re-runs on the
-    // media query's own change event, so rotating the phone repaints rather than
-    // keeping a stale snapshot.
     h.style.backgroundSize     = LANDSCAPE_MQ.matches ? BG.sizeLandscape : BG.sizePortrait;
     h.style.backgroundPosition = BG.position;
     h.style.backgroundRepeat   = 'no-repeat';
@@ -1749,17 +2360,12 @@
 
   // ── Gradient sampling ────────────────────────────────────────────────────────
   const SAMPLE_KEYS = ['handoff', 'upper', 'mid', 'lower', 'base'];
-  // VERSIONED: bump it whenever paletteFrom's SHAPE changes. A palette cached
-  // before a field existed is served forever and the field falls through to its
-  // fallback, which looks like the feature never shipped. localStorage survives
-  // a hard refresh, so nobody can clear it themselves.
+  // VERSIONED: bump this whenever paletteFrom's shape changes, or a cached palette wins forever.
   const CACHE_PREFIX = 'hemma-hero-sample:v2:';
   const CACHE_ROOT = 'hemma-hero-sample:';
 
   const CACHE_FIELDS = SAMPLE_KEYS.concat(['meshA', 'meshB']);
 
-  // Drop entries from earlier cache versions so localStorage does not accumulate
-  // a dead palette per version per photo.
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const k = localStorage.key(i);
@@ -1773,11 +2379,7 @@
   const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   const hex = (c) => '#' + c.map((v) => clamp8(v).toString(16).padStart(2, '0')).join('');
   const mute = (c, k) => { const l = lum(c); return c.map((v) => v + (l - v) * k); };
-  // Set a color's brightness while keeping its hue. Luminance is driven
-  // separately from color below, and this is the join between the two.
   const atLum = (c, target) => { const l = lum(c) || 1; return c.map((v) => v * target / l); };
-  // Positive is warm (red side), negative cool (blue side). Crude next to a real
-  // hue angle, but it only ever has to rank two colors against each other.
   const warmth = (c) => c[0] - c[2];
 
   function readVarUrl(name) {
@@ -1808,8 +2410,6 @@
     if (!ctx) return null;
     ctx.drawImage(img, 0, 0, w, h);
     let data;
-    // Tainted canvas throws here. /local/ is same-origin so it should not, but a
-    // reverse proxy serving media off another host would.
     try { data = ctx.getImageData(0, 0, w, h).data; } catch (e) { return null; }
 
     const band = (y0, y1) => {
@@ -1919,8 +2519,6 @@
       let pal = null;
       try {
         const hit = JSON.parse(localStorage.getItem(key) || 'null');
-        // Shape-checked as well as versioned. Either guard alone is one thing to
-        // forget; together, a stale or partial entry just misses and recomputes.
         if (hit && CACHE_FIELDS.every((f) => typeof hit[f] === 'string')) pal = hit;
       } catch (e) {}
       if (!pal) {
@@ -2086,9 +2684,6 @@
       if (this.isConnected) this._build();
     }
 
-    // Each view hands the bar its own copy of the same config. Rebuilding on
-    // that would throw away the indicator mid-travel, so only a real change
-    // to the routes or the variant is allowed through.
     updateConfig(config) {
       if (!config || !Array.isArray(config.routes)) return;
       const sig = JSON.stringify([
@@ -2117,18 +2712,12 @@
       window.addEventListener('resize', this._onResize);
       if (this._config && !this._built) this._build();
       this._syncRoute();
-      // The first placement can land before the nav has been laid out, where
-      // _placeIndicator bails and never marks the bar visible. Re-run after a
-      // frame; unchanged geometry returns early, so a travel is not snapped.
       this._syncHeaderOffset();
       requestAnimationFrame(() => {
         if (!this.isConnected) return;
         this._syncHeaderOffset();
         this._placeIndicator();
       });
-      // Web fonts land after first layout and every label changes width. Only
-      // the first nav of the page needs this; on a remount they are cached and
-      // the promise resolves instantly, which would snap a travel in progress.
       if (document.fonts && document.fonts.ready && !HemmaNavBar._fontsReady) {
         document.fonts.ready.then(() => {
           HemmaNavBar._fontsReady = true;
@@ -2155,16 +2744,25 @@
 
       const bar = document.createElement('div');
       bar.className = 'bar';
-      // The glass is a SIBLING of the routes, never their ancestor: a
-      // backdrop-filter composites its whole subtree as one, which would stop
-      // the indicator getting its own layer and drop the travel back onto the
-      // main thread - the same thread HA blocks building a view.
+      // The glass is a SIBLING of the routes, never their ancestor: an ancestor kills backdrop-filter.
       const glass = document.createElement('div');
       glass.className = 'glass';
       bar.appendChild(glass);
+      if (this._variant === 'tablet') {
+        const rim = document.createElement('div');
+        rim.className = 'rim';
+        bar.appendChild(rim);
+      }
       const scroller = document.createElement('div');
       scroller.className = 'scroller';
       bar.appendChild(scroller);
+      if (this._variant === 'tablet') {
+        const flash = document.createElement('div');
+        flash.className = 'flash';
+        bar.appendChild(flash);
+        bar.addEventListener('pointerdown', (ev) => this._flash(ev), true);
+        this._flashEl = flash;
+      }
       root.appendChild(bar);
 
       const indicator = document.createElement('div');
@@ -2225,9 +2823,29 @@
         this._openMenu(route, btn);
         return;
       }
-      if (route.url) { navigate(route.url); return; }
       const ta = route.tap_action;
-      if (ta && ta.action === 'navigate' && ta.navigation_path) navigate(ta.navigation_path);
+      const to = route.url || (ta && ta.action === 'navigate' && ta.navigation_path) || null;
+      if (!to) return;
+      if (this._variant !== 'tablet') { navigate(to); return; }
+      const idx = this._els.findIndex((el) => el.btn === btn);
+      if (idx >= 0 && idx !== this._activeIdx) {
+        this._els.forEach((el, i) => el.btn.classList.toggle('active', i === idx));
+        this._activeIdx = idx;
+        this._placeIndicator();
+      }
+      requestAnimationFrame(() => requestAnimationFrame(() => navigate(to)));
+    }
+
+    // The phone capsule's tap: light blooms from the thumb, rises fast and leaves slowly.
+    _flash(ev) {
+      const f = this._flashEl;
+      if (!f || !this._bar || !f.animate) return;
+      const r = this._bar.getBoundingClientRect();
+      const x = r.width ? Math.max(0, Math.min(100, ((ev.clientX - r.left) / r.width) * 100)) : 50;
+      f.style.background = 'radial-gradient(90px circle at ' + x.toFixed(1) + '% 50%,'
+        + ' rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.12) 55%, rgba(255,255,255,0) 100%)';
+      f.animate([{ opacity: 0 }, { opacity: 1, offset: 0.25, easing: 'cubic-bezier(0.4,0,0.6,1)' }, { opacity: 0 }],
+        { duration: 560, easing: 'ease-out' });
     }
 
     _syncRoute() {
@@ -2254,15 +2872,9 @@
       this._placeIndicator();
     }
 
-    // Leading the edge that moves first is what gives it the stretch.
-    // --hemma-header-offset resolves through vars HA does not always set, so it
-    // reads 0 and the bar rides into the header. Measure instead.
     _syncHeaderOffset() {
       let view = null;
-      // The bar lives in ha-app-layout, inside hui-root's shadow root - and
-      // hui-view is a sibling subtree in that same root. Ask there first; the
-      // document-wide walk below is only for when the bar has been parked on
-      // body because no app layout was found.
+      // The bar lives in ha-app-layout, inside hui-root's shadow root.
       try {
         const near = this.getRootNode();
         if (near && near.querySelector) {
@@ -2302,8 +2914,6 @@
       return { left: lRect.left - sRect.left + sc.scrollLeft, width: lRect.width };
     }
 
-    // Travels the fill (tablet) or the underline (desktop) to the active label.
-    // Width is written once per move; the travel itself is transform only.
     _placeIndicator(instant) {
       const ind  = this._indicator;
       const fill = this._fill;
@@ -2322,6 +2932,38 @@
           && ind.classList.contains('on')) return;
 
       ind.classList.remove('to-right', 'to-left');
+
+      const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      // No travel on any surface. The underline has nothing to move alongside:
+      // the tap replaces the whole view, so a journey competing with that
+      // rebuild lands late however it is eased. It leaves one name and arrives
+      // under the other instead, which is what a sidebar selection does.
+      if (!instant && from && ind.classList.contains('on') && ind.animate && !still) {
+        const ghost = ind.cloneNode(true);
+        ghost.classList.add('instant');
+        ghost.classList.remove('on');
+        ghost.style.opacity = '1';
+        this._scroller.insertBefore(ghost, ind);
+        const gone = () => ghost.remove();
+        ghost.animate([{ opacity: 1 }, { opacity: 0 }],
+          { duration: 110, easing: 'ease-out', fill: 'forwards' }).finished.then(gone, gone);
+        ind.classList.add('instant');
+        ind.style.width = to.width + 'px';
+        ind.style.transform = 'translateX(' + to.left + 'px)';
+        fill.style.transform = 'scaleX(1)';
+        void ind.offsetWidth;
+        ind.classList.remove('instant');
+        // A whisper of width on the way in, so it reads as arriving rather than
+        // being switched on. Anchored center: from the left edge it looks like
+        // a short slide, which is the thing being removed.
+        ind.animate(
+          [{ opacity: 0, transform: ind.style.transform + ' scaleX(0.88)' },
+           { opacity: 1, transform: ind.style.transform + ' scaleX(1)' }],
+          { duration: 150, easing: 'cubic-bezier(0.2,0.8,0.2,1)' });
+        this._from = to;
+        return;
+      }
+
       ind.style.width = to.width + 'px';
 
       if (instant || !from) {
@@ -2332,8 +2974,6 @@
         void ind.offsetWidth;
         ind.classList.remove('instant');
       } else {
-        // Render the OLD box exactly, using the new width as the base, then let
-        // both transforms resolve to their identity at the destination.
         ind.classList.add('instant');
         ind.style.transform  = 'translateX(' + from.left + 'px)';
         fill.style.transform = 'scaleX(' + (from.width / to.width) + ')';
@@ -2370,6 +3010,7 @@
       if (route.menu === 'scenes' || !route.popup) {
         if (SC && SC.list) {
           const ids = SC.list(hass.states, hass, this._config || {});
+          if (SC.noteColors) SC.noteColors((this._config || {}).scene_colors);
           if (SC.prefetch) { try { SC.prefetch(ids, hass.states); } catch (_) {} }
           return ids.map((id) => ({
             id: id,
@@ -2440,31 +3081,18 @@
       const menu = document.createElement('div');
       menu.className = 'hemma-nav-menu';
       menu._owner = btn;
-      // Same glass tokens as the tablet pill, so the menu reads as the same
-      // material. Radii stay concentric - outer less the padding is what a row
-      // carries - so the corners nest instead of fighting. macOS 26 rounds a
-      // menu highlight to roughly half its height; this sits just under that.
       Object.assign(menu.style, {
         position: 'fixed', zIndex: '99999', boxSizing: 'border-box',
-        padding: '6px', borderRadius: '26px',
+        padding: '6px',
         maxHeight: 'calc(100vh - 140px)', overflowY: 'auto', overflowX: 'hidden',
         width: 'max-content', maxWidth: 'calc(100vw - 24px)',
         display: 'flex', flexDirection: 'column', alignItems: 'stretch', rowGap: '2px',
-        background: 'var(--hemma-glass-background, rgba(255,255,255,0.10))',
-        backdropFilter: 'var(--hemma-glass-backdrop, blur(24px) saturate(180%))',
-        WebkitBackdropFilter: 'var(--hemma-glass-backdrop, blur(24px) saturate(180%))',
-        boxShadow: 'var(--hemma-glass-rim, inset 0 1px .5px -0.5px rgba(255,255,255,0.55))'
-          + ', 0 12px 34px rgba(0,0,0,0.26)',
         scrollbarWidth: 'none',
-        opacity: '0', transform: 'scale(.96)', transformOrigin: 'top center',
-        transition: 'opacity .14s ease, transform .16s cubic-bezier(.2,.9,.3,1)',
       });
+      window.hemmaMenuGlass.apply(menu);
 
       const build = () => {
         const items = this._menuItems(route);
-        // hass lands many times a second, and every one of those was tearing
-        // the menu down and rebuilding it - destroying the row under the
-        // cursor mid-hover, which is what made the fill flicker.
         const sig = items.map((i) => [i.id, i.label, i.icon, i.active].join('\u0001')).join('\u0002');
         if (sig === menu._sig) return;
         menu._sig = sig;
@@ -2476,7 +3104,8 @@
           Object.assign(row.style, {
             display: 'grid', gridTemplateColumns: '20px 1fr', alignItems: 'center',
             justifyItems: 'start', columnGap: '15px', width: '100%',
-            minHeight: '46px', padding: '0 16px 0 13px', borderRadius: '20px',
+            minHeight: '46px', padding: '0 16px 0 13px',
+            borderRadius: 'calc(var(--hemma-menu-radius, 28px) - 6px)',
             border: '0', textAlign: 'left',
             font: 'inherit', fontSize: 'var(--hemma-popup-label-size, 15px)',
             // 600 blanks these on re-render; 500 is the heaviest safe weight.
@@ -2492,10 +3121,7 @@
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             placeSelf: 'center',
           });
-          // Object.assign cannot set a custom property - it silently does
-          // nothing - so the icon kept rendering at its 24px default, spilling
-          // out of its column and sitting off-center against the label. Sized
-          // under its box so the glyph centres rather than filling to the edge.
+          // Object.assign cannot set a custom property; it fails silently.
           ico.style.setProperty('--mdc-icon-size', '18px');
 
           const txt = document.createElement('span');
@@ -2527,17 +3153,14 @@
         const r = btn.getBoundingClientRect();
         const w = menu.offsetWidth;
         const cx = r.left + r.width / 2;
-        menu.style.top = Math.round(r.bottom + 10) + 'px';
+        menu.style.top = window.hemmaMenuGlass.dropTop(r, 10) + 'px';
         menu.style.left = Math.round(
           Math.max(12, Math.min(cx - w / 2, window.innerWidth - w - 12))
         ) + 'px';
       };
       place();
 
-      requestAnimationFrame(() => {
-        menu.style.opacity = '1';
-        menu.style.transform = 'scale(1)';
-      });
+      window.hemmaMenuGlass.enter(menu);
 
       btn.setAttribute('data-popup-open', '');
 
@@ -2554,9 +3177,9 @@
         document.removeEventListener('pointerdown', onAway, true);
         window.removeEventListener('resize', close);
         window.removeEventListener('location-changed', close, true);
-        menu.style.opacity = '0';
-        menu.style.transform = 'scale(.96)';
-        setTimeout(() => { if (menu.parentNode) menu.remove(); }, 170);
+        window.hemmaMenuGlass.exit(menu, () => {
+          if (menu.parentNode) menu.remove();
+        });
         if (this._menu === menu) this._menu = null;
       };
       menu._close = close;
@@ -2620,10 +3243,8 @@
 
         .scroller::-webkit-scrollbar { height: 0; width: 0; }
 
-        /* Split across two elements so one edge can lead the other, and both move
-           by TRANSFORM - a compositor property, so the travel survives a busy
-           main thread. left/right are layout, and on tablet they also re-blur
-           the glass pill. */
+        /* Placed by TRANSFORM, a compositor property: left/right are layout, and
+           on tablet they also re-blur the glass pill behind it. */
         .indicator {
           position: absolute;
           left: 0;
@@ -2739,12 +3360,18 @@
           :host {
             top: calc(var(--hemma-chrome-row-top-tablet, 30px)
               + var(--hemma-nav-header-offset, var(--hemma-header-offset, 0px)));
+            --hemma-nav-reserve-current: var(--hemma-chrome-side-reserve-tablet, 188px);
           }
 
+          /* Both orientation-dependent values ride the one block that is known
+             to match here. A second bar rule in its own media query is the same
+             cascade on paper and was not worth the doubt. */
           @media (orientation: portrait) {
             :host {
               top: calc(var(--hemma-chrome-row-top-tablet-portrait, 32px)
                 + var(--hemma-nav-header-offset, var(--hemma-header-offset, 0px)));
+              --hemma-nav-reserve-current:
+                var(--hemma-chrome-side-reserve-tablet-portrait, 96px);
             }
           }
 
@@ -2753,7 +3380,7 @@
             max-width: min(
               calc(75vw - 35px),
               calc(100vw - 2 * (var(--hero-gutter, 23px)
-                + var(--hemma-chrome-side-reserve-tablet, 118px)))
+                + var(--hemma-nav-reserve-current, 188px)))
             );
             margin: 0 auto;
             height: var(--hemma-nav-pill-height-tablet, 46px);
@@ -2762,18 +3389,38 @@
             overflow: hidden;
           }
 
+          /* The capsule the phone dashboard and the panel share, from the same theme variables. */
           .glass {
-            background: var(--hemma-glass-background, rgba(255,255,255,0.10));
-            -webkit-backdrop-filter: var(--hemma-nav-glass-backdrop, blur(24px) saturate(120%));
-            backdrop-filter: var(--hemma-nav-glass-backdrop, blur(24px) saturate(120%));
-            box-shadow: var(--hemma-nav-glass-rim,
-              inset 0 1px .5px -0.5px rgba(255,255,255,0.55),
-              inset 0 -1px .5px -0.5px rgba(255,255,255,0.48),
-              inset 0 3px 6px -3px rgba(255,255,255,0.20),
-              inset 0 -3px 6px -3px rgba(255,255,255,0.12),
-              2px 0 3px -2px rgba(0,0,0,0.45),
-              -2px 0 3px -2px rgba(0,0,0,0.45),
-              0 4px 28px 2px rgba(0,0,0,0.07));
+            background: var(--hemma-pill-fill, rgba(255,255,255,0.10));
+            -webkit-backdrop-filter: var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+            backdrop-filter: var(--hemma-pill-backdrop, blur(12px) saturate(1.4));
+            box-shadow: var(--hemma-pill-rim, inset 0 0.5px 0 rgba(255,255,255,0.10), inset 0 -0.5px 0 rgba(255,255,255,0.10)),
+              inset 1px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50)), inset -1px 0 0 var(--hemma-pill-edge, rgba(0,0,0,0.50));
+          }
+
+          .rim {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            border-radius: inherit;
+            pointer-events: none;
+            -webkit-backdrop-filter: var(--hemma-pill-highlight, brightness(1.45));
+            backdrop-filter: var(--hemma-pill-highlight, brightness(1.45));
+            padding: 1px;
+            box-sizing: border-box;
+            -webkit-mask: linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+            -webkit-mask-composite: source-in, source-out;
+            mask: linear-gradient(to bottom, #000 0, rgba(0,0,0,.45) 13%, transparent 31%, transparent 69%, rgba(0,0,0,.45) 87%, #000 100%), linear-gradient(#000 0 0), linear-gradient(#000 0 0) content-box;
+            mask-composite: intersect, subtract;
+          }
+
+          .flash {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            border-radius: inherit;
+            opacity: 0;
+            pointer-events: none;
           }
 
           .scroller { height: 100%; }
@@ -2884,9 +3531,6 @@
     });
   }
 
-  // ha-app-layout survives navigation - only the hui-view inside it is swapped -
-  // and the theme scopes the nav variables to it, so the bar both persists and
-  // still inherits its own tokens. document.body would do neither.
   function persistentHost() {
     const found = [];
     walkFind(document, 'ha-app-layout', found, 0);
@@ -2894,9 +3538,6 @@
     return document.body;
   }
 
-  // The card is per view and is destroyed on every navigation. It owns no UI:
-  // it just keeps the one long-lived bar alive and fed, so the indicator can
-  // animate as an uninterrupted element instead of being handed between mounts.
   class HemmaNav extends HTMLElement {
     static getStubConfig() { return { variant: 'desktop', routes: [] }; }
 
@@ -2925,8 +3566,6 @@
 
     disconnectedCallback() {
       if (HemmaNav._live) HemmaNav._live.delete(this);
-      // A view swap disconnects this card a frame before the next one connects.
-      // Only retire the bar once nothing has claimed it in between.
       requestAnimationFrame(() => {
         if (HemmaNav._live && HemmaNav._live.size) return;
         if (HemmaNav._bar) { HemmaNav._bar.remove(); HemmaNav._bar = null; }
@@ -2966,10 +3605,6 @@
   });
 })();
 
-// ── Hemma popup ──────────────────────────────────────────────────────────────
-// Hemma renders the popup itself rather than restyling someone else's dialog.
-// Templates fire an ll-custom carrying `hemma_popup`, which nothing else listens
-// for - so browser_mod keeps hiding the sidebar without ever seeing a popup.
 (function () {
   if (window.hemmaPopup) return;
 
@@ -2985,10 +3620,6 @@
     } catch (e) { return true; }
   }
 
-  // popup_styles reaches the dialog by TAG NAME, so those tags point at Hemma's
-  // one surface element until the templates stop naming them.
-  // How long a chart has to draw before the popup stops hiding it. The widgets
-  // never wait on this - see _gateOnCharts.
   var CHART_WAIT_MAX = 1600;
 
   var FOREIGN = /([^\w.#-]|^)(ha-adaptive-dialog|ha-bottom-sheet|ha-dialog|wa-dialog|wa-drawer)(?![\w-])/g;
@@ -3406,9 +4037,6 @@
     }
   `;
 
-  // Scan on a slow cadence, paint every time: doing both per hass update meant
-  // walking every shadow root under the popup on every state change in the
-  // house. Not one-shot - button-cards render async, so nodes appear late.
   var LIVE_SCAN_MS = 2000;
 
   function collectLive(root, out) {
@@ -3443,9 +4071,6 @@
       var el = nodes[i];
       var st = hass.states[el.dataset.hemmaEnt];
       if (!st && el.dataset.hemmaLive !== 'fill') continue;
-      // One entity's value as a share of another's. The row's value had a live
-      // hook and its sub-line was a baked string, so the watts moved and the
-      // percentage stayed where it was rendered.
       if (el.dataset.hemmaLive === 'share') {
         var shSt = hass.states[el.dataset.hemmaEnt];
         var shTot = hass.states[el.dataset.hemmaTotal];
@@ -3458,9 +4083,6 @@
           ? shPct + (el.dataset.hemmaSuffix || '%') : '';
         continue;
       }
-      // Averaged across the group, so a popup driving several covers tracks all
-      // of them, and inverted where the fill means how much still covers the
-      // window. Baked at render, the control did not follow its own rows.
       if (el.dataset.hemmaLive === 'fill') {
         var fIds;
         try { fIds = JSON.parse(el.dataset.hemmaEnts || '[]'); } catch (e) { continue; }
@@ -3479,19 +4101,23 @@
         el.style.height = (el.dataset.hemmaInvert === '1' ? 100 - fAvg : fAvg) + '%';
         continue;
       }
-      // An action, not a reading. First matching rule wins, else the default.
-      // The color moves with the word: "Updating" in the same teal as "Update"
-      // reads as a button you can still press.
       if (el.dataset.hemmaLive === 'act') {
         var aspec;
         try { aspec = JSON.parse(el.dataset.hemmaAct || '{}'); } catch (e) { continue; }
         var arules = aspec.rules || [];
+        var atest = function (c) {
+          var v = c.attr === 'state' ? st.state : (st.attributes || {})[c.attr];
+          if (c.has !== undefined) {
+            return String(v == null ? '' : v).toLowerCase()
+              .indexOf(String(c.has).toLowerCase()) !== -1;
+          }
+          if (c.eq !== undefined) return v === c.eq;
+          return !!v;
+        };
         var apick = null;
         for (var ai = 0; ai < arules.length && !apick; ai++) {
           var ar = arules[ai];
-          var aval = ar.attr === 'state' ? st.state : (st.attributes || {})[ar.attr];
-          var ahit = ar.eq !== undefined ? aval === ar.eq : !!aval;
-          if (ahit) apick = ar;
+          if (atest(ar) && (ar.and || []).every(atest)) apick = ar;
         }
         if (!apick) apick = aspec;
         el.textContent = apick.text != null ? apick.text : '';
@@ -3499,9 +4125,6 @@
         el.style.display = apick.text === '' ? 'none' : '';
         continue;
       }
-      // A word, not a number: covers read "45% open" / "Closed" / "Opening...".
-      // This has to run before the isNaN guard below, which drops anything
-      // non-numeric.
       if (el.dataset.hemmaLive === 'word') {
         var spec;
         try { spec = JSON.parse(el.dataset.hemmaWords || '{}'); } catch (e) { continue; }
@@ -3603,10 +4226,6 @@
         this.dismiss();
       };
       this._onNav = () => {
-        /* Only a real navigation closes this: more-info pushes a history entry on
-           the SAME path, and closing it pops that entry - neither is leaving.
-           Looking for the dialog is not enough on its own, since
-           location-changed fires before HA has mounted it. */
         if (location.pathname === this._navPath) return;
         var ha = document.querySelector('home-assistant');
         if (ha && ha.shadowRoot && ha.shadowRoot.querySelector('ha-more-info-dialog')) return;
@@ -3614,17 +4233,21 @@
         this.close();
       };
 
-      this.scrim.addEventListener('click', () => this.dismiss());
+      // Only a gesture that BEGAN on the scrim dismisses. A tap on a tile can
+      // finish on the scrim: the tile re-renders while the tap is dispatching,
+      // so the click lands on whatever is underneath. Timing flags have to win
+      // that race; where the finger went down does not.
+      this.scrim.addEventListener('pointerdown', () => { this._scrimDown = true; }, true);
+      document.addEventListener('pointerdown', (e) => {
+        if (e.target !== this.scrim) this._scrimDown = false;
+      }, true);
+      this.scrim.addEventListener('click', () => {
+        var began = this._scrimDown;
+        this._scrimDown = false;
+        if (began) this.dismiss();
+      });
 
-      // Tapping the ground between widgets closes the popup, but only where a
-      // popup asks for it: a sheet whose content fills the surface has no
-      // "outside", and closing between its controls would be a trap.
-      // A pointer that moved is a scroll or a drag, not a tap.
       this.content.addEventListener('pointerdown', (e) => {
-        // A finger never lands and lifts on exactly one pixel, so the tolerance
-        // has to be bigger for touch than for a mouse - at 10px a perfectly
-        // still tap was being read as a drag and the dismiss never ran, which
-        // is why tapping the room worked on desktop and not on a phone.
         this._bgTap = { x: e.clientX, y: e.clientY,
                         slop: e.pointerType === 'mouse' ? 10 : 24 };
       }, true);
@@ -3636,8 +4259,6 @@
         if (this._overWidget(e)) return;
         this.dismiss();
       });
-      // touchend as well as click: inline handlers have been eaten here before.
-      // The guard is what stops the pair double-firing on a real tap.
       var closeTap = (e) => {
         var now = Date.now();
         if (now - (this._lastClose || 0) < 400) return;
@@ -3677,10 +4298,8 @@
       if (!wasOpen) {
         this.setAttribute('open', '');
         requestAnimationFrame(() => this.setAttribute('shown', ''));
-        // The header is built once and reused, so its entrance ran at page load
-        // and has been finished ever since - the content IS rebuilt per open and
-        // animated in around it. Re-apply so it plays on this open too.
-        this._replayChrome();
+        // Pinned invisible, entrance replayed below once the cards are in.
+        this._holdChrome();
         document.addEventListener('keydown', this._onKey, true);
         this._navPath = location.pathname;
         window.addEventListener('location-changed', this._onNav, true);
@@ -3689,12 +4308,14 @@
         document.documentElement.style.overflow = 'hidden';
       }
 
-      if (isCard) await this._buildCard(cfg.content);
-      else if (cfg.content) this.container.textContent = String(cfg.content);
-
       if (hasHeader && cfg.header_actions && typeof cfg.header_actions === 'object') {
         await this._buildCard(cfg.header_actions, this._headerActions);
       }
+
+      if (isCard) await this._buildCard(cfg.content);
+      else if (cfg.content) this.container.textContent = String(cfg.content);
+
+      if (!wasOpen) this._replayChrome();
 
       setTimeout(() => this._probe(), 900);   // after card_mod has landed
 
@@ -3702,18 +4323,12 @@
     }
 
 
-    /* The popup never waits for a chart: the widgets arrive at once and the
-       chart fades itself in when it stamps data-hemma-ready. Its space is
-       already held by the widget it sits in, so nothing moves. */
     _gateOnCharts(config) {
       if (this.hasAttribute('open')) this.setAttribute('data-hemma-charts-ready', '');
       var hasChart = false;
       try { hasChart = JSON.stringify(config || '').indexOf('custom:apexcharts-card') > -1; }
       catch (e) { hasChart = false; }
       if (!hasChart) return;
-      // A chart that errors, or genuinely has no data, never stamps itself and
-      // would stay invisible for good. One deferred sweep, after the cards have
-      // settled - no polling, and no walk at all in the common case.
       if (this._chartPoll) clearTimeout(this._chartPoll);
       this._chartPoll = setTimeout(() => {
         this._chartPoll = null;
@@ -3730,10 +4345,6 @@
       }, CHART_WAIT_MAX);
     }
 
-    // Diagnostic, off unless the URL carries ?hemmaprobe=1. Walks the popup and
-    // every nested shadow root and lists anything large enough to be the seam
-    // that carries a fill, a backdrop-filter, a blend mode, a promoted layer or
-    // partial opacity - what is actually painting, not what should be.
     _probe() {
       if (!/[?&]hemmaprobe=1/.test(location.search)) return;
       var rows = [];
@@ -3781,15 +4392,10 @@
       document.body.appendChild(box);
     }
 
-    // Widget or ground? POSITIONAL, not path-based: composedPath fails on any
-    // card that re-renders while the tap is dispatching, and a detached node
-    // reports no background. The test is whether anything at the point PAINTS.
+    // Positional, not path-based: composedPath fails on a retargeted event.
     _overWidget(ev) {
       var x = ev.clientX, y = ev.clientY;
       if (typeof x !== 'number' || typeof y !== 'number') return false;
-      // A SYNTHETIC click carries no coordinates: clientX/clientY are 0, which
-      // passes the guard above, and (0,0) is off the popup - so nothing is found
-      // there and the tap reads as bare ground.
       var box;
       try { box = this.content.getBoundingClientRect(); } catch (e) { return true; }
       if (!box || !box.width || !box.height) return true;
@@ -3829,23 +4435,30 @@
       return found;
     }
 
+    // animation-name before opacity, never the other way round.
+    _holdChrome() {
+      var els = [this._headerClose, this._headerContent, this._headerActions];
+      for (var i = 0; i < els.length; i++) {
+        if (!els[i]) continue;
+        els[i].style.animationName = 'none';
+        els[i].style.opacity = '0';
+      }
+    }
+
     _replayChrome() {
       var els = [this._headerClose, this._headerContent, this._headerActions];
       for (var i = 0; i < els.length; i++) {
         var el = els[i];
         if (!el) continue;
-        el.style.animation = 'none';
+        el.style.animationName = 'none';
+        el.style.opacity = '';
         // Read it back, or the two writes coalesce and nothing restarts.
         void el.offsetWidth;
-        el.style.animation = '';
+        el.style.animationName = '';
       }
     }
 
     dismiss() {
-      // A control claims its own tap by stamping this, and the background
-      // dismiss stands down briefly. Identifying such a tap from the EVENT
-      // cannot work: the control re-renders itself while the tap is still
-      // dispatching. The control is the only thing that knows for certain.
       if (Date.now() < (window._hemmaSuppressDismiss || 0)) return;
       if (this._dismissable) this.close();
     }
@@ -3896,17 +4509,12 @@
 
     async _buildCard(config, host) {
       var target = host || this.container;
-      // Read off the config, the way the chart gate does: a popup whose content
-      // carries no live markers must not pay for a scan that can only ever find
-      // none. light and the media popups are entirely in this case.
       if (this._bridge) {
         var hasLive = false;
         try { hasLive = JSON.stringify(config || '').indexOf('data-hemma-live') > -1; }
         catch (e) { hasLive = true; }
         this._bridge._liveCache = { none: !hasLive, nodes: null, at: 0 };
       }
-      /* Charts are the only cards worth keeping. Everything else builds in a
-         frame; a chart fetches history and draws, which is the wait. */
       var key = null;
       try {
         var cfgStr = JSON.stringify(config || '');
@@ -3937,8 +4545,6 @@
       if (!this.hasAttribute('open')) return;
 
       var ha = document.querySelector('home-assistant');
-      // One permanent registration on the bridge - provideHass has no matching
-      // unprovide, so registering each card would grow that list per open.
       if (ha && !this._bridge._provided) {
         this._bridge._provided = true;
         try { ha.provideHass(this._bridge); } catch (e) { this._bridge._provided = false; }
@@ -3984,10 +4590,6 @@
       catch (e) { return window.innerWidth <= SHEET_MAX; }
     }
 
-    // Drag the whole sheet, not just the handle - but only from the handle or
-    // with the scroller already at the top, or this fights the content. Nothing
-    // is prevented until the finger has committed 8px, so a tap is still a tap:
-    // swallowing touchstart outright is what killed inline handlers before.
     _bindSheetDrag(surface, grab, content) {
       var y0 = 0, dy = 0, tracking = false, dragging = false;
 
@@ -4053,9 +4655,6 @@
     return window.loadCardHelpers ? window.loadCardHelpers() : null;
   }
 
-  // Sits in the home-assistant shadow root beside HA's own dialogs, so a
-  // more-info opened from inside the popup is appended after it and lands on
-  // top without either of them needing a z-index fight.
   function popupHost() {
     var ha = document.querySelector('home-assistant');
     return (ha && ha.shadowRoot) || document.body;
@@ -4092,9 +4691,6 @@
     },
   };
 
-  // The templates carry `hemma_popup:` now, not `browser_mod:`. That is what
-  // guarantees browser_mod cannot pick a popup up even while it stays installed
-  // for the sidebar and header hiding it still does.
   window.addEventListener('ll-custom', function (ev) {
     if (!flagOn()) return;
     var cfg = ev.detail && ev.detail.hemma_popup;
@@ -4104,29 +4700,18 @@
   }, true);
 })();
 
-// ── HA dialog chrome ─────────────────────────────────────────────────────────
-// HA dialogs bottom out in a native <dialog> four hops down:
-// ha-more-info-dialog > ha-adaptive-dialog > ha-dialog > wa-dialog > dialog.
-// A keyframe, not a transition: the ::backdrop does not exist until it opens.
 (function () {
   if (window._hemmaDialogChrome) return;
   window._hemmaDialogChrome = true;
 
   var MARK = '_hemmaChrome';
 
-  // The scrim has no entrance: HA fades its own in, and a second reads as two
-  // events. The blur weakening during HA's slide is a browser constraint - a
-  // transform above a backdrop-filter suspends it.
-  // Backticks, not quotes: the data URI contains both kinds.
   var SHEET_RADIUS =
     ':host([placement="bottom"]) dialog {' +
     '  border-start-start-radius: var(--hemma-sheet-radius, 24px) !important;' +
     '  border-start-end-radius: var(--hemma-sheet-radius, 24px) !important;' +
     '}';
 
-  // A blend layer composites the subtree as one group, and returning from
-  // another tab that group is rebuilt before anything paints - until it lands
-  // the area is a flat dark rectangle. Off by default.
   var GRAIN = `
     dialog { isolation: isolate; }
     dialog::before, dialog::after {
@@ -4141,9 +4726,6 @@
   var NO_ENTRANCE =
     'dialog::backdrop { animation: none !important; transition: none !important; }';
 
-  // Over a hemma-popup the room already has its scrim, and that one never
-  // toggles - this one standing down whole is what leaves the blur unbroken
-  // when the dialog goes. The dialog's own surface still blurs what is behind it.
   var STACKED_SCRIM =
     ':host([hemma-stacked]) dialog::backdrop {' +
     '  background-color: var(--hemma-stacked-scrim, transparent) !important;' +
@@ -4152,21 +4734,11 @@
     '  -webkit-backdrop-filter: var(--hemma-stacked-scrim-backdrop, none) !important;' +
     '}';
 
-  // HA's drawer animates translate AND opacity. The opacity is the problem:
-  // below 1 the element is a backdrop root, so its own backdrop-filter samples
-  // nothing and the blur only lands when the ramp reaches 1. Same motion, same
-  // 300ms, translate only.
   var DRAWER_SLIDE =
     '@keyframes hemma-drawer-in { from { translate: 0 100%; } to { translate: 0 0; } }' +
     ':host([placement="bottom"]) dialog { animation-name: hemma-drawer-in !important; }';
 
-  // Desktop more-info is a wa-dialog; on mobile it is a wa-drawer, which none
-  // of this was reaching. The offset is dialog-only - a bottom sheet is
-  // already flush against the edge.
   var CSS_BY_HOST = {
-    // Pushing the dialog down without shrinking it sends the bottom off
-    // screen - the UA's max-height is measured from the viewport, not from
-    // where the margin puts it, so the last controls become unreachable.
     'wa-dialog':
       'dialog {' +
       '  margin-block-start: var(--hemma-popup-top, 112px) !important;' +
@@ -4203,10 +4775,6 @@
 
   function sweep() { inject(document, 0); }
 
-  // The one moment that is guaranteed correct: showModal() is what creates the
-  // ::backdrop, so a stylesheet added immediately before it cannot be late.
-  // Element lifecycle hooks were not reliable here - the patch applied but the
-  // style still arrived after the dialog had opened.
   function patchShowModal() {
     var P = window.HTMLDialogElement && HTMLDialogElement.prototype;
     if (!P || P._hemmaPatched) return;
@@ -4225,10 +4793,6 @@
     };
   }
 
-  // The sweep alone is too late: a cold open builds and opens wa-dialog before
-  // any observer fires, so the stylesheet lands mid-open. Patching
-  // connectedCallback puts it in first. Lit builds the shadow root on first
-  // update, hence the retry.
   function patchClass() {
     if (!window.customElements || !customElements.whenDefined) return;
     customElements.whenDefined('wa-dialog').then(function () {
@@ -4251,9 +4815,6 @@
   function boot() {
     var ha = document.querySelector('home-assistant');
     if (!ha || !ha.shadowRoot) { setTimeout(boot, 200); return; }
-    // wa-dialog is built a beat after the dialog element lands, and only its
-    // own shadow root can be reached once it is - hence the retry rather than
-    // a subtree observer, which cannot see across the boundary anyway.
     new MutationObserver(function (recs) {
       for (var i = 0; i < recs.length; i++) {
         for (var j = 0; j < recs[i].addedNodes.length; j++) {
@@ -4270,10 +4831,7 @@
     sweep();
   }
 
-  // A backdrop-filter's first paint builds its texture; until then the element
-  // paints UNFILTERED, which on the ::backdrop is a snap rather than a fade. One
-  // 1px pixel does the building up front. BOTH filters: warming the cheap one
-  // does nothing for the expensive one.
+  // A backdrop-filter's first paint builds its texture, so it cannot be animated from nothing.
   var WARM = ['--hemma-scrim-backdrop, blur(6px) saturate(1.35)'];
 
   function warmFilter() {
@@ -4294,9 +4852,6 @@
     } catch (e) {}
   }
 
-  // The compositor reclaims those textures when the tab is hidden, so on the way
-  // back every backdrop-filter on screen builds again at once - a dozen of them
-  // with a popup open. Warm once on return, as at boot.
   patchShowModal();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { boot(); warmFilter(); });
@@ -4306,10 +4861,6 @@
   }
 })();
 
-// ── Popup body components ────────────────────────────────────────────────────
-// One source for the shared popup anatomy: header (drawn by hemma-popup), then
-// hero, then grouped rows. Templates build HTML strings, so these return HTML
-// strings with inline styles - card_mod cannot reach into button-card's root.
 (function () {
   if (window._hemmaUI) return;
 
@@ -4326,16 +4877,12 @@
     fill: 'var(--hemma-popup-ui-fill, rgba(255,255,255,0.06))',
     fill2:'var(--hemma-popup-ui-fill-2, rgba(255,255,255,0.10))',
     div:  'var(--hemma-popup-ui-divider, rgba(255,255,255,0.08))',
-    // The action tint. Teal, not a one-off blue that appears nowhere else
-    // in the dashboard - an app gets one tint color, and this is Hemma's.
     blue: 'var(--hemma-popup-ui-action, var(--hemma-color-teal, #00C3D0))',
     green:'var(--hemma-popup-ui-good, #30D158)',
     amber:'var(--hemma-popup-ui-warn, #FF9F0A)',
     red:  'var(--hemma-popup-ui-bad, #FF453A)',
     accent: 'var(--hemma-color-teal, #00C3D0)',
     font: 'var(--primary-font-family, system-ui)',
-    // One size for every tall control, so the lock toggle and the cover
-    // slider line up when a popup shows both.
     controlH: 314,
     controlW: 120,
   };
@@ -4345,19 +4892,11 @@
       : t === 'accent' ? T.accent : null;
   };
 
-  // A title with no card under it. Apple's device sheets put the name and the
-  // state bare on the blurred room and let the controls be the only surfaces.
-  // { title, state, stateTone }
   function headline(o) {
     o = o || {};
-    // The chrome carries the name, so what is left here is the live state line -
-    // which the chrome cannot carry, since its title is evaluated once on open.
-    // Nothing to say, nothing to draw: an empty block still spends its padding.
     if (o.barTitle && !o.state) return '';
     var out = '<div style="font-family:' + T.font + ';text-align:center;'
       + 'padding:' + (o.padTop != null ? o.padTop : 2) + 'px 8px '
-      // A caption adds its own 5px lead and a line box below the state, so the
-      // block's own bottom padding comes off or the widget below sits too low.
       + (o.barTitle ? ((o.caption != null || o.captionSlot) ? 3 : 10) : 18)
       + 'px;">';
     if (!o.barTitle) {
@@ -4366,10 +4905,6 @@
         + esc(o.title || '') + '</div>';
     }
     if (o.state) {
-      // A size down and a shade back, never in the accent: it is what the thing
-      // IS, not something you can act on.
-      // sheet: the measure the lock and cover popups set by hand - a size up
-      // and in the full text color, not the dimmer ink.
       var sheet = o.measure === 'sheet';
       out += '<div style="font-size:' + (sheet ? '22px' : 'clamp(17px, 2.1vw, 21px)')
         + ';font-weight:400;letter-spacing:' + (sheet ? '-0.5px' : '-0.01em')
@@ -4377,9 +4912,6 @@
         + (tone(o.stateTone) || (sheet ? T.ink : T.ink2)) + ';">'
         + esc(o.state) + '</div>';
     }
-    // A caption under the state, for a fact that has to be computed after the
-    // popup is already up. Emitted empty and filled in later, so the line does
-    // not pop the layout when its answer arrives.
     if (o.caption != null || o.captionSlot) {
       out += '<div' + (o.captionId ? ' id="' + esc(o.captionId) + '"' : '')
         + ' style="font-size:' + (o.measure === 'sheet' ? '15px' : '14px')
@@ -4391,40 +4923,19 @@
     return out + '</div>';
   }
 
-  // { label, value, unit, sub, subTone, chip: { text, tone }, center, compact,
-  //   trailing, trailingLabel }
-  // `center` PINS the type size, or a length-based size jumps while you drag.
-  // `compact` puts the headline INSIDE a chart's plate, so the number and its
-  // curve read as one object.
   function hero(o) {
     o = o || {};
     if (o.compact) {
       var cInk = tone(o.subTone);
-      // Two columns from the same top edge: inside the value's flex row, the
-      // trailing caption sat level with a 30px word and read as dropped however
-      // the baselines were aligned. Side by side, captions share a line and
-      // readings share a line.
       var out = '<div style="font-family:' + T.font + ';text-align:left;'
         + 'display:flex;align-items:flex-start;justify-content:space-between;'
         + 'gap:12px;padding:2px 2px 10px;">'
         + '<div style="display:flex;flex-direction:column;gap:1px;min-width:0;">';
       if (o.label) {
-        // A knob because the label carries different weight per popup: where the
-        // popup keeps its header title this is a caption, and where the header
-        // is stripped back to a close control it is the only thing naming the
-        // widget.
         out += '<div style="font-size:var(--hemma-popup-hero-label-size, 13px);'
           + 'letter-spacing:-0.01em;color:' + T.ink2 + ';">'
           + esc(o.label) + '</div>';
       }
-      // The headline is a state word. A word at 30px reads as a title and fills
-      // the block - a two-digit number does not, and a same-size unit competes
-      // with it rather than supporting it. Keeping every popup worded here is
-      // what makes them read as one family.
-      /* Scales with the sheet it sits in. A flat 30px was comfortable on a
-         desktop and ran into the reading on its right on a phone, where the
-         plate is a third of the width. The unit follows it so the pair keeps
-         its proportion. */
       out += '<div style="font-size:var(--hemma-popup-hero-value-size,'
         + ' clamp(21px, 3.4vw, 28px));font-weight:600;letter-spacing:-0.02em;'
         + 'line-height:1.1;min-width:0;color:' + T.ink + ';">' + esc(o.value);
@@ -4440,8 +4951,6 @@
       }
       out += '</div>';
       if (o.trailing) {
-        // Mirrors the left: caption over value. A number with no name is a
-        // number you have to guess at - "15 ms" could be anything.
         out += '<div style="flex:none;text-align:right;white-space:nowrap;'
           + 'display:flex;flex-direction:column;gap:1px;">';
         if (o.trailingLabel) {
@@ -4475,9 +4984,6 @@
     }
     left += '</div>';
     if (o.sub) {
-      // subTone lets the sub carry a verdict. A chip said the same thing, but a
-      // chip is a fixed-width object beside the value and on a phone it landed
-      // on top of the sub-line it was competing with.
       left += '<div style="font-size:' + (c ? '16px' : '14px') + ';'
         + 'color:' + (tone(o.subTone) || (c ? T.ink : T.ink2)) + ';">'
         + esc(o.sub) + '</div>';
@@ -4502,10 +5008,6 @@
       + '">' + left + right + '</div>';
   }
 
-  // The Settings row idiom: a solid color tile with a white glyph. Hemma icons
-  // are masked so they take currentColor; an mdi: name falls through to ha-icon.
-  // Hues are the dashboard's own tile palette, so a device reads the same in the
-  // popup as on its tile.
   var ICON_HUE = {
     light: 'var(--hemma-color-yellow, #FFCC00)',
     lamp: 'var(--hemma-color-yellow, #FFCC00)',
@@ -4516,19 +5018,12 @@
     leaf: 'var(--hemma-color-green, #30D158)',
     energy: 'var(--hemma-color-green, #30D158)',
     power: 'var(--hemma-color-green, #30D158)',
-    // No tile kind owns these, so they were falling through to the teal
-    // default and a battery list came out entirely one color. Motion takes
-    // purple; the personal devices share blue, because they are the same kind
-    // of thing and should not be told apart by hue.
     motion: 'var(--hemma-color-purple, #9333ea)',
     occupancy: 'var(--hemma-color-purple, #9333ea)',
     presence: 'var(--hemma-color-purple, #9333ea)',
-    cellphone: 'var(--hemma-color-blue, #0088FF)',
-    phone: 'var(--hemma-color-blue, #0088FF)',
-    tablet: 'var(--hemma-color-blue, #0088FF)',
-    // A sun is yellow like the bulbs it stands in for. Conductivity is soil
-    // chemistry, not a status, so it takes the one hue nothing else in a plant
-    // popup uses.
+    cellphone: 'var(--hemma-color-blue, #0A84FF)',
+    phone: 'var(--hemma-color-blue, #0A84FF)',
+    tablet: 'var(--hemma-color-blue, #0A84FF)',
     sunny: 'var(--hemma-color-yellow, #FFCC00)',
     beaker: 'var(--hemma-color-purple, #9333ea)',
   };
@@ -4542,35 +5037,26 @@
     return T.accent;
   }
 
-  // `contain`, not `auto <h>`: these viewBoxes run 0.59:1 to 1.92:1, so sizing by
-  // height alone overflows the wide ones. ha-icon does not self-center, so the
-  // mdi branch needs its own. iconTone takes a keyword or a literal color, so a
-  // row can match something outside the palette - a chart series, say.
   function icon(name, t) {
     if (!name) return '';
     var literal = (typeof t === 'string' && /^(var\(|#|rgb|hsl)/.test(t)) ? t : null;
     var fill = tone(t) || literal || hueFor(name);
-    var tile = 'width:29px;height:29px;border-radius:7px;background:' + fill + ';flex:none;'
+    var tsz = 'var(--hemma-popup-icon-tile, 29px)';
+    var tile = 'width:' + tsz + ';height:' + tsz + ';border-radius:7px;background:' + fill + ';flex:none;'
       + 'display:flex;align-items:center;justify-content:center;line-height:0;pointer-events:none;';
     if (String(name).indexOf(':') !== -1) {
-      return '<div style="' + tile + '"><ha-icon icon="' + esc(name) + '" style="--mdc-icon-size:18px;'
-        + 'width:18px;height:18px;color:#fff;display:flex;align-items:center;justify-content:center;'
+      return '<div style="' + tile + '"><ha-icon icon="' + esc(name) + '" style="--mdc-icon-size:calc(' + tsz + ' * .62);'
+        + 'width:calc(' + tsz + ' * .62);height:calc(' + tsz + ' * .62);color:#fff;display:flex;align-items:center;justify-content:center;'
         + 'line-height:0;"></ha-icon></div>';
     }
     var url = (typeof window.hemmaIconUrl === 'function')
       ? window.hemmaIconUrl(name) : '/local/hemma/icons/' + name + '.svg';
-    return '<div style="' + tile + '"><div style="width:17px;height:17px;background-color:#fff;'
+    return '<div style="' + tile + '"><div style="width:calc(' + tsz + ' * .586);height:calc(' + tsz + ' * .586);'
+      + 'background-color:#fff;'
       + "-webkit-mask:url('" + url + "') center / contain no-repeat;"
       + "mask:url('" + url + "') center / contain no-repeat;\"></div></div>";
   }
 
-  // group(rows, label, labelAction, opts)
-  // rows: [{ icon, iconTone, label, sub, value, valueTone, action, bar: 0..1, barTone,
-  //          liveAttr | liveWords, image, labelTone, subLive }]
-  // Dividers are real elements so they can inset without a pseudo.
-  // labelAction acts on the whole GROUP, not a row.
-  // opts.labelInside moves the caption onto the plate: with no pane there is
-  // nothing behind a floating caption but the room.
   function group(rows, label, labelAction, opts) {
     rows = rows || [];
     var inside = !!(opts && opts.labelInside);
@@ -4590,15 +5076,8 @@
       out += '</div>';
     }
     out += '<style>'
-      // button-card adds .disabled to ha-card when tap_action is none, and that
-      // carries pointer-events:none to every descendant. The card should stay
-      // inert; the rows inside it must not.
       + 'ha-card.disabled{pointer-events:auto!important;}'
       + '.hui-row{transition:background-color .18s ease;}'
-      // The entrance rides the PLATE, never a wrapper: an animated opacity on an
-      // ancestor paints the subtree into its own layer and every
-      // backdrop-filter inside goes flat for the animation. Transform on an
-      // ancestor is fine; opacity is the one that kills it.
       + '@keyframes hemma-plate-hold{from,to{opacity:0;}}'
       + '@keyframes hemma-plate-in{'
       + 'from{opacity:0;transform:perspective(900px) translateZ(-70px);}'
@@ -4614,28 +5093,16 @@
       +   '.hui-tap:hover + .hui-div{opacity:0;}'
       +   '.hui-div:has(+ .hui-tap:hover){opacity:0;}'
       + '}'
-      + '.hui-chev{opacity:.35;flex:none;pointer-events:none;}'
-      // One line down to 340, where it stacks. inline-block, not inline: an
-      // INLINE box ignores overflow and text-overflow, so a long sub ran under
-      // the row's action instead of ellipsising before it.
+      + '.hui-chev{opacity:var(--hemma-popup-chev-opacity, .35);'
+      +   'flex:none;pointer-events:none;'
+      +   'margin-inline-start:var(--hemma-popup-chev-gap, 0px);}'
       + '@media (min-width: 340px){'
       +   '.hui-sub{display:inline-block;max-width:100%;vertical-align:bottom;'
       +     'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
       +   '.hui-sub2::before{content:"  \\00b7  ";opacity:.6}'
       + '}'
-      // Two-step confirm inside the row, ported from the Studio panel's tile
-      // editing: the row clips, Confirm is parked outside the trailing edge, and
-      // arming slides it in while the row content slides out the same distance.
       + '.hui-row{overflow:hidden;position:relative;--cf-w:88px;}'
-      // Inset from the row rather than filling it. 12px either side leaves
-      // 28px in a 52px row, so the chip reads as sitting IN the row instead of
-      // being the row.
       + '.hui-cf{position:absolute;top:12px;bottom:12px;right:8px;width:var(--cf-w);'
-      // Concentric: the group's radius less its inset, so the curves stay
-      // parallel. It cannot simply BE the radius - at 28px tall anything from 14
-      // up clamps to a capsule.
-      // The action's own tint, not red: red is for destroying something
-      // unrecoverable.
       +   'border-radius:calc(var(--hemma-popup-row-radius, 20px) - 9px);'
       +   'background:' + T.blue + ';color:#fff;font-size:14px;'
       +   'font-weight:560;display:grid;place-items:center;cursor:pointer;'
@@ -4652,31 +5119,20 @@
       + '.hui-row.armed .hui-inner{--armed-x:calc((var(--cf-w) + 16px) * -1);}'
       + '@media (prefers-reduced-motion:reduce){.hui-cf,.hui-inner{transition:none;}}'
       + '</style>';
-    // Its own knob, not T.fill: this surface repeats the whole length of a popup
-    // and wants to sit heavier than the incidental fills that share T.fill.
-    // Off by default; a popup that drops its pane sets it, and every group in it
-    // starts casting like a card in front of the room.
     out += '<div class="hui-plate" style="background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));'
       + 'border-radius:var(--hemma-popup-row-radius, 20px);overflow:hidden;'
       + 'box-shadow:var(--hemma-popup-plate-shadow, none);'
       + 'backdrop-filter:var(--hemma-popup-plate-backdrop, none);'
       + '-webkit-backdrop-filter:var(--hemma-popup-plate-backdrop, none);">';
     if (label && inside) {
-      // 2px under the caption put it right on top of the first row's hover
-      // band. The gap has to clear that highlight, not just the text.
       out += '<div style="padding:var(--hemma-popup-row-pad-y, 8px)'
         + ' var(--hemma-popup-row-pad-x, 16px)'
         + ' var(--hemma-popup-group-label-gap, 10px);'
-        + 'font-size:15px;font-weight:600;'
+        + 'font-size:var(--hemma-popup-group-label-size, 15px);font-weight:600;'
         + 'letter-spacing:-0.01em;color:' + T.ink + ';">' + esc(label) + '</div>';
     }
     rows.forEach(function (r, i) {
-      // Measured off an iOS grouped list at 3x: the separator is inset ~16px
-      // from BOTH edges of the card, not flush to the trailing edge. With an
-      // icon the leading inset moves out to where the label starts.
       if (i) {
-        // Same inset both sides: clearing the icon on the left reads as
-        // off-center rather than as a list rule.
         out += '<div class="hui-div" style="height:1px;background:' + T.div
           + ';margin-left:calc(var(--hemma-popup-row-pad-x, 16px)'
           + ' + var(--hemma-popup-divider-inset, 0px));'
@@ -4684,9 +5140,6 @@
       }
 
       var arming = !!(r.svc && r.confirm);
-      // Two controls, not one: the row opens the device, the action arms the
-      // confirm. The delegated handler walks the composed path innermost-first,
-      // so the label wins wherever it is tapped.
       var armOnAction = !!(arming && r.entity && r.action);
       var tap = armOnAction
         ? ' data-hemma-mi="' + esc(r.entity) + '"'
@@ -4694,20 +5147,25 @@
           ? ' data-hemma-arm=""'
           : (r.svc ? ' data-hemma-svc="' + esc(JSON.stringify(r.svc)) + '"'
                    : (r.entity ? ' data-hemma-mi="' + esc(r.entity) + '"' : ''));
-      var tappable = arming || r.svc || r.entity;
+      var tappable = arming || r.svc || r.entity || r.tappable;
 
-      // A brand logo, when the row has one. Both states sit on the same plate,
-      // so a row with a logo and a row without still read as one set - which is
-      // the thing that goes wrong if you only draw the ones you have.
       var lead;
       if (r.image !== undefined) {
-        // 28 in a 32 plate: the logo is the thing, the plate only gives it an
-        // edge. At 22-in-29 the container was doing the talking.
-        lead = '<div style="width:32px;height:32px;border-radius:9px;flex:none;'
-          + 'background:' + T.fill2 + ';display:grid;place-items:center;overflow:hidden;">'
+        var plate = tone(r.iconTone)
+          || ((typeof r.iconTone === 'string' && /^(var\(|#|rgb|hsl)/.test(r.iconTone))
+                ? r.iconTone : null)
+          || T.fill2;
+        var psz = 'var(--hemma-popup-lead-plate, 32px)';
+        lead = '<div style="width:' + psz + ';height:' + psz + ';border-radius:9px;flex:none;'
+          + 'background:' + plate + ';display:grid;place-items:center;overflow:hidden;">'
           + (r.image
               ? '<img src="' + esc(r.image) + '" alt="" '
-                + 'style="width:28px;height:28px;object-fit:contain;display:block;">'
+                + 'style="' + (r.imageFit === 'cover'
+                    ? 'width:calc(' + psz + ' * .875);height:calc(' + psz + ' * .875);'
+                      + 'border-radius:7px;object-fit:cover;'
+                    : 'width:calc(' + psz + ' * .875);height:calc(' + psz + ' * .875);'
+                      + 'object-fit:contain;')
+                + 'display:block;">'
               : '<ha-icon icon="mdi:package-variant" style="--mdc-icon-size:19px;'
                 + 'width:19px;height:19px;color:' + T.ink3 + ';"></ha-icon>')
           + '</div>';
@@ -4717,23 +5175,21 @@
 
       out += '<div class="hui-row' + (tappable ? ' hui-tap' : '') + '"' + tap
         + ' style="' + (tappable ? 'cursor:pointer;' : '')
-        + 'display:flex;align-items:center;gap:12px;min-height:52px;'
+        + 'display:flex;align-items:center;gap:12px;'
+        + 'min-height:var(--hemma-popup-row-min, 52px);'
         + 'padding:var(--hemma-popup-row-pad-y, 8px) var(--hemma-popup-row-pad-x, 16px);">'
         + '<div class="hui-inner">'
         + lead
         + '<div style="flex:1;min-width:0;pointer-events:none;">'
         + '<div style="font-size:var(--hemma-popup-row-label-size, 17px);'
+        + 'font-weight:var(--hemma-popup-row-label-weight, 400);'
         + 'letter-spacing:-0.022em;color:'
         + (tone(r.labelTone) || T.ink) + ';overflow:hidden;'
         + 'text-overflow:ellipsis;white-space:nowrap;">' + esc(r.label) + '</div>';
 
       if (r.sub) {
-        // An array stacks: on a phone "Door closed · 62% battery" does not fit
-        // on one line, so each part gets its own.
         var subs = Array.isArray(r.sub) ? r.sub : [r.sub];
         subs.forEach(function (line, si) {
-          // subLive rides the first line only: it is the one describing the
-          // row's own reading, and the rest are static detail.
           var sLive = '';
           if (si === 0 && r.subLive && r.entity && r.subLive.total) {
             sLive = ' data-hemma-live="share" data-hemma-ent="' + esc(r.entity) + '"'
@@ -4741,16 +5197,14 @@
               + ' data-hemma-suffix="' + esc(r.subLive.suffix || '%') + '"';
           }
           out += '<div class="hui-sub' + (si ? ' hui-sub2' : '') + '"' + sLive
-            + ' style="font-size:13px;color:'
-            + T.ink3 + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+            + ' style="font-size:var(--hemma-popup-sub-size, 13px);'
+            + 'color:var(--hemma-popup-sub-color, ' + T.ink3 + ');overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
             + esc(line) + '</div>';
         });
       }
       if (r.bar != null) {
         var bt = tone(r.barTone) || T.ink2;
         var pct = Math.max(0, Math.min(1, r.bar)) * 100;
-        // data-hemma-live lets the hass bridge repaint this without the whole
-        // popup being rebuilt - the content card is generated once.
         var live = r.liveAttr && r.entity
           ? ' data-hemma-live="bar" data-hemma-ent="' + esc(r.entity)
             + '" data-hemma-attr="' + esc(r.liveAttr) + '"'
@@ -4764,16 +5218,11 @@
       out += '</div>';
 
       if (r.action) {
-        // actionLive hands the label to the bridge, which is the only thing
-        // that repaints after a popup is built - the content card is generated
-        // once and never re-evaluated.
         var aLive = '';
         if (r.actionLive && r.entity) {
           aLive = ' data-hemma-live="act" data-hemma-ent="' + esc(r.entity) + '"'
             + ' data-hemma-act="' + esc(JSON.stringify(r.actionLive)) + '"';
         }
-        // Negative margin so the target is finger-sized without the label
-        // pushing the row taller than the ones beside it.
         out += '<div' + aLive + (armOnAction ? ' data-hemma-arm=""' : '')
           + ' style="font-size:var(--hemma-popup-row-action-size, 16px);'
           + 'font-weight:500;color:'
@@ -4793,13 +5242,14 @@
             + '" data-hemma-attr="' + esc(r.liveAttr) + '"'
             + ' data-hemma-suffix="' + esc(r.liveSuffix || '') + '"';
         }
-        out += '<div' + vlive + ' style="font-size:17px;letter-spacing:-0.022em;color:'
+        out += '<div' + vlive + ' style="font-size:var(--hemma-popup-row-value-size, 17px);'
+          + 'letter-spacing:-0.022em;color:'
           + (tone(r.valueTone) || T.ink2)
           + ';margin-inline-start:var(--hemma-popup-value-gap, 0px)'
           + ';white-space:nowrap;pointer-events:none;">'
           + esc(r.value) + '</div>';
       }
-      if (r.entity && (!r.svc || armOnAction)) {
+      if ((r.entity || r.tappable) && (!r.svc || armOnAction)) {
         out += '<svg class="hui-chev" width="7" height="12" viewBox="0 0 7 12" aria-hidden="true">'
           + '<path d="M1 1L6 6L1 11" fill="none" stroke="' + T.ink3 + '" stroke-width="2" '
           + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -4844,12 +5294,7 @@
       }, 190);
     };
     var fire = function (ev) {
-      // Nothing fires while a scroll is still settling. _hemmaLastScrollTs was
-      // read here before but never assigned anywhere, so this had never once
-      // been true; the touch tracking below is what sets it.
       if (Date.now() - (window._hemmaLastScrollTs || 0) < 400) return;
-      // Retargeting means ev.target is the outermost host here; composedPath
-      // is the only thing that sees the row inside the card's shadow root.
       var path = (ev.composedPath && ev.composedPath()) || [ev.target];
       for (var i = 0; i < path.length; i++) {
         var t = path[i];
@@ -4867,25 +5312,14 @@
           ev.preventDefault(); ev.stopPropagation();
           return;
         }
-        // A media tile opens its detail over the shelf. The popup dismisses on
-        // a background tap, so this claims the tap the same way the light
-        // popup's pills do - the overlay is opened by script, not by a path the
-        // dismiss test could recognize.
         if (t && t.dataset && t.dataset.hemmaMedia !== undefined) {
           if (Date.now() - (window._hemmaUILastTap || 0) < 400) return;
           window._hemmaUILastTap = Date.now();
           window._hemmaSuppressDismiss = Date.now() + 600;
-          /* The tile's OWN shelf. Both shelves are custom fields of one card,
-             so they share a shadow root - querying it returned the first
-             overlay every time, and a TV Shows tile opened the film above it. */
           var shelf = t.closest && t.closest('.hui-mrow');
           var wrapM = shelf && shelf.parentElement;
           var ov = wrapM && wrapM.querySelector && wrapM.querySelector('.hui-mov');
           if (ov) {
-            /* position:fixed resolves against the nearest TRANSFORMED ancestor, not
-               the viewport, and the sheet has one on a phone - so each shelf's
-               overlay landed at its own offset. Measure where it landed and pull
-               it back to the screen's origin. */
             var vv = window.visualViewport;
             var vw = (vv && vv.width) || window.innerWidth;
             var vh = (vv && vv.height) || window.innerHeight;
@@ -4897,9 +5331,6 @@
               var r0 = ov.getBoundingClientRect();
               ov.style.left = (r0.left ? -r0.left : 0) + 'px';
               ov.style.top = (r0.top ? -r0.top : 0) + 'px';
-              /* Back sits on the close control's row. Reading the close's own
-                 position keeps them together at any breakpoint, rather than
-                 restating the sheet's offset and header padding here. */
               var host = ov.getRootNode && ov.getRootNode().host;
               var pop = host;
               while (pop && !(pop.shadowRoot
@@ -4912,16 +5343,11 @@
                 var cr = cls.getBoundingClientRect();
                 if (cr.height) {
                   ov.style.paddingTop = Math.max(0, cr.top) + 'px';
-                  /* Back takes the close control's place rather than sitting
-                     beside it - two controls stacked in the same corner is the
-                     one thing this view must not show. */
                   var bk = ov.querySelector('.hui-mback');
                   var col = ov.querySelector('.hui-movin');
                   if (bk && col) {
                     bk.style.marginLeft = '0px';
                     var br = col.getBoundingClientRect();
-                    // May be negative: the popup's gutter is often tighter
-                    // than the overlay's own padding.
                     bk.style.marginLeft = (cr.left - br.left) + 'px';
                   }
                   ov._hemmaHidX = cls;
@@ -4931,8 +5357,6 @@
             };
             ov.hidden = false;
             place();
-            // Twice: the first pass reveals it, and a sheet that is still
-            // settling moves under it.
             requestAnimationFrame(place);
             if (ov._hemmaPlace) window.removeEventListener('resize', ov._hemmaPlace);
             ov._hemmaPlace = function () {
@@ -5010,10 +5434,6 @@
         }
       }
     };
-    // A touchend is not a tap. Scrolling a popup with a finger resting on a row
-    // ends over that row, and binding touchend directly bypasses the browser's
-    // own post-scroll click suppression - so every swipe opened whatever the
-    // finger happened to be over. Only a finger that stayed put gets through.
     var TAP_SLOP = 10;
     var tp = null;
     document.addEventListener('touchstart', function (ev) {
@@ -5036,14 +5456,10 @@
     document.addEventListener('touchend', function (ev) {
       var moved = !!(tp && tp.moved);
       tp = null;
-      // A finger put down to stop momentum has not moved either - the guard
-      // inside fire() is what tells that apart from a real tap.
       if (moved) return;
       fire(ev);
     }, true);
 
-    // Vertical drag. Bottom of the track is 0, top is 100, and the service is
-    // called once on release rather than on every frame.
     var drag = null;
     var pctFrom = function (el, clientY) {
       var b = el.getBoundingClientRect();
@@ -5095,8 +5511,6 @@
     document.addEventListener('pointercancel', endDrag, true);
   }
 
-  // A horizontally scrolling row of artwork, the way the TV app shows Recently
-  // Added. items: [{ image, title, meta, badge, unwatched }]
   function shelf(items, label) {
     items = items || [];
     var out = '';
@@ -5151,8 +5565,6 @@
     return '<div style="font-family:' + T.font + ';text-align:left;">' + out + '</div>';
   }
 
-  // The popup's card config is baked when the tile renders, not when it opens,
-  // so the artwork can be in cache long before anyone taps.
   function prime(urls) {
     var seen = window._hemmaImgPrimed || (window._hemmaImgPrimed = new Set());
     var todo = [];
@@ -5174,15 +5586,9 @@
     else setTimeout(go, 1200);
   }
 
-  // Landscape media row: fanart with three caption lines beneath it.
-  // items: [{ image, when, title, summary, watched, titleMobile, sub }]
-  // titleMobile/sub are the phone's split of a title that reads as one line on
-  // a wide shelf - "Show \u00b7 Episode" becomes the show, then S01E02 - Episode.
   function mediaRow(items, label, opts) {
     items = items || [];
     opts = opts || {};
-    // Lead-in clears the popup's own 260ms fade / 300ms sheet slide, so the
-    // shelf builds inside a surface that has already arrived.
     var base = opts.base == null ? 0.08 : Number(opts.base);
     var step = opts.step == null ? 0.028 : Number(opts.step);
     var first = Number(opts.index) || 0;
@@ -5193,19 +5599,9 @@
         + esc(label) + '</div>';
     }
     out += '<style>'
-      // The cell owns the padding and the row has no gap, so a hover lights art
-      // AND caption together. A grid, not a scroller, so nothing hides off the
-      // edge. The gutter lives HERE: this card's extra_styles zero ha-card and
-      // #container padding with !important, beating any inline value.
       + '.hui-mrow{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));'
       +   'gap:26px 30px;padding:2px var(--hui-gutter, var(--hemma-popup-gutter, 26px)) 4px;}'
-      // Two across still gave each poster about 150px on a phone, which is
-      // narrower than the summary needs. One per row instead: the art gets
-      // the full width and the caption stops being a column of fragments.
       + '@media (max-width: 900px){.hui-mrow{grid-template-columns:repeat(2, minmax(0, 1fr));}}'
-      // One column has no border or plate to separate the items, so the gap is
-      // the only grouping cue - it has to beat the 10px under each fanart by
-      // enough that the caption reads as belonging to the art above it.
       + '@media (max-width: 640px){.hui-mrow{grid-template-columns:minmax(0, 1fr);'
       +   'gap:var(--hui-mrow-gap-phone, 32px);}}'
       + '.hui-m{min-width:0;padding:0;border-radius:18px;}'
@@ -5224,42 +5620,24 @@
       + '.hui-m .e{font-size:13px;color:' + T.ink2 + ';margin-top:2px;overflow:hidden;'
       +   'text-overflow:ellipsis;white-space:nowrap;}'
       + '.hui-m .hm,.hui-m .e{display:none;}'
-      // button-card's container is white-space:nowrap, which collapses the clamp
-      // to a single clipped line unless it is overridden here.
       + '.hui-m .s{font-size:14px;line-height:1.42;color:' + T.ink2 + ';margin-top:4px;'
       +   'white-space:normal !important;overflow-wrap:anywhere;'
       +   'display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;'
       +   'overflow:hidden;max-height:calc(1.42em * 5);}'
-      // Inset, not flush: at top:0 the fanart's 14px radius clipped the corner
-      // off the marker itself. The rim keeps it legible on bright artwork now
-      // that the fill is lighter.
       + '.hui-m .ck{position:absolute;top:8px;right:8px;width:26px;height:26px;'
       +   'border-radius:50%;background:rgba(0,0,0,.64);display:grid;'
       +   'place-items:center;box-shadow:0 1px 3px rgba(0,0,0,.30),'
       +   'inset 0 0 0 0.5px rgba(255,255,255,.18);}'
       + '.hui-m .ck svg{width:15px;height:15px;display:block;}'
-      // One column is where a cell gets the full width, and where four lines of
-      // summary per item turned the sheet into a wall of text. The episode line
-      // carries what the summary was standing in for.
       + '@media (max-width: 640px){'
       +   '.hui-m.split .h{display:none;}'
       +   '.hui-m .hm,.hui-m .e{display:block;}'
       +   '.hui-m .s{display:none;}'
-      // One column stacks the two shelves into one scroll, so the heading is
-      // the only thing saying where Movies stops and TV Shows starts.
       +   '.hui-mlabel{--hui-label-size:24px;--hui-label-gap:10px;'
       +     '--hui-label-weight:700;--hui-label-track:-0.02em;}}'
-      // A shelf heading must not outweigh the popup's own title, which is
-      // 22px - on a phone 24px read as the larger of the two.
       + '@media (max-width: 640px){.hui-mlabel{--hui-label-size:17px;}}'
-      // Entrance. Cells rise on the smart-tile curve and stagger; the caption
-      // lines follow with the mobile header's depth motion - a small scale up
-      // from a low origin on the sheet spring.
       + '@keyframes hui-m-in{from{opacity:0;transform:translateY(10px) scale(0.986);}'
       +   'to{opacity:1;transform:none;}}'
-      // The lines fade against a parent that is itself still fading, so the
-      // two multiply - starting at 0.2 keeps the text from double-dipping to
-      // invisible and reading as a second, slower entrance.
       + '@keyframes hui-tx-in{from{opacity:0.2;transform:scale(0.972) translateY(5px);}'
       +   'to{opacity:1;transform:none;}}'
       + '.hui-mlabel{font-size:var(--hui-label-size, 17px);'
@@ -5269,8 +5647,6 @@
       +   'transform-origin:0% 40%;'
       +   'animation:hui-tx-in var(--hui-tx-dur, .28s) cubic-bezier(0.32, 0.72, 0, 1) both;'
       +   'animation-delay:var(--hui-d, 0s);}'
-      // backwards, not both: a filled `to` keyframe outranks a normal
-      // declaration forever, which left .hui-m:hover unable to apply.
       + '.hui-m{animation:hui-m-in var(--hui-cell-dur, .28s) cubic-bezier(0.16, 1, 0.3, 1) backwards;'
       +   'animation-delay:var(--hui-d, 0s);}'
       + '.hui-m .w,.hui-m .h,.hui-m .hm,.hui-m .e,.hui-m .s{transform-origin:0% 40%;'
@@ -5278,8 +5654,6 @@
       + '.hui-m .w{animation-delay:calc(var(--hui-d, 0s) + .03s);}'
       + '.hui-m .h,.hui-m .hm{animation-delay:calc(var(--hui-d, 0s) + .045s);}'
       + '.hui-m .e,.hui-m .s{animation-delay:calc(var(--hui-d, 0s) + .06s);}'
-      // Held back until the bitmap is actually decoded, so a slow fanart
-      // dissolves onto its plate instead of popping in over a settled cell.
       + '.hui-m .fa img{opacity:0;transition:opacity .24s ease;}'
       + '.hui-m .fa.rdy img{opacity:1;}'
       + '@media (prefers-reduced-motion:reduce){'
@@ -5287,8 +5661,6 @@
       +   '.hui-m .s{animation:none;}'
       +   '.hui-m .fa img{transition:none;}}'
       + (opts.tiles
-          // The art is the tile: it fills the frame, and the caption is set on
-          // it over a gradient. Nothing here is a plate.
           ? '.hui-m{position:relative;border-radius:var(--hemma-popup-row-radius, 20px);'
           +   'overflow:hidden;box-shadow:var(--hemma-popup-plate-shadow, none);'
           +   'background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));}'
@@ -5297,8 +5669,6 @@
           + '.hui-m .fa img{width:100%;height:100%;object-fit:cover;display:block;}'
           + '.hui-m .ph{width:100%;height:100%;display:flex;align-items:center;'
           +   'justify-content:center;color:' + T.ink3 + ';font-size:26px;}'
-          // Lower half only, and eased rather than linear so the ramp does not
-          // draw a visible band across the middle of the frame.
           + '.hui-m .sc{position:absolute;inset:auto 0 0 0;height:48%;'
           +   'background:linear-gradient(to top,'
           +     'rgba(0,0,0,0.72) 0%,rgba(0,0,0,0.44) 38%,'
@@ -5313,8 +5683,6 @@
           + '.hui-m .cap .l2{font-size:13px;margin-top:1px;'
           +   'color:rgba(255,255,255,0.62);text-shadow:0 1px 3px rgba(0,0,0,0.5);'
           +   'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
-          // The rating is a badge, not a caption - both references put it in
-          // the corner where it reads at a glance without fighting the title.
           + '.hui-m .rt{position:absolute;top:10px;left:10px;'
           +   'font-size:12px;font-weight:600;color:#fff;'
           +   'padding:4px 9px;border-radius:999px;'
@@ -5322,8 +5690,6 @@
           +   'backdrop-filter:var(--hemma-popup-tile-backdrop, none);'
           +   '-webkit-backdrop-filter:var(--hemma-popup-tile-backdrop, none);}'
           + '.hui-m .ck{top:10px;right:10px;}'
-          // The same lift a light tile gets: the tile is a thing you can act
-          // on, so it answers the pointer like one.
           + '.hui-m{transition:transform .2s ease, box-shadow .2s ease;'
           +   'transform:scale(1);}'
           + '@media (hover:hover){'
@@ -5335,20 +5701,13 @@
           + '.hui-m .fa img{transition:transform .3s cubic-bezier(0.16, 1, 0.3, 1);}'
           + '.hui-m:active{transform:scale(0.99);}'
           + '.hui-m{cursor:pointer;}'
-          // The overlay covers the shelf and blurs it, so the detail reads as
-          // being in front of the row rather than replacing it.
           + '.hui-mov{position:fixed;inset:0;z-index:20;display:grid;'
           +   'align-items:start;justify-items:center;padding:24px;'
           +   'box-sizing:border-box;'
           // Blur only - the darkening read as a scrim on top of the popup's own.
-          /* Blur only. The popup's own scrim already saturates what is behind
-             it, so saturating again here put the room through it twice. */
           +   'backdrop-filter:blur(18px);'
           +   '-webkit-backdrop-filter:blur(18px);}'
           + '.hui-mov[hidden]{display:none;}'
-          /* Leaves the way the scrim does: the frost lifts and the card settles
-             back a touch, over one short beat. Dismissing was instant, which
-             read as the card being cut rather than closed. */
           + '.hui-mov{transition:opacity .19s ease,'
           +   'backdrop-filter .19s ease,-webkit-backdrop-filter .19s ease;}'
           + '.hui-mov.hui-closing{opacity:0;'
@@ -5357,9 +5716,6 @@
           + '.hui-mdet{transition:transform .19s cubic-bezier(0.4, 0, 1, 1);}'
           + '.hui-mov.hui-closing .hui-mdet{transform:scale(0.97);}'
           + '.hui-mdet[hidden]{display:none;}'
-          /* The card and its Back button are one column, so the control sits
-             above the card and on its left edge rather than floating in the
-             overlay. Same disc as the filter overlay's back. */
           + '.hui-movin{width:min(760px, 100%);max-height:100%;min-height:0;'
           +   'display:flex;flex-direction:column;align-items:flex-start;gap:18px;}'
           + '.hui-mback{width:48px;height:48px;border-radius:50%;position:relative;'
@@ -5374,8 +5730,6 @@
           +   'scrollbar-width:none;'
           +   'border-radius:var(--hemma-popup-row-radius, 20px);'
           +   'background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));'
-          // Its own shadow, far softer than a plate's: the card sits under the
-          // header on a phone and a plate shadow read as a clipped edge there.
           +   'box-shadow:var(--hemma-popup-detail-shadow,'
           +   ' 0 10px 30px -22px rgba(0,0,0,0.45));'
           // The same depth entrance everything else uses.
@@ -5392,8 +5746,6 @@
           + '.hui-mdet .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}'
           + '.hui-mdet .c{font-size:12px;font-weight:600;color:' + T.ink2 + ';'
           +   'background:' + T.fill2 + ';border-radius:999px;padding:5px 10px;}'
-          // white-space inherits too, and the shelf's captions set nowrap:
-          // the summary ran off the card on one line instead of wrapping.
           + '.hui-mdet .t,.hui-mdet .s,.hui-mdet .c{white-space:normal;'
           +   'overflow:visible;text-overflow:clip;}'
           + '.hui-mdet .s{overflow-wrap:anywhere;'
@@ -5402,18 +5754,10 @@
           + '@keyframes hemma-plate-in{'
           +   'from{opacity:0;transform:perspective(900px) translateZ(-70px);}'
           +   'to{opacity:1;transform:perspective(900px) translateZ(0);}}'
-          // The tiles arrive together, coming forward - the same depth entrance
-          // the plates and the chrome use, so the popup reads as one object
-          // rather than a queue. Every delay is zeroed, including the ones the
-          // markup stamps per item.
           + '.hui-m{animation:hemma-plate-in var(--hui-cell-dur, .42s) '
           +   'cubic-bezier(0.16, 1, 0.3, 1) backwards;animation-delay:0s;}'
           + '.hui-mlabel{animation-delay:0s;}'
           + '.hui-m,.hui-mrow,.hui-mov{pointer-events:auto;}'
-          /* A real column width, not 1fr: a sheet cannot size itself to a shelf
-             whose columns are shares of a width it has not decided yet.
-             Re-stated after the base rule - a media query carries no extra
-             specificity. */
           + '.hui-mrow{grid-template-columns:'
           +   'repeat(var(--hui-cols, 3), var(--hui-tile-w, min(381px, (min(1260px, 94vw) - 116px) / 3)));}'
           + '@media (max-width: 900px){.hui-mrow{'
@@ -5425,17 +5769,10 @@
           +   '.hui-m,.hui-m:first-child{grid-column:auto;}}'
           : '')
       + '</style>';
-    /* Short shelves start at the gutter. Centering moved the tiles away from the
-       heading and the close control, which live in different subtrees - so
-       nothing could keep the three together. One shared edge, no arithmetic. */
     var nT = items.length;
     out += '<div class="hui-mrow"'
       + (opts.tiles ? ' style="--hui-cols:' + Math.min(nT, 3) + ';"' : '')
       + '>';
-    // Tile mode: the art IS the tile. Everything the item says is set over it,
-    // on a gradient rather than a plate - a caption plate under the art made
-    // each item two objects, and padding the art inside one tile left cover art
-    // that does not fill its frame, which reads as a mistake.
     if (opts.tiles) {
       items.forEach(function (it, i) {
         out += '<div class="hui-m" data-hemma-media="' + i + '"'
@@ -5446,9 +5783,6 @@
                 + 'onload="this.parentNode.classList.add(\'rdy\')" '
                 + 'onerror="this.onerror=null;this.style.display=\'none\'"/>'
               : '<div class="ph">\u25b6</div>')
-          // The scrim is the whole point of setting text on artwork: without it
-          // a title lands on whatever the frame happens to be and half of them
-          // are unreadable. Transparent to near-black over the lower half only.
           + '<div class="sc"></div>'
           + (it.rating ? '<div class="rt">' + esc(it.rating) + '</div>' : '')
           + (it.watched
@@ -5465,13 +5799,7 @@
           + '</div></div></div>';
       });
       out += '</div>';
-      // The detail lives in the same popup, not a second one: hemma-popup is a
-      // singleton, so opening another would replace this shelf rather than sit
-      // over it. An overlay inside the popup keeps the shelf behind, blurred,
-      // which is what "expands to the center" actually looks like.
       out += '<div class="hui-mov" hidden><div class="hui-movin">'
-        // The same back control the filter overlay uses, on the card's left
-        // edge rather than floating in the middle of the blur.
         + '<div class="hui-mback" role="button" aria-label="Back">'
         +   '<svg width="14" height="24" viewBox="0 0 14 24" fill="none"'
         +   ' style="margin-right:2px;pointer-events:none;">'
@@ -5526,9 +5854,6 @@
       out += '</div>';
     });
     out += '</div>';
-    // Same plate a row group gets, so a shelf can stand as its own widget in a
-    // popup that has dropped its pane. The frost rides this element, never a
-    // wrapper around it.
     if (opts.plate) {
       return '<div class="hui-plate" style="font-family:' + T.font + ';text-align:left;'
         + 'background:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));'
@@ -5551,15 +5876,7 @@
     }
     out += '<style>'
       + 'ha-card.disabled{pointer-events:auto!important;}'
-      // Content-sized and centered, like more-info's. A cap on a flex:1 1 0
-      // pill still filled the row, so the horizontal padding still could not
-      // show - the width has to come from the text. Wrap is a safety for a very
-      // narrow phone: five presets would rather stack than clip "Close".
       + '.hui-seg{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;}'
-      // Pills, and solid enough to read as controls: at the list fill (6%) they
-      // were ghosts on a bright photo. They sit under a control, so they are
-      // things you press, not a grouped list you read.
-      // flex:0 1 auto - sized by its label, allowed to shrink but never to grow.
       + '.hui-sg{flex:0 1 auto;text-align:center;'
       +   'font-size:14px;font-weight:500;'
       +   'padding:11px 13px;border-radius:var(--hemma-popup-seg-radius, 999px);'
@@ -5581,12 +5898,6 @@
     return '<div style="font-family:' + T.font + ';text-align:left;">' + out + '</div>';
   }
 
-  // A grab-anywhere control, the way Home does blinds: the body is the track,
-  // the fill is the value, no thumb.
-  // o: { value 0..100, svc, invert, icon, width, height }
-  // invert is the blind metaphor - 100 (open) is an EMPTY track and the fill
-  // grows down as it closes. The position maths is unchanged; only the fill's
-  // anchor moves.
   function slider(o) {
     o = o || {};
     var v = Math.max(0, Math.min(100, Number(o.value) || 0));
@@ -5617,8 +5928,6 @@
       + '.hui-sl-wrap{display:flex;justify-content:center;}'
       + '.hui-sl{position:relative;width:' + w + 'px;height:' + h + 'px;'
       +   'border-radius:var(--hemma-popup-control-radius, 37px);overflow:hidden;'
-      // Flat, not glass: no top highlight and no rim. Consistent with the
-      // inactive-tile material rather than the pill one.
       +   'background:var(--hemma-popup-slider-track, rgba(0,0,0,0.34));'
       +   'cursor:ns-resize;touch-action:none;user-select:none;-webkit-user-select:none;}'
       + '.hui-sl-fill{position:absolute;left:0;right:0;'
@@ -5643,8 +5952,6 @@
       + ';padding:2px 4px 0;text-align:left;">' + esc(text) + '</div>';
   }
 
-  // One cover taxonomy, read by both the tile template and the popup, so a
-  // blind can never fall back to a curtain glyph in one place and not the other.
   var COVER_KINDS = {
     curtain: { key: 'curtain', label: 'Curtains', open: 'curtain-open',         closed: 'curtain-closed' },
     blind:   { key: 'blind',   label: 'Blinds',   open: 'blinds-vertical-open', closed: 'blinds-vertical-closed' },
@@ -5669,10 +5976,6 @@
   };
 
 
-  /* The recorder keeps 2 days, so the watering CYCLE can only come from
-     long-term statistics, which survive the purge; history is the fallback and
-     usually only reaches the drying rate. Whatever cannot be established is
-     left unsaid rather than guessed. */
   var PLANT_CACHE_V = 1;
   function plantWater(node, entityId, dryPct) {
     if (!node || !entityId) return;
@@ -5720,8 +6023,6 @@
     node.style.opacity = txt ? '1' : '0';
   }
 
-  /* A watering is a jump upward that a drying curve cannot produce. The decay
-     after it gives the rate, and the rate gives the days left. */
   function readPlant(pts, dryPct) {
     pts = (pts || []).filter(function (p) { return p && isFinite(p.v) && p.t; })
       .sort(function (a, b) { return new Date(a.t) - new Date(b.t); });
@@ -5733,8 +6034,6 @@
     }
     var bits = [];
     if (watered) {
-      // Calendar days, not 24-hour blocks: statistics are hourly, so a watering
-      // 23.9 hours ago would otherwise read as "today".
       var d0 = new Date(); d0.setHours(0, 0, 0, 0);
       var dw = new Date(ms(watered)); dw.setHours(0, 0, 0, 0);
       var days = Math.round((d0 - dw) / 86400000);
@@ -5751,10 +6050,6 @@
         var perDay = drop / spanD;
         var floorPct = isFinite(dryPct) ? dryPct : 20;
         var left = (last.v - floorPct) / perDay;
-        // The condition line above is the verdict, so this says what to DO - a
-        // plant can be healthy and due for water at once, and a second judgment
-        // reads as the popup contradicting itself. Forecast only: once it is
-        // actually due, the line above already says so.
         if (left >= 1 && left < 60) {
           bits.push('dry in about ' + Math.round(left)
             + (Math.round(left) === 1 ? ' day' : ' days'));
@@ -5764,27 +6059,18 @@
     return bits.join(' · ');
   }
 
-  window._hemmaUI = { hero: hero, headline: headline, group: group, legend: legend, note: note, shelf: shelf, mediaRow: mediaRow, segments: segments, slider: slider, icon: icon, esc: esc, prime: prime, plantWater: plantWater, tokens: T, v: 144 };
+  window._hemmaUI = { hero: hero, headline: headline, group: group, legend: legend, note: note, shelf: shelf, mediaRow: mediaRow, segments: segments, slider: slider, icon: icon, esc: esc, prime: prime, plantWater: plantWater, tokens: T, v: 146 };
 })();
-// ── Notification center ──────────────────────────────────────────────────────
-// History comes from the logbook, so a fresh install has a populated bell with
-// no automations and no helper to set up. Standing conditions (updates, low
-// battery, restart pending) are not events at all and are read live instead.
 (function () {
   if (window._hemmaNotify) return;
 
   var HOURS = 24;
   var MAX_ROWS = 40;
-  // Two integrations on one physical lock each report it, so the same line
-  // arrives twice a second apart. Collapse identical labels landing close
-  // together, whichever entity produced them.
   var DEDUPE_MS = 5 * 60 * 1000;
   // One flapping device must not be able to fill the panel on its own.
   var PER_ENTITY_MAX = 3;
   var POLL_MS = 60000;
   var KEY = 'hemma_notify_read_v1';
-  // true: an app-icon badge carrying the number. false: Apple's bell.badge,
-  // which is a bare dot drawn into the glyph itself.
   var COUNT_IN_BADGE = true;
 
   function iconUrl(name) {
@@ -5795,7 +6081,61 @@
   function ha() { return document.querySelector('home-assistant'); }
   function hassOf() { var h = ha(); return h && h.hass; }
 
+  var READ_ENTITY = 'input_datetime.hemma_notifications_read';
+
+  function readEntityId() {
+    if (window.HEMMA_NOTIFY_READ_ENTITY) return window.HEMMA_NOTIFY_READ_ENTITY;
+    var h = hassOf();
+    if (h && h.states && h.states[READ_ENTITY]) return READ_ENTITY;
+    return null;
+  }
+
+  function sharedRead() {
+    var id = readEntityId();
+    if (!id) return null;
+    var h = hassOf();
+    var st = h && h.states && h.states[id];
+    if (!st) return null;
+    var ms;
+    if (id.indexOf('input_datetime.') === 0) {
+      var ts = st.attributes && Number(st.attributes.timestamp);
+      ms = isFinite(ts) ? ts * 1000 : NaN;
+    } else {
+      ms = parseFloat(st.state);
+    }
+    if (!isFinite(ms)) return null;
+    if (ms < Date.now() - 90 * 864e5) return null;
+    return ms;
+  }
+
+  function writeShared(ts) {
+    var id = readEntityId();
+    if (!id) return false;
+    var h = hassOf();
+    if (!h || !h.callService) return false;
+    var dom = String(id).split('.')[0];
+    try {
+      if (dom === 'input_datetime') {
+        h.callService('input_datetime', 'set_datetime',
+          { entity_id: id, timestamp: Math.round(ts / 1000) });
+      } else if (dom === 'input_text') {
+        h.callService('input_text', 'set_value',
+          { entity_id: id, value: String(ts) });
+      } else if (dom === 'input_number') {
+        h.callService('input_number', 'set_value', { entity_id: id, value: ts });
+      } else {
+        return false;
+      }
+    } catch (e) { return false; }
+    return true;
+  }
+
+  var _sealedAt = 0;
+
   function watermark() {
+    var shared = sharedRead();
+    if (shared !== null) return Math.max(shared, _sealedAt);
+    if (_sealedAt) return _sealedAt;
     try {
       var v = parseFloat(localStorage.getItem(KEY));
       if (isFinite(v)) return v;
@@ -5807,11 +6147,25 @@
   }
 
   function setWatermark(ts) {
+    _sealedAt = ts;
+    if (writeShared(ts)) return;
     try { localStorage.setItem(KEY, String(ts)); } catch (e) {}
   }
 
   function nameOf(st) {
     return (st && st.attributes && st.attributes.friendly_name) || (st && st.entity_id) || '';
+  }
+
+  function tidyName(n) {
+    var s = String(n || '').trim().replace(/\s+/g, ' ');
+    var out = s.replace(/\s+(sensor|contact)$/i, '');
+    var w = out.split(' ');
+    while (w.length > 1
+      && w[w.length - 1].toLowerCase() === w[w.length - 2].toLowerCase()) {
+      w.pop();
+    }
+    out = w.join(' ');
+    return out || s;
   }
 
   function dc(st) {
@@ -5829,8 +6183,6 @@
     return d === 1 ? 'Yesterday' : d + ' days ago';
   }
 
-  // ── Catalog ────────────────────────────────────────────────────────────────
-  // Which entities are worth a line, and what that line says.
 
   var ALARM_WORD = {
     armed_home: 'Alarm armed (Home)',
@@ -5845,12 +6197,56 @@
   var VACUUM_BUSY = { cleaning: 1, returning: 1 };
   var VACUUM_DONE = { docked: 1, idle: 1 };
 
-  // device_class "running" is add-ons and services on a normal install, never
-  // white goods, so an appliance has to be named rather than detected.
+  // Every category is on unless a dashboard turns it off.
+  function on(type) {
+    var t = window.HEMMA_NOTIFY_TYPES;
+    return !t || t[type] !== false;
+  }
+
   function appliances() {
     var list = window.HEMMA_NOTIFY_APPLIANCES;
-    return Array.isArray(list) ? list.filter(Boolean) : [];
+    if (!Array.isArray(list)) return [];
+    return list.filter(Boolean).map(function (a) {
+      return typeof a === 'string' ? { entity: a } : a;
+    }).filter(function (a) { return a && a.entity; });
   }
+
+  function applianceFor(id) {
+    var all = appliances();
+    for (var i = 0; i < all.length; i++) if (all[i].entity === id) return all[i];
+    return null;
+  }
+
+  function minutesLeft(st) {
+    if (!st) return null;
+    var a = st.attributes || {};
+    if (a.device_class === 'timestamp') {
+      var t = Date.parse(st.state);
+      if (!isFinite(t)) return null;
+      return Math.max(0, Math.round((t - Date.now()) / 60000));
+    }
+    var n = parseFloat(st.state);
+    if (!isFinite(n)) return null;
+    var u = String(a.unit_of_measurement || '').toLowerCase();
+    if (u === 's' || u === 'sec' || u === 'seconds') return Math.round(n / 60);
+    if (u === 'h' || u === 'hr' || u === 'hours') return Math.round(n * 60);
+    return Math.round(n);
+  }
+
+  var PLANT_WORD = {
+    'moisture:Low': 'needs water',
+    'moisture:High': 'has been overwatered',
+    'conductivity:Low': 'needs feeding',
+    'conductivity:High': 'has too much fertilizer',
+    'illuminance:Low': 'needs more light',
+    'illuminance:High': 'is getting too much light',
+    'dli:Low': 'needs more light',
+    'dli:High': 'is getting too much light',
+    'temperature:Low': 'is too cold',
+    'temperature:High': 'is too warm',
+    'humidity:Low': 'is in air that is too dry',
+    'humidity:High': 'is in air that is too humid',
+  };
 
   var APPLIANCE_DONE = /^(off|idle|finished|complete|completed|standby|end|ready)$/i;
   var APPLIANCE_BUSY = /^(on|run|running|active|washing|rinsing|spinning|drying|printing|busy)$/i;
@@ -5866,14 +6262,15 @@
   // Entities whose past matters. Everything else is read from current state.
   function watched(hass) {
     var out = [];
-    var appl = appliances();
+    var appl = appliances().map(function (a) { return a.entity; });
     Object.keys(hass.states).forEach(function (id) {
       var st = hass.states[id];
-      if (id.indexOf('lock.') === 0) return void out.push(id);
-      if (id.indexOf('alarm_control_panel.') === 0) return void out.push(id);
-      if (id.indexOf('vacuum.') === 0) return void out.push(id);
-      if (isDoorbell(id, st)) return void out.push(id);
-      if (appl.indexOf(id) !== -1) return void out.push(id);
+      if (on('locks') && id.indexOf('lock.') === 0) return void out.push(id);
+      if (on('alarm') && id.indexOf('alarm_control_panel.') === 0) return void out.push(id);
+      if (on('vacuum') && id.indexOf('vacuum.') === 0) return void out.push(id);
+      if (on('doorbell') && isDoorbell(id, st)) return void out.push(id);
+      if (on('people') && id.indexOf('person.') === 0) return void out.push(id);
+      if (on('appliances') && appl.indexOf(id) !== -1) return void out.push(id);
     });
     return out;
   }
@@ -5885,9 +6282,32 @@
     var name = entry.name || nameOf(st);
 
     if (id.indexOf('lock.') === 0) {
-      if (s === 'locked') return { label: name + ' locked', icon: 'lock-fill', tone: 'good' };
-      if (s === 'unlocked') return { label: name + ' unlocked', icon: 'lock-open-fill', tone: 'warn' };
-      if (s === 'jammed') return { label: name + ' jammed', icon: 'exclamation', tone: 'bad' };
+      var lk = { opens: ['hemma_badge_lock_group', 'hemma_popup_lock'] };
+      if (s === 'locked') return { label: name + ' locked', icon: 'lock-fill', tone: 'good', opens: lk.opens };
+      if (s === 'unlocked') return { label: name + ' unlocked', icon: 'lock-open-fill', tone: 'warn', opens: lk.opens };
+      if (s === 'jammed') return { label: name + ' jammed', icon: 'exclamation', tone: 'bad', opens: lk.opens };
+      return null;
+    }
+
+    if (id.indexOf('person.') === 0) {
+      var AWAY = 'var(--hemma-color-blue, #0A84FF)';
+      var pic = st && st.attributes && st.attributes.entity_picture;
+      var who = {
+        once: 'person:' + name, icon: 'person',
+        image: pic || undefined, imageFit: 'cover',
+      };
+      if (s === 'home') {
+        return { label: name + ' arrived', tone: 'good', icon: who.icon,
+          image: who.image, imageFit: who.imageFit, once: who.once };
+      }
+      if (s === 'not_home') {
+        return { label: name + ' left', tone: AWAY, icon: who.icon,
+          image: who.image, imageFit: who.imageFit, once: who.once };
+      }
+      if (s && s !== 'unknown' && s !== 'unavailable') {
+        return { label: name + ' is at ' + s, tone: AWAY, icon: who.icon,
+          image: who.image, imageFit: who.imageFit, once: who.once };
+      }
       return null;
     }
 
@@ -5915,9 +6335,11 @@
       return { label: (who || name) + ' rang', icon: 'doorbell', tone: 'accent' };
     }
 
-    if (appliances().indexOf(id) !== -1) {
-      if (APPLIANCE_DONE.test(s) && APPLIANCE_BUSY.test(prev || '')) {
-        return { label: name + ' finished', icon: 'default', tone: 'good' };
+    var appl = applianceFor(id);
+    if (appl) {
+      var done = appl.done ? new RegExp('^' + appl.done + '$', 'i') : APPLIANCE_DONE;
+      if (done.test(s) && APPLIANCE_BUSY.test(prev || '')) {
+        return { label: (appl.name || name) + ' finished', icon: 'default', tone: 'good' };
       }
       return null;
     }
@@ -5925,8 +6347,6 @@
     return null;
   }
 
-  // ── Live conditions ────────────────────────────────────────────────────────
-  // Not events: these are true right now, and their age is last_changed.
 
   function standing(hass) {
     var rows = [];
@@ -5954,7 +6374,7 @@
       }, 0);
     };
 
-    if (updates.length) {
+    if (updates.length && on('updates')) {
       rows.push({
         id: 'hemma:updates',
         when: newest(updates) || Date.now(),
@@ -5964,24 +6384,22 @@
         icon: 'updates',
         tone: 'accent',
         entity: updates[0].entity_id,
-        opens: 'updates',
+        opens: ['hemma_updates', 'hemma_popup_updates'],
       });
     }
 
-    if (restarts.length) {
+    if (restarts.length && on('restart')) {
       rows.push({
         id: 'hemma:restart',
         when: newest(restarts) || Date.now(),
         label: 'Restart pending',
-        // What the restart is FOR. The bare integration name read as a stray
-        // technical word sitting under a sentence.
         sub: restarts.length === 1
           ? 'Finishes the ' + nameOf(restarts[0]).replace(/\s+Update$/i, '') + ' update'
           : 'Finishes ' + restarts.length + ' updates',
         icon: 'exclamation',
         tone: 'warn',
         entity: restarts[0].entity_id,
-        opens: 'updates',
+        opens: ['hemma_updates', 'hemma_popup_updates'],
       });
     }
 
@@ -5997,7 +6415,7 @@
         low.push({ st: st, pct: null });
       }
     });
-    if (low.length) {
+    if (low.length && on('battery')) {
       low.sort(function (a, b) { return (a.pct == null ? -1 : a.pct) - (b.pct == null ? -1 : b.pct); });
       rows.push({
         id: 'hemma:battery',
@@ -6009,6 +6427,162 @@
         icon: 'battery',
         tone: 'bad',
         entity: low.length === 1 ? low[0].st.entity_id : null,
+        opens: ['hemma_battery', 'hemma_popup_battery'],
+      });
+    }
+
+    var SAFETY = {
+      moisture: { word: 'Water detected', icon: 'exclamation' },
+      smoke: { word: 'Smoke detected', icon: 'exclamation' },
+      gas: { word: 'Gas detected', icon: 'gas' },
+      carbon_monoxide: { word: 'Carbon monoxide detected', icon: 'exclamation' },
+      safety: { word: 'Safety alert', icon: 'exclamation' },
+    };
+    if (on('safety')) {
+      ids.forEach(function (id) {
+        if (id.indexOf('binary_sensor.') !== 0) return;
+        var st = S[id];
+        if (st.state !== 'on') return;
+        var kind = SAFETY[dc(st)];
+        if (!kind) return;
+        rows.push({
+          id: 'hemma:safety:' + id,
+          when: Date.parse(st.last_changed || '') || Date.now(),
+          label: kind.word,
+          sub: nameOf(st),
+          icon: kind.icon,
+          tone: 'bad',
+          entity: id,
+          rank: 1,
+        });
+      });
+    }
+
+    var openMins = Number(window.HEMMA_NOTIFY_OPEN_MINUTES);
+    if (!isFinite(openMins)) openMins = 10;
+    if (on('doors') && openMins > 0) {
+      ids.forEach(function (id) {
+        if (id.indexOf('binary_sensor.') !== 0) return;
+        var st = S[id];
+        if (st.state !== 'on') return;
+        var kind = dc(st);
+        if (kind !== 'door' && kind !== 'window' && kind !== 'garage_door'
+          && kind !== 'opening') return;
+        var since = Date.parse(st.last_changed || '');
+        if (!isFinite(since)) return;
+        var mins = Math.round((Date.now() - since) / 60000);
+        if (mins < openMins) return;
+        rows.push({
+          id: 'hemma:open:' + id,
+          when: since,
+          label: tidyName(nameOf(st)) + ' is open',
+          sub: 'For ' + (mins < 60 ? mins + ' min'
+            : Math.round(mins / 60) + (mins < 120 ? ' hr' : ' hrs')),
+          ongoing: true,
+          icon: kind === 'window' ? 'window-shade-open' : 'door-open',
+          tone: 'warn',
+          entity: id,
+          // Door and window sensors sit beside their lock in that popup.
+          opens: ['hemma_badge_lock_group', 'hemma_popup_lock'],
+        });
+      });
+    }
+
+    var co2Limit = Number(window.HEMMA_NOTIFY_CO2);
+    if (!isFinite(co2Limit)) co2Limit = 1800;
+    if (on('air') && co2Limit > 0) {
+      var CO2_KEY = 'hemma_co2_since';
+      var co2Since = {};
+      try { co2Since = JSON.parse(localStorage.getItem(CO2_KEY) || '{}') || {}; }
+      catch (e) { co2Since = {}; }
+      var co2Now = {};
+      var plants = ids.filter(function (id) { return id.indexOf('plant.') === 0; })
+        .map(function (id) { return id.slice(6); });
+      ids.forEach(function (id) {
+        if (id.indexOf('sensor.') !== 0) return;
+        var st = S[id];
+        if (dc(st) !== 'carbon_dioxide') return;
+        var bare = id.slice(7);
+        if (plants.some(function (n) { return bare.indexOf(n) === 0; })) return;
+        var ppm = parseFloat(st.state);
+        if (!isFinite(ppm) || ppm < co2Limit) return;
+        var bad = ppm >= 2000;
+        var crossed = Number(co2Since[id]);
+        if (!isFinite(crossed)) crossed = Date.now();
+        co2Now[id] = crossed;
+        rows.push({
+          id: 'hemma:co2:' + id,
+          when: crossed,
+          label: 'Carbon dioxide is high',
+          sub: (function () {
+            var where = nameOf(st)
+              .replace(/\s*(carbon dioxide|co2)\s*/gi, ' ')
+              .replace(/\s+/g, ' ').trim();
+            return Math.round(ppm) + ' ppm' + (where ? ' in ' + where : '');
+          })(),
+          icon: 'co2-fill',
+          tone: bad ? 'bad' : 'warn',
+          entity: id,
+          opens: ['hemma_badge_air_quality'],
+          rank: bad ? 1 : 0,
+        });
+      });
+      try {
+        if (JSON.stringify(co2Now) !== JSON.stringify(co2Since)) {
+          localStorage.setItem(CO2_KEY, JSON.stringify(co2Now));
+        }
+      } catch (e) {}
+    }
+
+    if (on('plants')) {
+      var midnight = new Date();
+      midnight.setHours(0, 0, 0, 0);
+      ids.forEach(function (id) {
+        if (id.indexOf('plant.') !== 0) return;
+        var st = S[id];
+        if (st.state !== 'problem') return;
+        var probs = (st.attributes || {}).problems;
+        if (!Array.isArray(probs) || !probs.length) return;
+        // Watering is the one you can act on standing there, so it leads.
+        var first = probs.filter(function (x) { return x.sensor_type === 'moisture'; })[0]
+          || probs[0];
+        var word = PLANT_WORD[first.sensor_type + ':' + first.status];
+        if (!word) return;
+        var soil = parseFloat(first.current);
+        rows.push({
+          id: 'hemma:plant:' + id,
+          when: Math.max(Date.parse(st.last_changed || '') || 0, midnight.getTime()),
+          label: nameOf(st) + ' ' + word,
+          sub: (first.sensor_type === 'moisture' && isFinite(soil))
+            ? 'Soil at ' + Math.round(soil) + '%' : null,
+          icon: 'plant',
+          tone: 'warn',
+          entity: id,
+          opens: ['hemma_plant', 'hemma_popup_plant'],
+        });
+      });
+    }
+
+    if (on('appliances')) {
+      appliances().forEach(function (a) {
+        var st = S[a.entity];
+        if (!st) return;
+        var done = a.done ? new RegExp('^' + a.done + '$', 'i') : APPLIANCE_DONE;
+        if (done.test(st.state)) return;
+        var left = a.remaining ? minutesLeft(S[a.remaining]) : null;
+        if (left == null) return;
+        rows.push({
+          id: 'hemma:appliance:' + a.entity,
+          when: Date.now(),
+          label: (a.name || nameOf(st)) + (left > 0 ? ' is running' : ' is finishing up'),
+          sub: left > 0
+            ? (left < 60 ? left + ' min left'
+               : Math.floor(left / 60) + ' hr ' + (left % 60) + ' min left')
+            : 'Almost done',
+          icon: 'default',
+          tone: 'accent',
+          entity: a.entity,
+        });
       });
     }
 
@@ -6036,9 +6610,11 @@
     _busy = fetch.catch(function () { return []; }).then(function (entries) {
       var prev = {};
       var events = [];
+      var asked = {};
+      ids.forEach(function (id) { asked[id] = 1; });
       (entries || []).forEach(function (e) {
         var id = e.entity_id;
-        if (!id) return;
+        if (!id || !asked[id]) return;
         var st = hass.states[id];
         var was = prev[id];
         prev[id] = String(e.state == null ? '' : e.state);
@@ -6054,7 +6630,11 @@
           sub: d.sub || null,
           icon: d.icon,
           tone: d.tone,
+          image: d.image,
+          imageFit: d.imageFit,
           entity: id,
+          opens: d.opens || null,
+          once: d.once || null,
         });
       });
 
@@ -6062,7 +6642,14 @@
 
       var kept = [];
       var perEntity = {};
+      var onlyOnce = {};
       events.forEach(function (e) {
+        if (e.once) {
+          if (onlyOnce[e.once]) return;
+          onlyOnce[e.once] = 1;
+          kept.push(e);
+          return;
+        }
         var n = (perEntity[e.entity] || 0);
         if (n >= PER_ENTITY_MAX) return;
         var dupe = kept.some(function (k) {
@@ -6073,11 +6660,11 @@
         kept.push(e);
       });
 
-      // Standing conditions are not events and never compete for a slot: they
-      // are true right now, which is the whole reason to show them.
       var room = Math.max(0, MAX_ROWS - live.length);
       _rows = live.concat(kept.slice(0, room))
-        .sort(function (a, b) { return b.when - a.when; });
+        .sort(function (a, b) {
+          return ((b.rank || 0) - (a.rank || 0)) || (b.when - a.when);
+        });
       _busy = null;
       announce();
       return _rows;
@@ -6091,20 +6678,29 @@
     return _rows.filter(function (r) { return r.when > w; }).length;
   }
 
-  // ── Bell badge ─────────────────────────────────────────────────────────────
-  // Written into the button rather than rendered by it: a button-card cannot
-  // await the logbook, and re-rendering the card to change a number would
-  // restart the chrome row's entrance.
 
   var _bells = [];
   var _lastCount = -1;
+
+  function mountCount(glyph) {
+    var root = glyph.getRootNode();
+    if (!root || !root.querySelector || !root.appendChild) return null;
+    var have = root.querySelector('.hemma-bell-count');
+    if (have) return have;
+    var span = document.createElement('span');
+    span.className = 'hemma-bell-count';
+    span.style.display = 'none';
+    root.appendChild(span);
+    return span;
+  }
 
   function findBells() {
     var out = [];
     (function walk(root, depth) {
       if (!root || depth > 14 || !root.querySelectorAll) return;
-      root.querySelectorAll('.hemma-bell-count').forEach(function (el) {
-        if (out.indexOf(el) === -1) out.push(el);
+      root.querySelectorAll('.hemma-bell').forEach(function (glyph) {
+        var el = mountCount(glyph);
+        if (el && out.indexOf(el) === -1) out.push(el);
       });
       root.querySelectorAll('*').forEach(function (el) {
         if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
@@ -6113,8 +6709,6 @@
     return out;
   }
 
-  // The walk crosses every shadow root on the page, so it runs only when the
-  // cache is actually empty or stale, never on a timer.
   function bells() {
     _bells = _bells.filter(function (el) { return el.isConnected; });
     if (!_bells.length) _bells = findBells();
@@ -6124,13 +6718,15 @@
   function announce() {
     var n = unread();
     var text = n > 99 ? '99+' : String(n);
-    var show = (n > 0 && COUNT_IN_BADGE) ? 'grid' : 'none';
-    var src = iconUrl(!COUNT_IN_BADGE && n > 0 ? 'bell-badge' : 'bell');
+    var inBadge = COUNT_IN_BADGE && !isPhone();
+    var show = (n > 0 && inBadge) ? 'grid' : 'none';
+    var src = iconUrl(!inBadge && n > 0 ? 'bell-badge' : 'bell');
     bells().forEach(function (el) {
       if (el.textContent !== text) el.textContent = text;
       if (el.style.display !== show) el.style.display = show;
       var glyph = el.parentNode && el.parentNode.querySelector('.hemma-bell');
       if (glyph && glyph.getAttribute('src') !== src) glyph.setAttribute('src', src);
+      if (glyph) glyph.classList.toggle('badged', !inBadge && n > 0);
     });
     if (n !== _lastCount) {
       _lastCount = n;
@@ -6146,6 +6742,19 @@
       fresh: _rows.filter(function (r) { return r.when > w; }),
       old: _rows.filter(function (r) { return r.when <= w; }),
     };
+  }
+
+  function configure(cfg) {
+    cfg = cfg || {};
+    if (cfg.types !== undefined) window.HEMMA_NOTIFY_TYPES = cfg.types;
+    if (cfg.appliances !== undefined) window.HEMMA_NOTIFY_APPLIANCES = cfg.appliances;
+    if (cfg.battery !== undefined) window.HEMMA_NOTIFY_BATTERY = cfg.battery;
+    if (cfg.open_minutes !== undefined) window.HEMMA_NOTIFY_OPEN_MINUTES = cfg.open_minutes;
+    if (cfg.co2 !== undefined) window.HEMMA_NOTIFY_CO2 = cfg.co2;
+    if (cfg.read_entity !== undefined) {
+      window.HEMMA_NOTIFY_READ_ENTITY = cfg.read_entity || null;
+    }
+    return true;
   }
 
   function sections() {
@@ -6164,14 +6773,16 @@
         icon: r.icon,
         iconTone: r.tone,
         label: r.label,
-        sub: r.sub ? [r.sub, ago(r.when)] : ago(r.when),
+        // Something still happening says how long, not when it started as well.
+        sub: r.ongoing ? r.sub : (r.sub ? [r.sub, ago(r.when)] : ago(r.when)),
         value: r.value || null,
         entity: r.entity || null,
+        image: r.image,
+        imageFit: r.imageFit,
+        tappable: !!(r.entity || r.opens),
       };
     };
 
-    // labelInside puts the caption on the row inset rather than floating it
-    // above a plate, which is what it would be doing with no plate there.
     var opts = { labelInside: true };
     var out = '';
     if (g.fresh.length) out += UI.group(g.fresh.map(toRow), g.old.length ? 'New' : null, null, opts);
@@ -6179,9 +6790,6 @@
     return out;
   }
 
-  // Rows whose tap is not a more-info are retagged in the DOM: group() has no
-  // hook for a custom action, but it has already drawn the chevron and the
-  // hover, so only the tap target changes hands.
   function paint(root) {
     if (!root) return;
     var g = ordered();
@@ -6195,50 +6803,137 @@
     }
   }
 
-  // The card that already knows how to open the Updates popup. Re-firing its
-  // own action is the only way to get that popup with its templates evaluated
-  // in their own card's context; rebuilding the config here would be a copy
-  // that drifts.
-  function updatesCard() {
+  function templatesOf(cfg) {
+    var t = cfg && cfg.template;
+    return Array.isArray(t) ? t : (t ? [t] : []);
+  }
+
+  function wants(cfg, names, entityId) {
+    var list = templatesOf(cfg);
+    var hit = names.some(function (n) { return list.indexOf(n) !== -1; });
+    if (!hit) return false;
+    if (!entityId) return true;
+    var v = cfg.variables || {};
+    return cfg.entity === entityId
+      || Object.keys(v).some(function (k) { return v[k] === entityId; });
+  }
+
+  function cardWithTemplate(names, entityId) {
     var out = null;
-    (function walk(root, depth) {
-      if (!root || out || depth > 14 || !root.querySelectorAll) return;
-      root.querySelectorAll('button-card').forEach(function (el) {
-        if (out) return;
-        var t = el._config && el._config.template;
-        var list = Array.isArray(t) ? t : (t ? [t] : []);
-        if (list.indexOf('hemma_updates') !== -1
-          || list.indexOf('hemma_popup_updates') !== -1) out = el;
-      });
-      root.querySelectorAll('*').forEach(function (el) {
-        if (!out && el.shadowRoot) walk(el.shadowRoot, depth + 1);
-      });
-    })(document, 0);
+    var scan = function (id) {
+      (function walk(root, depth) {
+        if (!root || out || depth > 14 || !root.querySelectorAll) return;
+        root.querySelectorAll('button-card').forEach(function (el) {
+          if (!out && wants(el._config, names, id)) out = el;
+        });
+        root.querySelectorAll('*').forEach(function (el) {
+          if (!out && el.shadowRoot) walk(el.shadowRoot, depth + 1);
+        });
+      })(document, 0);
+    };
+    if (entityId) scan(entityId);
+    if (!out) scan(null);
     return out;
   }
 
-  function openTarget(what, fallbackEntity) {
-    if (what === 'updates') {
-      var card = updatesCard();
-      var node = card && ((card.shadowRoot && card.shadowRoot.querySelector('ha-card')) || card);
-      if (node) {
-        ['pointerdown', 'pointerup', 'click'].forEach(function (type) {
-          var ev;
-          try {
-            ev = new PointerEvent(type, { bubbles: true, composed: true, cancelable: true });
-          } catch (e) {
-            ev = new MouseEvent(type, { bubbles: true, composed: true, cancelable: true });
-          }
-          node.dispatchEvent(ev);
+  function cardFromConfig(names, entityId) {
+    var h = hassOf();
+    if (!h || !h.callWS) return Promise.resolve(null);
+    var seg = (location.pathname || '').split('/').filter(Boolean);
+    var url = seg[0] || 'lovelace';
+    return h.callWS({ type: 'lovelace/config', url_path: url }).then(function (cfg) {
+      var found = null;
+      (function walk(cards) {
+        (cards || []).forEach(function (c) {
+          if (found || !c || typeof c !== 'object') return;
+          if (wants(c, names, entityId)) { found = c; return; }
+          walk(c.cards);
         });
-        return true;
+      })((cfg.views || []).reduce(function (a, v) {
+        return a.concat(v.cards || []);
+      }, []));
+      if (!found && entityId) {
+        (function walk(cards) {
+          (cards || []).forEach(function (c) {
+            if (found || !c || typeof c !== 'object') return;
+            if (wants(c, names, null)) { found = c; return; }
+            walk(c.cards);
+          });
+        })((cfg.views || []).reduce(function (a, v) {
+          return a.concat(v.cards || []);
+        }, []));
       }
+      if (!found) return null;
+      var el = document.createElement('button-card');
+      try { el.setConfig(JSON.parse(JSON.stringify(found))); } catch (e) { return null; }
+      el.hass = h;
+      el.style.cssText = 'position:fixed;left:-9999px;top:0;'
+        + 'width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(el);
+      return el;
+    }).catch(function () { return null; });
+  }
+
+  function tapCard(card, done) {
+    if (!card || typeof card._handleAction !== 'function' || !card._config) {
+      return done(false);
     }
-    if (fallbackEntity && window.hemmaPopup) {
-      window.hemmaPopup.moreInfo(fallbackEntity);
-      return true;
+    if (typeof card._isActionDoingSomething === 'function') {
+      try {
+        if (!card._isActionDoingSomething(card._stateObj, card._config.tap_action)) {
+          return done(false);
+        }
+      } catch (e) {}
     }
-    return false;
+    var settled = false;
+    var take = function (ev) {
+      var cfg = ev.detail && ev.detail.config;
+      var act = cfg && cfg[((ev.detail && ev.detail.action) || 'tap') + '_action'];
+      if (act && act.hemma_popup && window.hemmaPopup) {
+        // Only ours gets intercepted; anything else stays HA's to handle.
+        ev.stopPropagation();
+        window.hemmaPopup.open(act.hemma_popup);
+        return finish(true);
+      }
+      finish(false);
+    };
+    var finish = function (ok) {
+      if (settled) return;
+      settled = true;
+      card.removeEventListener('hass-action', take, true);
+      done(ok);
+    };
+    card.addEventListener('hass-action', take, true);
+    try {
+      card._handleAction({ detail: { action: 'tap' } }, { isIcon: false });
+    } catch (e) { return finish(false); }
+    // hass-action arrives a microtask later, so the miss cannot be decided yet.
+    setTimeout(function () { finish(false); }, 400);
+  }
+
+  function openTarget(what, fallbackEntity) {
+    // dataset stringifies an array, so a retagged row arrives comma-joined.
+    var names = Array.isArray(what) ? what
+      : (what ? String(what).split(',').map(function (n) { return n.trim(); })
+                .filter(Boolean)
+              : []);
+    var fall = function () {
+      if (fallbackEntity && window.hemmaPopup) window.hemmaPopup.moreInfo(fallbackEntity);
+    };
+    if (!names.length) return fall();
+    tapCard(cardWithTemplate(names, fallbackEntity), function (hit) {
+      if (hit) return;
+      cardFromConfig(names, fallbackEntity).then(function (el) {
+        if (!el) return fall();
+        // One frame for button-card to evaluate its config before the tap.
+        setTimeout(function () {
+          tapCard(el, function (ok) {
+            if (!ok) fall();
+            setTimeout(function () { if (el.parentNode) el.remove(); }, 1500);
+          });
+        }, 80);
+      });
+    });
   }
 
   function bindOpens(root, close) {
@@ -6272,10 +6967,9 @@
     announce();
   }
 
-  // The bell inverts while its panel is up, the same way the waveform and the
-  // settings dots do. Fill says active; the geometry never moves.
   function lift(anchor, on) {
     if (!anchor || !anchor.style) return;
+    if (isPhone()) return;
     if (on) {
       anchor.style.setProperty('--hemma-bell-fill', '#fff');
       anchor.style.setProperty('--hemma-bell-filter', 'brightness(0)');
@@ -6334,8 +7028,6 @@
       }
     }, 260);
 
-    // The sheet owns its own dismissal and emits nothing on close, so the seal
-    // waits on the attribute it toggles.
     var watch = setInterval(function () {
       if (el && el.hasAttribute('open')) return;
       clearInterval(watch);
@@ -6346,9 +7038,21 @@
 
   var _menu = null;
 
+
   function openMenu(anchor) {
+    var GLASS = window.hemmaMenuGlass;
     var card = anchor && anchor.shadowRoot && anchor.shadowRoot.querySelector('ha-card');
     var r = (card || anchor).getBoundingClientRect();
+    for (var up = anchor, i = 0; up && i < 6; i++) {
+      var rootNode = up.getRootNode && up.getRootNode();
+      up = rootNode && rootNode.host;
+      var tpl = up && up._config && up._config.template;
+      if (tpl && [].concat(tpl).indexOf('hemma_mobile_chrome') >= 0) {
+        var cap = up.shadowRoot && up.shadowRoot.querySelector('ha-card');
+        if (cap) r = cap.getBoundingClientRect();
+        break;
+      }
+    }
 
     var menu = document.createElement('div');
     _menu = menu;
@@ -6357,24 +7061,20 @@
     menu.setAttribute('role', 'dialog');
     Object.assign(menu.style, {
       position: 'fixed', zIndex: '99999', boxSizing: 'border-box',
-      width: 'min(392px, calc(100vw - 24px))',
-      padding: '0', borderRadius: '26px',
-      // No inner plate: the panel IS the surface, so the rows run to its edge
-      // and it clips them to its own radius. A plate inside it was a box in a
-      // box, and its square bottom corners cut across the panel's round ones.
+      width: 'max-content',
+      minWidth: '256px',
+      maxWidth: 'min(392px, calc(100vw - 24px))',
+      padding: '0',
       overflow: 'hidden',
-      background: 'var(--hemma-popup-pane, rgba(28,28,32,0.72))',
-      backdropFilter: 'blur(40px) saturate(170%)',
-      WebkitBackdropFilter: 'blur(40px) saturate(170%)',
-      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16),'
-        + ' inset 0 -1px 0 rgba(255,255,255,0.07),'
-        + ' 0 18px 48px rgba(0,0,0,0.34)',
-      color: '#fff',
-      opacity: '0',
-      transform: 'scale(0.92) translateY(-8px)',
-      transformOrigin: 'top right',
-      transition: 'opacity 200ms cubic-bezier(0.32,0.72,0,1),'
-        + ' transform 260ms cubic-bezier(0.32,0.72,0,1)',
+    });
+    GLASS.apply(menu);
+
+    var inner = document.createElement('div');
+    // Safari lets a descendant's background paint past a rounded parent's radius.
+    Object.assign(inner.style, {
+      opacity: '0', willChange: 'opacity',
+      borderRadius: 'inherit', overflow: 'hidden',
+      clipPath: 'inset(0 round ' + GLASS.radius + ')',
     });
 
     var head = document.createElement('div');
@@ -6382,11 +7082,6 @@
       display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
       gap: '12px', padding: '15px 16px 9px',
       fontFamily: 'var(--primary-font-family, system-ui)',
-    });
-    var title = document.createElement('div');
-    title.textContent = 'Notifications';
-    Object.assign(title.style, {
-      fontSize: '18px', fontWeight: '600', letterSpacing: '-0.015em',
     });
     var clear = document.createElement('button');
     clear.type = 'button';
@@ -6398,57 +7093,75 @@
     });
     clear.onclick = function (e) { e.stopPropagation(); seal(); menu._close(); };
     clear.style.display = unread() ? 'block' : 'none';
-    head.appendChild(title);
     head.appendChild(clear);
-    menu.appendChild(head);
+    head.style.justifyContent = 'flex-end';
+    head.style.padding = '11px calc(var(--hemma-popup-row-pad-x, 16px) + 8px) 5px';
+    if (unread()) inner.appendChild(head);
 
     var body = document.createElement('div');
     Object.assign(body.style, {
       maxHeight: 'min(62vh, 560px)', overflowY: 'auto', overscrollBehavior: 'contain',
-      paddingBottom: '8px',
     });
-    // A cut list ends on the NEXT row's divider, which promises a row that is
-    // not there. Dissolving the last few pixels says "more below" instead of
-    // drawing a line under nothing, and it holds wherever the cut lands -
-    // these rows are not a uniform height, so no max-height can align to them.
-    var FADE = 'linear-gradient(to bottom, #000 calc(100% - 26px), transparent 100%)';
     var fade = function () {
       var over = body.scrollHeight - body.clientHeight;
-      var atEnd = body.scrollTop >= over - 1;
-      var on = over > 4 && !atEnd;
-      var v = on ? FADE : '';
+      var top = over > 4 && body.scrollTop > 1;
+      var bot = over > 4 && body.scrollTop < over - 1;
+      var v = (top || bot)
+        ? 'linear-gradient(to bottom, '
+          + (top ? 'transparent 0, #000 26px' : '#000 0')
+          + ', '
+          + (bot ? '#000 calc(100% - 26px), transparent 100%' : '#000 100%')
+          + ')'
+        : '';
       if (body.style.webkitMaskImage !== v) {
         body.style.webkitMaskImage = v;
         body.style.maskImage = v;
       }
     };
     body.addEventListener('scroll', fade, { passive: true });
+    GLASS.lockScroll(menu, body);
     // Custom properties never land through Object.assign.
     body.style.setProperty('--hemma-popup-row-fill', 'transparent');
+    body.style.setProperty('--hemma-popup-row-hover', 'rgba(255,255,255,0.10)');
+    body.style.setProperty('--hemma-popup-chev-gap', '16px');
+    body.style.setProperty('--hemma-popup-group-label-gap', '4px');
+    var U_MIN = 10, U_VW = 0.575, U_MAX = 11.5;
+    body.style.setProperty('--hemma-popup-row-label-weight', '600');
+    body.style.setProperty('--hemma-popup-sub-color', 'rgba(255,255,255,0.62)');
+    [['--hemma-popup-row-label-size', 1.53],
+     ['--hemma-popup-sub-size', 1.25],
+     ['--hemma-popup-row-min', 4.68],
+     ['--hemma-popup-icon-tile', 2.61],
+     ['--hemma-popup-lead-plate', 2.88],
+     ['--hemma-popup-group-label-size', 1.35]].forEach(function (p) {
+      var k = p[1];
+      body.style.setProperty(p[0], 'clamp(' + (U_MIN * k).toFixed(2) + 'px, '
+        + (U_VW * k).toFixed(4) + 'vw, ' + (U_MAX * k).toFixed(2) + 'px)');
+    });
     body.style.setProperty('--hemma-popup-row-radius', '0px');
     body.innerHTML = sections();
-    menu.appendChild(body);
+    inner.appendChild(body);
+    menu.appendChild(inner);
     document.body.appendChild(menu);
     fade();
     paint(body);
-    bindOpens(body, function () { menu._close(); });
+    bindOpens(body, null);
 
     var w = menu.offsetWidth;
-    menu.style.top = Math.round(r.bottom + 10) + 'px';
+    menu.style.top = GLASS.dropTop(r, 10) + 'px';
     menu.style.left = Math.round(
       Math.max(12, Math.min(r.right - w, window.innerWidth - w - 12))
     ) + 'px';
-    requestAnimationFrame(function () {
-      menu.style.opacity = '1';
-      menu.style.transform = 'scale(1) translateY(0)';
-    });
+
+    inner.style.opacity = '1';
+    inner.style.willChange = 'auto';
+    GLASS.enter(menu);
 
     var onKey = function (e) { if (e.key === 'Escape') menu._close(); };
     var onAway = function (e) {
       var path = (e.composedPath && e.composedPath()) || [e.target];
       if (path.indexOf(menu) !== -1) return;
-      // contains() cannot cross a shadow boundary, so the bell inside its own
-      // card read as "outside" and every tap on it closed and reopened.
+      // contains() cannot cross a shadow boundary.
       if (anchor && path.indexOf(anchor) !== -1) return;
       for (var i = 0; i < path.length; i++) {
         var n = path[i];
@@ -6458,7 +7171,7 @@
       }
       menu._close();
     };
-    var idle = setTimeout(function () { menu._close(); }, 20000);
+    var idle = setTimeout(function () { menu._idle = true; menu._close(); }, 20000);
 
     menu._close = function () {
       if (_menu !== menu) return;
@@ -6468,14 +7181,8 @@
       document.removeEventListener('pointerdown', onAway, true);
       window.removeEventListener('resize', menu._close);
       lift(anchor, false);
-      seal();
-      // Out faster than in, and on a curve that starts quickly: a menu that
-      // leaves on the same easing it arrived with reads as sluggish.
-      menu.style.transition = 'opacity 150ms cubic-bezier(0.4,0,1,1),'
-        + ' transform 170ms cubic-bezier(0.4,0,1,1)';
-      menu.style.opacity = '0';
-      menu.style.transform = 'scale(0.95) translateY(-6px)';
-      setTimeout(function () { if (menu.parentNode) menu.remove(); }, 190);
+      if (!menu._idle) seal();
+      GLASS.exit(menu, function () { if (menu.parentNode) menu.remove(); });
     };
 
     setTimeout(function () {
@@ -6486,22 +7193,59 @@
   }
 
   function open(anchor) {
-    // Toggling closes SYNCHRONOUSLY. Deciding it after the logbook answered
-    // let a second tap open a fresh panel beside the one it should have shut.
     if (_menu) { _menu._close(); return; }
     var pop = window.hemmaPopup && window.hemmaPopup.element;
     if (pop && pop.hasAttribute('open')) { window.hemmaPopup.close(); return; }
 
-    var phone = isPhone();
-    var show = function () { if (phone) openSheet(anchor); else openMenu(anchor); };
+    var show = function () { openMenu(anchor); };
     // Opening waits on the network only the very first time.
     if (_rows.length) { show(); collect(); } else { collect().then(show); }
+  }
+
+  // The categories a dashboard can switch off, as the panel writes them.
+  var TYPES = ['safety', 'air', 'locks', 'alarm', 'doorbell', 'doors', 'people',
+    'vacuum', 'appliances', 'plants', 'battery', 'updates', 'restart'];
+
+  function configureFrom(V) {
+    V = V || {};
+    var types = {};
+    TYPES.forEach(function (k) {
+      if (V['notify_' + k] === false) types[k] = false;
+    });
+
+    var list = Array.isArray(V.notification_appliances) ? V.notification_appliances : [];
+    var timers = (V.notification_appliance_timers
+      && typeof V.notification_appliance_timers === 'object')
+      ? V.notification_appliance_timers : {};
+
+    var num = function (x) {
+      if (x === null || x === undefined || x === '') return undefined;
+      var n = Number(x);
+      return isFinite(n) ? n : undefined;
+    };
+
+    return configure({
+      types: types,
+      appliances: list.filter(Boolean).map(function (e) {
+        return { entity: e, remaining: timers[e] || undefined };
+      }),
+      battery: num(V.notification_battery_threshold),
+      open_minutes: num(V.notification_open_minutes),
+      co2: num(V.notification_co2_ppm),
+      read_entity: V.notification_read_entity || null,
+    });
+  }
+
+  if (window._hemmaNotifyCfg) {
+    try { configureFrom(window._hemmaNotifyCfg); } catch (e) {}
   }
 
   window._hemmaNotify = {
     open: open,
     close: function () { if (_menu) _menu._close(); },
     refresh: collect,
+    configure: configure,
+    configureFrom: configureFrom,
     markAll: seal,
     get count() { return unread(); },
     get rows() { return _rows.slice(); },
@@ -6525,4 +7269,14 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+})();
+
+// HACS serves button-card cached, so some cards render before this file runs.
+(function () {
+  var waiting = window._hemmaCoreWaiters;
+  window._hemmaCoreWaiters = null;
+  if (!waiting || typeof window.hemmaKick !== 'function') return;
+  setTimeout(function () {
+    waiting.forEach(function (el) { window.hemmaKick(el); });
+  }, 0);
 })();

@@ -13,52 +13,6 @@ hemma_light:
       [[[
         return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
-    hemma_popup:
-      title: ""
-      dismissable: true
-      style: "--popup-min-width: min(880px, 92vw); --popup-max-width: min(880px, 92vw);"
-      popup_styles:
-        - style: all
-          styles: |
-            .content .container > * {
-              width: 100% !important;
-              max-width: none !important;
-              box-sizing: border-box !important;
-            }
-            .content .container {
-              scrollbar-width: none;
-              overscroll-behavior: contain;
-              touch-action: pan-y;
-              padding-bottom: 24px !important;
-            }
-            .content .container::-webkit-scrollbar {
-             display: none;
-            }
-            @media (max-width: 768px) {
-            wa-drawer {
-                --size: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-                height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-            }
-            .content .container {
-                min-height: calc(100dvh - env(safe-area-inset-top, 0px)) !important;
-            }
-            wa-drawer.hemma-h-auto {
-                --size: var(--ha-bottom-sheet-height, auto) !important;
-                height: auto !important;
-                min-height: 0 !important;
-            }
-            wa-drawer.hemma-h-auto .content .container {
-                min-height: 0 !important;
-            }
-            }
-      content: |
-        [[[
-          if (typeof window._hemmaLPC === 'function') {
-            return window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables);
-          }
-          return null;
-        ]]]
 
   icon_tap_action:
     action: call-service
@@ -66,7 +20,7 @@ hemma_light:
     service_data:
       entity_id: script.hemma_light_smart_toggle
       variables:
-        light_entity: '[[[ return entity.entity_id ]]]'
+        light_entity: '[[[ return entity?.entity_id ]]]'
 
   state_display: >
     [[[
