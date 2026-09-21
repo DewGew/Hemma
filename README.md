@@ -15,23 +15,36 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 (Updated screenshots coming soon...)
 
 ### Desktop
-<img width="1400" height="840" alt="home-day" src="https://github.com/user-attachments/assets/5f80dffb-455d-4773-bfc6-c0f43cf93f18" />
+<img width="1400" height="905" alt="desktop" src="https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc" />
 
 ### Light and dark
-<img width="1400" height="843" alt="bedroom-day" src="https://github.com/user-attachments/assets/e111998e-03e6-416d-9e43-d09049767046" />
-
-<img width="1400" height="842" alt="bedroom-night" src="https://github.com/user-attachments/assets/01d75265-ecca-4378-aaad-e4788010fa6e" />
+<img width="1400" height="911" alt="livingroom-light" src="https://github.com/user-attachments/assets/e8ffb8e4-e457-4165-ba7e-125a974f9cff" />
+<img width="1400" height="912" alt="livingroom-dark" src="https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675" />
 
 ### Mobile
-<img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/96b0a526-62aa-450b-b0a4-dd1cbf6ba4af" />
+<img width="850" height="600" alt="mobile light and dark" src="https://github.com/user-attachments/assets/82165232-cd83-4d6b-9416-5677f999a2cf" />
 
 ### Popups
 
 Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
 
-<img width="615" height="361" alt="lights" src="https://github.com/user-attachments/assets/eda0853b-8e49-459a-a4d2-010ef335ec4d" />
+<img width="500" height="740" alt="cover" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
+
+<img width="500" height="740" alt="lock" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
+
+<img width="500" height="740" alt="plant" src="https://github.com/user-attachments/assets/734cd60a-a791-4613-8771-0e108707bc75" />
+
+<img width="500" height="740" alt="aqi" src="https://github.com/user-attachments/assets/8e4bfb88-dbf9-4018-81c4-6fe32d4f950d" />
+
+<img width="500" height="503" alt="energy" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
+
+<img width="500" height="503" alt="network" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
+
+<img width="500" height="866" alt="battery" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
 
 ### Building it
+
+<img width="1280" height="827" alt="studio" src="https://github.com/user-attachments/assets/02598a48-108e-4b94-939e-c86616a02aa4" />
 
 Hemma's editor sits in your sidebar. Pick a room, point it at your entities, and a live preview shows the desktop and tablet layouts as you work. Nothing is written to a dashboard until you press Save.
 
