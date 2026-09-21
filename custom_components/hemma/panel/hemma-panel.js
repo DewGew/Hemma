@@ -11,8 +11,6 @@ const REQUIREMENTS = [
     why: "every Hemma tile is one", repo: "custom-cards/button-card" },
   { kind: "card", id: "apexcharts-card", label: "apexcharts-card",
     why: "the energy popup's charts", repo: "RomRider/apexcharts-card" },
-  { kind: "card", id: "bar-card", label: "bar-card",
-    why: "the plant and battery popups", repo: "spacerokk/bar-card" },
 ];
 
 

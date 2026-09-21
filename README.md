@@ -6,7 +6,7 @@ A modern, mobile-friendly dashboard for Home Assistant, built and configured fro
 
 Hemma installs as an integration and adds **Hemma** to your sidebar. You pick your rooms and entities there, press Save, and Hemma writes the dashboard. There is no dashboard YAML to write and no card configuration to paste.
 
-You get two dashboards from one setup: a desktop and tablet layout, and a dedicated mobile dashboard inspired by Apple Home. Phones are routed to the mobile one automatically.
+Creating a dashboard gives you two layouts from one setup: desktop and tablet, and a phone layout inspired by Apple Home. Phones are routed to the phone one automatically.
 
 Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamtherufus, rebuilt and extended.
 
@@ -32,6 +32,12 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
 <img width="615" height="513" alt="energy" src="https://github.com/user-attachments/assets/1e24e4ae-e8ed-4dfa-a6dc-10d05b27c2bc" />
 <img width="615" height="437" alt="plant" src="https://github.com/user-attachments/assets/0136bb91-851b-446b-bec3-114f045d68dc" />
 
+### Building it
+
+Hemma's editor sits in your sidebar. Pick a room, point it at your entities, and a live preview shows the desktop and tablet layouts as you work. Nothing is written to a dashboard until you press Save.
+
+Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, tiles, scenes and Now Playing whenever you like.
+
 ---
 
 ## Requirements
@@ -45,7 +51,7 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
     themes: !include_dir_merge_named themes
   ```
 
-- A time sensor for the clock on each room card. Settings > Devices & Services > **Add Integration > Date & time**, and enable the "Time" sensor.
+- A time sensor, if you want the clock on your room cards. Settings > Devices & Services > **Add Integration > Date & time**, and enable the "Time" sensor. Without one the clock is simply not shown.
 - **Packages enabled.** Hemma's badges, filter pills and overlays are driven by helper entities that ship in `packages/hemma_helpers.yaml`. Home Assistant only loads that folder when `configuration.yaml` says so:
 
   ```yaml
@@ -60,10 +66,8 @@ Hemma checks for the cards below on first open and links you straight to each on
 | [uix](https://github.com/Lint-Free-Technology/uix) | card styling, used throughout. Do not install card-mod alongside it. | **required** |
 | [button-card](https://github.com/custom-cards/button-card) | every Hemma tile is one | **required** |
 | [apexcharts-card](https://github.com/RomRider/apexcharts-card) | the energy and climate charts | optional |
-| [bar-card](https://github.com/spacerokk/bar-card) | the plant and battery popups | optional |
 
-Hemma will not let you build a dashboard without the two marked required. The
-optional two only affect the popups named beside them.
+Hemma will not let you build a dashboard without the two marked require (apexcharts-card only affects the charts named beside it).
 
 ---
 
@@ -73,7 +77,7 @@ optional two only affect the popups named beside them.
 
 HACS > **Integrations** > menu > **Custom repositories**, add `https://github.com/willsanderson/Hemma` as an **Integration**, then find Hemma in the list and **Download**.
 
-While you are there, install **uix**, **button-card**, **apexcharts-card** and **bar-card**.
+While you are there, install **uix**, **button-card** and **apexcharts-card**.
 
 ### 2. Copy the assets
 
@@ -83,9 +87,7 @@ Hemma's icons, fonts, room images and theme live in your config folder. From thi
 - `themes/hemma/` into `/config/themes/hemma/`
 - `packages/hemma_helpers.yaml` into `/config/packages/`
 
-Without the last one, tapping a badge group throws a service-call error and the
-phone's filter pills do nothing. Hemma keeps the room list in it up to date for
-you once your dashboard is saved; you never edit that file by hand.
+Without the last one, tapping a badge group throws a service-call error and the phone's filter pills do nothing. Hemma keeps the room list in it up to date for you once your dashboard is saved, and you never edit that file by hand.
 
 ### 3. Restart Home Assistant
 
@@ -148,7 +150,7 @@ Five things changed in 2.1 that are worth knowing:
 
 ## Writing your own YAML
 
-Hemma is still a YAML dashboard underneath, and everything it writes you can also write by hand. Custom templates, hand-built views and per-card overrides all keep working.
+Hemma builds ordinary Lovelace dashboards, so anything it writes you can also write or extend by hand. Custom templates, hand-built views and per-card overrides all keep working.
 
 See **[docs/ADVANCED.md](docs/ADVANCED.md)** for the folder layout, template variables, and the full card reference.
 
@@ -157,8 +159,6 @@ See **[docs/ADVANCED.md](docs/ADVANCED.md)** for the folder layout, template var
 ### :trophy: Credits
 
 - Original Homio concept and base implementation: [iamtherufus/Homio](https://github.com/iamtherufus/Homio)
-- Original climate/air quality card design: [jerahmeel-sudo](https://github.com/jerahmeel-sudo/Custom-Air-Quality-Card-with-score-trends-and-pollutant-tiles)
-- Big thanks to [SH1FT-W](https://github.com/SH1FT-W) for helping build out the custom pop up cards
 - Hemma customization and ongoing tweaks: [@willsanderson](https://github.com/willsanderson)
 
 #### Enjoying Hemma? Buy me a coffee :v::smiley:
