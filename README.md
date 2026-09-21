@@ -1,4 +1,4 @@
-<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/66b364c9-1af1-4a7b-951a-9ba2b0d839e3" />
+<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/11d69ef8-ae98-4ba0-a402-1a8c831d46cc" />
 
 ## Hemma
 
@@ -28,9 +28,6 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
 
 <img width="615" height="361" alt="lights" src="https://github.com/user-attachments/assets/eda0853b-8e49-459a-a4d2-010ef335ec4d" />
-<img width="615" height="668" alt="aqi" src="https://github.com/user-attachments/assets/2356570c-18be-4234-88f6-85d8d18dfb9e" />
-<img width="615" height="513" alt="energy" src="https://github.com/user-attachments/assets/1e24e4ae-e8ed-4dfa-a6dc-10d05b27c2bc" />
-<img width="615" height="437" alt="plant" src="https://github.com/user-attachments/assets/0136bb91-851b-446b-bec3-114f045d68dc" />
 
 ### Building it
 
