@@ -65,7 +65,8 @@ hemma_mobile_header:
     presence: >
       [[[
         const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
-        const motionEntity = variables.motion_helper_entity || (slug ? 'input_text.hemma_motion_' + slug : null);
+        const helper = variables.motion_helper_entity || (slug ? 'input_text.hemma_motion_' + slug : null);
+        const motionEntity = variables.motion_entity || helper;
         if (!motionEntity) return '';
         return `
           <div style="
@@ -130,10 +131,12 @@ hemma_mobile_header:
         - "--hemma-presence-fade": >
             [[[
               const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
-              const motionEntity = variables.motion_helper_entity || (slug ? 'input_text.hemma_motion_' + slug : null);
-              if (!motionEntity) return 0;
-              const badgesOn = states['input_boolean.hemma_motion_badges']?.state === 'on';
-              const sensorId = states[motionEntity]?.state?.trim();
+              const helper = variables.motion_helper_entity || (slug ? 'input_text.hemma_motion_' + slug : null);
+              const direct = variables.motion_entity;
+              if (!direct && !helper) return 0;
+              const mute = states['input_boolean.hemma_motion_badges'];
+              const badgesOn = !mute || mute.state === 'on';
+              const sensorId = direct || states[helper]?.state?.trim();
               const active = badgesOn && !!sensorId && states[sensorId]?.state === 'on';
               return active ? 1 : 0;
             ]]]

@@ -75,9 +75,6 @@ tile could duplicate, vanish, or show the wrong artwork.
 
 - **`hemma-nav` replaces navbar-card.** Navigation is Hemma's own now, with an
   anchored desktop row.
-- The underline under a room name no longer travels between names. It leaves
-  one and arrives under the other, which holds up when the same tap is
-  rebuilding the view behind it.
 - The Edit, Notifications and Scenes dropdowns match Hemma's own corners.
 - Reworked theme.
 
@@ -94,7 +91,7 @@ Your existing YAML dashboard keeps working. Nothing is removed or rewritten.
 
 To move it into Hemma, open it from the sidebar and choose **Import from YAML**.
 
-Four things changed that are worth knowing:
+Five things changed that are worth knowing:
 
 - **browser_mod is no longer required.** Every popup is Hemma's own. Remove it
   if nothing else uses it.
@@ -107,3 +104,7 @@ Four things changed that are worth knowing:
   remembered per browser rather than per dashboard, so a second dashboard could
   draw the first one's forecast and temperature. If a dashboard has been
   showing weather you never set up there, it stops after upgrading.
+- **Motion dots are set per room now.** The pulsing dot beside a room in the
+  navigation is configured in Appearance rather than through a helper. Pick the
+  room's motion sensor once and it covers both the navigation and the phone. An
+  imported dashboard starts without one, so set it on each room you want it on.

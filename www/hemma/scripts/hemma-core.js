@@ -3456,7 +3456,7 @@ window.hemmaMenuGlass = {
             margin-right: -6px;
           }
 
-          .badge { top: 9px; left: 44px; }
+          .badge { top: 8px; right: 12px; }
         `;
       }
 
@@ -3516,7 +3516,7 @@ window.hemmaMenuGlass = {
 
         .indicator .fill { background: rgba(255,255,255,0.85); }
 
-        .badge { top: 35px; right: 10px; }
+        .badge { top: 6px; right: 10px; }
       `;
     }
   }

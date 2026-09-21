@@ -53,7 +53,7 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
     packages: !include_dir_named packages
   ```
 
-Hemma checks for everything below on first open and links you straight to each one, so you do not need to collect them up front.
+Hemma checks for the cards below on first open and links you straight to each one, so you do not need to collect them up front. The requirements above are yours to set up.
 
 | From HACS | Why | |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ optional two only affect the popups named beside them.
 
 ### 1. Install Hemma from HACS
 
-HACS > **Integrations** > menu > **Custom repositories**, add `https://github.com/willsanderson/hemma` as an **Integration**, then find Hemma in the list and **Download**.
+HACS > **Integrations** > menu > **Custom repositories**, add `https://github.com/willsanderson/Hemma` as an **Integration**, then find Hemma in the list and **Download**.
 
 While you are there, install **uix**, **button-card**, **apexcharts-card** and **bar-card**.
 
@@ -122,23 +122,26 @@ To move it into Hemma:
 
 The import creates a **new** dashboard and leaves the original untouched, so you can compare the two and switch over when you are happy.
 
-Four things changed in 2.1 that are worth knowing:
+Five things changed in 2.1 that are worth knowing:
 
 - **browser_mod is no longer required.** Every popup is now Hemma's own. You can remove it if nothing else uses it.
 - **navbar-card is no longer required**, replaced by Hemma's own `hemma-nav`.
 - **Dashboard resources moved.** Hemma now serves its scripts itself and registers them for you. Entries still pointing at `/local/hemma/scripts/` are repointed automatically on first setup. If you see a warning in the log about a resource Hemma no longer ships, remove that one entry by hand.
 - **Weather appears only where you configured it.** The weather entity used to be remembered per browser rather than per dashboard, so a second dashboard could draw the first one's forecast. If a dashboard has been showing weather you never set up there, it stops after upgrading.
+- **Motion dots are set per room now.** The pulsing dot beside a room in the navigation is configured in Appearance rather than through a helper. Pick the room's motion sensor once and it covers both the navigation and the phone. An imported dashboard starts without one, so set it on each room you want it on.
 
 ---
 
 ## Features
 
+- **Built from a UI.** Rooms, entities, badges, tiles, scenes, weather, the clock and Now Playing are all set up in Hemma itself, with a live preview of the desktop, tablet and phone layouts as you go.
 - **Rooms** with a photo hero, live clock, weather, and per-room entity tiles
 - **Badges** for climate, lights, presence, media, security and energy, each opening a full popup
 - **Now Playing** showing every active source at once, with artwork, progress and controls. Understands media players, Plex and Tautulli, Discord, Steam and PlayStation.
 - **Scenes**, as a row, a page, and per-room sections
-- **Popups** for climate and air quality, energy, network, lights, locks and security, covers, plants, batteries, cameras, system updates and Plex
+- **Popups** for lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added
 - **Mobile dashboard** with filter pills, room popups, a collapsing header, and a wallpaper that samples your room photos for its gradient
+- **Motion** shows a pulsing dot beside a room in the navigation, and a motion icon on the phone
 - **Light and dark** throughout, with day and night room images
 
 ---

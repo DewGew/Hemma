@@ -990,6 +990,8 @@ const SECTIONS = [
     fields: [
       { key: "__name", label: "Room name", type: "text", always: true },
       { key: "image", label: "Background image", type: "image", always: true },
+      { ...E("motion_entity", "Motion sensor", ["binary_sensor"]),
+        hint: "Pulses a dot beside this room in the navigation, and shows a motion icon on the phone." },
       { key: "__extras", label: "Other cards", type: "extras", noAdd: true,
         hint: "Kept from the dashboard you imported. Hemma leaves them as they are, below the tiles." },
     ],
@@ -1423,6 +1425,24 @@ function seedScenePrefs(rooms, sources) {
   return n;
 }
 
+function applyMotion(cfg, rooms) {
+  if (!cfg) return;
+  const byName = {};
+  (rooms || []).forEach((r) => {
+    if (r && r.name) byName[r.name] = (r.variables || {}).motion_entity;
+  });
+  eachObject(cfg, (o) => {
+    if (!o || o.template !== MOBILE_HEADER || !o.name) return;
+    const m = byName[o.name];
+    if (m) {
+      o.variables = o.variables || {};
+      o.variables.motion_entity = m;
+    } else if (o.variables) {
+      delete o.variables.motion_entity;
+    }
+  });
+}
+
 function applyScenePick(cfg, rooms) {
   if (!cfg) return;
   const src = ((rooms || [])[0] || {}).variables || {};
@@ -1744,7 +1764,16 @@ function retargetRoutes(root, urlPath, rooms, extras) {
     if (Array.isArray(node.routes)) {
       const keep = extras === undefined ? node.routes.filter((r) => !r.url) : extras;
       node.routes = rooms
-        .map((r) => ({ url: `/${urlPath}/${r.path}`, label: r.name, icon: roomIcon(r.name) }))
+        .map((r) => {
+          const route = { url: `/${urlPath}/${r.path}`, label: r.name, icon: roomIcon(r.name) };
+          const m = (r.variables || {}).motion_entity;
+          // The global helper is a mute switch: absent means nothing to mute.
+          if (m) route.badge = { show: "[[[ const b = states['input_boolean.hemma_motion_badges'];"
+            + " if (b && b.state !== 'on') return false;"
+            + " const s = states['" + m + "'];"
+            + " return !!s && s.state === 'on'; ]]]" };
+          return route;
+        })
         .concat(clone(keep));
       rewritten += 1;
     }
@@ -9915,6 +9944,7 @@ class HemmaPanel extends HTMLElement {
         mcfg = markPhoneManaged(
           expandAny(pair.mobile, { extras: mextras, templates }), bellOnFor(pair), assistOnFor(pair));
         applyScenePick(mcfg, s.compact.rooms);
+        applyMotion(mcfg, s.compact.rooms);
         applyKiosk(mcfg, s.compact.rooms);
       } catch (e) {
         this._status("phone layout could not be rebuilt: " + e.message, "err");
