@@ -12,8 +12,6 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 
 ---
 
-(Updated screenshots coming soon...)
-
 ### Desktop
 <img width="1400" height="905" alt="desktop" src="https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc" />
 
@@ -44,11 +42,11 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
 
 ### Building it
 
-<img width="1280" height="827" alt="studio" src="https://github.com/user-attachments/assets/02598a48-108e-4b94-939e-c86616a02aa4" />
-
 Hemma's editor sits in your sidebar. Pick a room, point it at your entities, and a live preview shows the desktop and tablet layouts as you work. Nothing is written to a dashboard until you press Save.
 
 Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, tiles, scenes and Now Playing whenever you like.
+
+<img width="1280" height="827" alt="studio" src="https://github.com/user-attachments/assets/02598a48-108e-4b94-939e-c86616a02aa4" />
 
 ---
 
