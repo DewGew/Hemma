@@ -778,7 +778,7 @@ Hemma:
   hemma-entity-text-shadow: none
   hemma-entity-height-h: clamp(160px, 18svh, 200px)
   hemma-entity-aspect-desktop: 1.487
-  hemma-entity-height-desktop: clamp(160px, calc(18svh + (var(--hemma-u, 10px) - 10px) * 42), min(calc(var(--hemma-entity-col-width-desktop) / var(--hemma-entity-aspect-desktop, 1.487)), 24svh))
+  hemma-entity-height-desktop: clamp(160px, calc(22svh + (var(--hemma-u, 10px) - 10px) * 42), min(calc(var(--hemma-entity-col-width-desktop) / var(--hemma-entity-aspect-desktop, 1.487)), 24svh))
   hemma-entity-col-width-desktop: clamp(290px, calc(var(--hemma-u, 10px) * 29), 319px)
   hemma-entity-inner-pad-desktop: calc(var(--hemma-u, 10px) * 2)
   hemma-entity-name-font-desktop: calc(var(--hemma-u, 10px) * 1.8)
