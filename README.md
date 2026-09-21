@@ -12,6 +12,8 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 
 ---
 
+(Updated screenshots coming soon...)
+
 ### Desktop
 <img width="1400" height="840" alt="home-day" src="https://github.com/user-attachments/assets/5f80dffb-455d-4773-bfc6-c0f43cf93f18" />
 
