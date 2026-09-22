@@ -21,7 +21,7 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 <img width="1400" height="912" alt="livingroom-dark" src="https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675" />
 
 ### Mobile
-<img width="850" height="600" alt="mobile light and dark" src="https://github.com/user-attachments/assets/82165232-cd83-4d6b-9416-5677f999a2cf" />
+<img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/beb8537b-89f5-4f1b-ac7b-85af30117b68" />
 
 ### Popups
 
