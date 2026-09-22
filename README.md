@@ -1,4 +1,4 @@
-<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/03d47c26-ec57-474d-a654-0eb4b508e1b0" />
+![hemma](https://github.com/user-attachments/assets/03d47c26-ec57-474d-a654-0eb4b508e1b0)
 
 
 ## Hemma
@@ -11,42 +11,7 @@ Creating a dashboard gives you two layouts from one setup: desktop and tablet, a
 
 Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamtherufus, rebuilt and extended.
 
----
-
-### Desktop
-<img width="1400" height="905" alt="desktop" src="https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc" />
-
-### Light and dark
-<img width="1400" height="911" alt="living room-light" src="https://github.com/user-attachments/assets/ba69a8d6-d1d8-4b2d-a728-057cae3e2809" />
-<img width="1400" height="912" alt="livingroom-dark" src="https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675" />
-
-### Mobile
-<img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/beb8537b-89f5-4f1b-ac7b-85af30117b68" />
-
-### Popups
-
-Every badge and tile opens a popup built for what it shows: lights, locks, covers, air quality, energy, network, plants, batteries, cameras, and more.
-
-<br>
-
-<img width="386" height="572" alt="popup-cover" hspace="15" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
-<img width="386" height="572" alt="popup-lock" hspace="15" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
-<br><br>
-<img width="386" height="572" alt="popup-plant" hspace="15" src="https://github.com/user-attachments/assets/734cd60a-a791-4613-8771-0e108707bc75" />
-<img width="386" height="572" alt="popup-aqi" hspace="15" src="https://github.com/user-attachments/assets/8e4bfb88-dbf9-4018-81c4-6fe32d4f950d" />
-<br><br>
-<img width="386" height="388" alt="popup-energy" hspace="15" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
-<img width="386" height="388" alt="popup-network" hspace="15" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
-<br><br>
-<img width="386" height="668" alt="popup-battery" hspace="15" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
-
-### Building it
-
-Hemma's editor sits in your sidebar. Pick a room, point it at your entities, and a live preview shows the desktop and tablet layouts as you work. Nothing is written to a dashboard until you press Save.
-
-Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, tiles, scenes and Now Playing whenever you like.
-
-<img width="1280" height="827" alt="studio" src="https://github.com/user-attachments/assets/02598a48-108e-4b94-939e-c86616a02aa4" />
+[Requirements](#requirements) · [Installation](#installation) · [Screenshots](#screenshots) · [Upgrading](#upgrading-from-hemma-20) · [Features](#features)
 
 ---
 
@@ -77,7 +42,6 @@ Hemma checks for the cards below on first open and links you straight to each on
 | [button-card](https://github.com/custom-cards/button-card) | every Hemma tile is one | **required** |
 | [apexcharts-card](https://github.com/RomRider/apexcharts-card) | network, energy and climate charts | optional |
 
----
 
 ## Installation
 
@@ -117,6 +81,45 @@ If Hemma is not in the list, the `frontend: themes:` line above is missing from
 Open **Hemma** in the sidebar and choose **Create dashboard**. Add a room, point it at your entities, and press Save. Repeat for each room.
 
 Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, scenes and Now Playing whenever you like.
+
+---
+
+## Screenshots
+
+### Desktop
+![desktop](https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc)
+
+### Light and dark
+![living room-light](https://github.com/user-attachments/assets/ba69a8d6-d1d8-4b2d-a728-057cae3e2809)
+![livingroom-dark](https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675)
+
+### Mobile
+<img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/beb8537b-89f5-4f1b-ac7b-85af30117b68" />
+
+### Popups
+
+Every badge and tile opens a popup built for what it shows: lights, locks, covers, air quality, energy, network, plants, batteries, cameras, and more.
+
+<br>
+
+<img width="386" height="572" alt="popup-cover" hspace="15" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
+<img width="386" height="572" alt="popup-lock" hspace="15" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
+<br><br>
+<img width="386" height="572" alt="popup-plant" hspace="15" src="https://github.com/user-attachments/assets/734cd60a-a791-4613-8771-0e108707bc75" />
+<img width="386" height="572" alt="popup-aqi" hspace="15" src="https://github.com/user-attachments/assets/8e4bfb88-dbf9-4018-81c4-6fe32d4f950d" />
+<br><br>
+<img width="386" height="388" alt="popup-energy" hspace="15" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
+<img width="386" height="388" alt="popup-network" hspace="15" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
+<br><br>
+<img width="386" height="668" alt="popup-battery" hspace="15" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
+
+### Building it
+
+Hemma's editor sits in your sidebar. Pick a room, point it at your entities, and a live preview shows the desktop and tablet layouts as you work. Nothing is written to a dashboard until you press Save.
+
+Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, tiles, scenes and Now Playing whenever you like.
+
+![studio](https://github.com/user-attachments/assets/02598a48-108e-4b94-939e-c86616a02aa4)
 
 ---
 

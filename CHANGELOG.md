@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.1
+
+Documentation only. Nothing in the integration itself changed.
+
+- **The README leads with the install steps.** Installation sat behind every
+  screenshot, which in the HACS panel meant scrolling past all of them to
+  reach it. The screenshots now follow it, under their own heading.
+- **The wide screenshots scale to the panel.** They carried fixed pixel
+  widths up to 1729. GitHub quietly caps those at the page width, but the
+  HACS renderer honors them, so the hero overflowed and was cropped.
+- **`configuration.yaml` no longer contradicts the install steps.** Its header
+  still said to add Lovelace resources by hand under Settings > Dashboards >
+  Resources. Hemma has registered those itself since 2.1.0. The `lovelace:`
+  block is now marked as belonging to the hand-written YAML setup in
+  [docs/ADVANCED.md](docs/ADVANCED.md), which is the only place it applies.
+
 ## 2.1.0
 
 Hemma is now installed and configured from a UI. You add it as an integration,
