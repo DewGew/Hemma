@@ -37,7 +37,7 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
 <img width="386" height="388" alt="energy" hspace="15" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
 <img width="386" height="388" alt="network" hspace="15" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
 <br><br>
-<img width="38" height="668" alt="battery" hspace="15" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
+<img width="386" height="668" alt="battery" hspace="15" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
 
 ### Building it
 
