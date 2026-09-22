@@ -62,7 +62,7 @@ Everything is optional. A room with nothing but a light group is a valid room, a
   ```
 
 - A time sensor, if you want the clock on your room cards. Settings > Devices & Services > **Add Integration > Date & time**, and enable the "Time" sensor. Without one the clock is simply not shown.
-- **Packages enabled.** Hemma's badges, filter pills and overlays are driven by helper entities that ship in `packages/hemma_helpers.yaml`. Home Assistant only loads that folder when `configuration.yaml` says so:
+- **Packages enabled.** Hemma's badges and overlays are driven by helper entities that ship in `packages/hemma_helpers.yaml`. Home Assistant only loads that folder when `configuration.yaml` says so:
 
   ```yaml
   homeassistant:
