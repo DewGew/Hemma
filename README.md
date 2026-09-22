@@ -24,9 +24,10 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 <img width="850" height="600" alt="mobile light and dark" src="https://github.com/user-attachments/assets/82165232-cd83-4d6b-9416-5677f999a2cf" />
 
 ### Popups
-<br><br>
 
 Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
+
+<br>
 
 <img width="386" height="572" alt="cover" hspace="15" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
 <img width="386" height="572" alt="lock" hspace="15" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
