@@ -25,7 +25,7 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 
 ### Popups
 
-Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
+Every badge and tile opens a popup built for what it shows: lights, locks, covers, air quality, energy, network, plants, batteries, cameras, and more.
 
 <br>
 
