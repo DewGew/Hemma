@@ -77,8 +77,6 @@ Hemma checks for the cards below on first open and links you straight to each on
 | [button-card](https://github.com/custom-cards/button-card) | every Hemma tile is one | **required** |
 | [apexcharts-card](https://github.com/RomRider/apexcharts-card) | network, energy and climate charts | optional |
 
-You will be unable to build a dashboard without button-card and uix (apexcharts-card only affects the popup charts).
-
 ---
 
 ## Installation
