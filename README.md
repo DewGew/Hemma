@@ -5,7 +5,7 @@
 
 A modern, mobile-friendly dashboard for Home Assistant, built and configured from a UI.
 
-Hemma installs as an integration and adds **Hemma** to your sidebar. You pick your rooms and entities there, press Save, and Hemma writes the dashboard. There is no dashboard YAML to write and no card configuration to paste.
+Hemma installs as an integration and adds **Hemma** to your sidebar. There is no dashboard YAML to write and no card configuration to paste. You pick your rooms and entities, press Save, and Hemma writes the dashboard. 
 
 Creating a dashboard gives you two layouts from one setup: desktop and tablet, and a phone layout inspired by Apple Home. Phones are routed to the phone one automatically.
 
@@ -24,6 +24,7 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 <img width="850" height="600" alt="mobile light and dark" src="https://github.com/user-attachments/assets/82165232-cd83-4d6b-9416-5677f999a2cf" />
 
 ### Popups
+<br><br>
 
 Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
 
