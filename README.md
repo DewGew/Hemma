@@ -33,11 +33,10 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
 <img width="386" height="572" alt="plant" hspace="15" src="https://github.com/user-attachments/assets/734cd60a-a791-4613-8771-0e108707bc75" />
 <img width="386" height="572" alt="aqi" hspace="15" src="https://github.com/user-attachments/assets/8e4bfb88-dbf9-4018-81c4-6fe32d4f950d" />
 <br><br>
-<img width="500" height="503" alt="energy" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
+<img width="387" height="389" alt="energy" hspace="15" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
+<img width="387" height="389" alt="network" hspace="15" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
 <br><br>
-<img width="500" height="503" alt="network" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
-<br><br>
-<img width="500" height="866" alt="battery" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
+<img width="387" height="670" alt="battery" hspace="15" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
 
 ### Building it
 
