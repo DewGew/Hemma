@@ -75,9 +75,9 @@ Hemma checks for the cards below on first open and links you straight to each on
 | --- | --- | --- |
 | [uix](https://github.com/Lint-Free-Technology/uix) | card styling, used throughout. Do not install card-mod alongside it. | **required** |
 | [button-card](https://github.com/custom-cards/button-card) | every Hemma tile is one | **required** |
-| [apexcharts-card](https://github.com/RomRider/apexcharts-card) | the energy and climate charts | optional |
+| [apexcharts-card](https://github.com/RomRider/apexcharts-card) | network, energy and climate charts | optional |
 
-Hemma will not let you build a dashboard without the two marked require (apexcharts-card only affects the charts named beside it).
+Hemma will not let you build a dashboard without the two marked require (apexcharts-card only affects the popup charts).
 
 ---
 
