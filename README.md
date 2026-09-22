@@ -27,18 +27,16 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 
 Every badge and tile opens a popup built for what it shows: lights, locks, covers, climate and air quality, energy, network, plants, batteries, cameras, scenes, system updates, Plex and recently added. They are Hemma's own, not a generic dialog, so they open and dismiss the same way wherever you are.
 
-<img width="410" height="607" alt="cover" hspace="2" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
-
-<img width="410" height="607" alt="lock" hspace="2" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
-
-<img width="410" height="607" alt="plant" hspace="2" src="https://github.com/user-attachments/assets/734cd60a-a791-4613-8771-0e108707bc75" />
-
-<img width="410" height="607" alt="aqi" hspace="2" src="https://github.com/user-attachments/assets/8e4bfb88-dbf9-4018-81c4-6fe32d4f950d" />
-
+<img width="410" height="607" alt="cover" hspace="4" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
+<img width="410" height="607" alt="lock" hspace="4" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
+<br><br>
+<img width="410" height="607" alt="plant" hspace="4" src="https://github.com/user-attachments/assets/734cd60a-a791-4613-8771-0e108707bc75" />
+<img width="410" height="607" alt="aqi" hspace="4" src="https://github.com/user-attachments/assets/8e4bfb88-dbf9-4018-81c4-6fe32d4f950d" />
+<br><br>
 <img width="500" height="503" alt="energy" src="https://github.com/user-attachments/assets/fcb01fb6-cbaf-467b-828e-6cb05824d9e5" />
-
+<br><br>
 <img width="500" height="503" alt="network" src="https://github.com/user-attachments/assets/a73d5b33-03d6-487c-ba13-39c3ae22346f" />
-
+<br><br>
 <img width="500" height="866" alt="battery" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
 
 ### Building it
