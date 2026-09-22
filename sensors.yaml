@@ -1,10 +1,10 @@
-# Template Sensors — OPTIONAL
+# Template Sensors (optional)
 # ============================================================================
 # Loaded by `template: !include sensors.yaml` in configuration.yaml.
 #
 # Nothing in Hemma requires these. They exist as a no-integration fallback for
 # the clock on each room's hero card, which `hemma_time` reads from
-# `sensor.time` by default — and `sensor.time` comes from Home Assistant's
+# `sensor.time` by default. That sensor comes from Home Assistant's
 # Date & Time integration, which is NOT part of default_config. If you'd rather
 # not add that integration, point hemma_time at the sensor below instead:
 #
@@ -19,7 +19,7 @@
 # `Current Date` is unused by Hemma and included purely as a convenience.
 #
 # Safe to delete BOTH this file and the `template: !include sensors.yaml` line
-# in configuration.yaml if you don't want either sensor — but remove the line
+# in configuration.yaml if you don't want either sensor, but remove the line
 # too, or Home Assistant will fail to start on the missing include.
 # ============================================================================
 - sensor:

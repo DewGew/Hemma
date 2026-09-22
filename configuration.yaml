@@ -1,5 +1,14 @@
+# Hemma - configuration.yaml reference
+# ============================================================================
+# If you installed the Hemma integration, you need only the `packages:` and
+# `frontend: themes:` lines below. Hemma builds the dashboard itself and
+# registers its own resources, so the `lovelace:` block at the end is not for
+# you: it belongs to the hand-written YAML setup in docs/ADVANCED.md.
+# ============================================================================
+
 homeassistant:
   packages: !include_dir_named packages
+
 # Loads default set of integrations. Do not remove.
 default_config:
 
@@ -12,8 +21,8 @@ script: !include scripts.yaml
 scene: !include scenes.yaml
 template: !include sensors.yaml
 
-# Lovelace resources (smart-row.js, filter-overlay.js, etc.) are added via
-# Settings → Dashboards → Resources — see the README installation steps.
+# Hand-written YAML only. Delete this block if the integration is installed:
+# Hemma registers the dashboard itself, and serving it twice conflicts.
 lovelace:
   mode: storage
   dashboards:
