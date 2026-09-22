@@ -78,7 +78,7 @@ If Hemma is not in the list, the `frontend: themes:` line above is missing from
 
 ### 6. Build your dashboard
 
-Open **Hemma** in the sidebar and choose **Create dashboard**. Add a room, point it at your entities, and press Save. Repeat for each room.
+Open **Hemma** in the sidebar and choose **Create dashboard**. Add a room, choose your entities, and press Save. Repeat for each room.
 
 Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, scenes and Now Playing whenever you like.
 
@@ -98,10 +98,6 @@ Everything is optional. A room with nothing but a light group is a valid room, a
 
 ### Popups
 
-Every badge and tile opens a popup built for what it shows: lights, locks, covers, air quality, energy, network, plants, batteries, cameras, and more.
-
-<br>
-
 <img width="386" height="572" alt="popup-cover" hspace="15" src="https://github.com/user-attachments/assets/af162535-1ad7-477c-a6f7-add2f8f49c70" />
 <img width="386" height="572" alt="popup-lock" hspace="15" src="https://github.com/user-attachments/assets/99cfd111-d0bd-41b1-b994-ecd6c8856e74" />
 <br><br>
@@ -113,15 +109,8 @@ Every badge and tile opens a popup built for what it shows: lights, locks, cover
 <br><br>
 <img width="386" height="668" alt="popup-battery" hspace="15" src="https://github.com/user-attachments/assets/a68d4924-bcc6-42cb-810e-2104bb1ec152" />
 
-### Building it
-
-Hemma's editor sits in your sidebar. Pick a room, point it at your entities, and a live preview shows the desktop and tablet layouts as you work. Nothing is written to a dashboard until you press Save.
-
-Everything is optional. A room with nothing but a light group is a valid room, and you can come back and add badges, tiles, scenes and Now Playing whenever you like.
-
+### Editing
 ![studio](https://github.com/user-attachments/assets/02598a48-108e-4b94-939e-c86616a02aa4)
-
----
 
 ## Upgrading from Hemma 2.0
 
