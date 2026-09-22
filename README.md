@@ -17,7 +17,7 @@ Inspired by the [Homio](https://github.com/iamtherufus/Homio) dashboard by @iamt
 <img width="1400" height="905" alt="desktop" src="https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc" />
 
 ### Light and dark
-<img width="1400" height="911" alt="livingroom-light" src="https://github.com/user-attachments/assets/e8ffb8e4-e457-4165-ba7e-125a974f9cff" />
+<img width="1400" height="911" alt="living room-light" src="https://github.com/user-attachments/assets/ba69a8d6-d1d8-4b2d-a728-057cae3e2809" />
 <img width="1400" height="912" alt="livingroom-dark" src="https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675" />
 
 ### Mobile
