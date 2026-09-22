@@ -1,4 +1,4 @@
-<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/988ad74c-1334-46e3-835c-04101e956015" />
+<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/03d47c26-ec57-474d-a654-0eb4b508e1b0" />
 
 
 ## Hemma
