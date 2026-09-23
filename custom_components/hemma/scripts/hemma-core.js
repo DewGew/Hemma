@@ -6378,6 +6378,26 @@ window.hemmaMenuGlass = {
   }
 
   // Entities whose past matters. Everything else is read from current state.
+  // Custom notification sources, so a letterbox or a bin collection does not
+  // mean patching this file and merging it again on every update. See #71.
+  function exts() {
+    var x = window.HEMMA_NOTIFY_EXTENSIONS;
+    return Array.isArray(x) ? x : [];
+  }
+
+  function extApi() {
+    return { on: on, nameOf: nameOf, tidyName: tidyName, dc: dc };
+  }
+
+  function eachExt(name, fn) {
+    exts().forEach(function (e) {
+      if (!e || typeof e[name] !== 'function') return;
+      try { fn(e); } catch (err) {
+        console.warn('Hemma notify extension (' + name + '):', err);
+      }
+    });
+  }
+
   function watched(hass) {
     var out = [];
     var appl = appliances().map(function (a) { return a.entity; });
@@ -6390,11 +6410,26 @@ window.hemmaMenuGlass = {
       if (on('people') && id.indexOf('person.') === 0) return void out.push(id);
       if (on('appliances') && appl.indexOf(id) !== -1) return void out.push(id);
     });
+    eachExt('watch', function (e) {
+      (e.watch(hass, extApi()) || []).forEach(function (id) {
+        if (out.indexOf(id) === -1) out.push(id);
+      });
+    });
     return out;
   }
 
   // entry: a logbook row. prev: that entity's previous state in the window.
   function describe(entry, st, prev) {
+    // undefined means "not mine", so the built-in rules still run. null means
+    // "mine, and deliberately not a row".
+    var ex = exts();
+    for (var xi = 0; xi < ex.length; xi++) {
+      if (!ex[xi] || typeof ex[xi].describe !== 'function') continue;
+      try {
+        var xr = ex[xi].describe(entry, st, prev, extApi());
+        if (xr !== undefined) return xr;
+      } catch (err) { console.warn('Hemma notify extension (describe):', err); }
+    }
     var id = entry.entity_id || '';
     var s = String(entry.state == null ? '' : entry.state);
     var name = entry.name || nameOf(st);
@@ -6722,6 +6757,11 @@ window.hemmaMenuGlass = {
         });
       });
     }
+
+    eachExt('standing', function (e) {
+      var next = e.standing(hass, rows, extApi());
+      if (Array.isArray(next)) rows = next;
+    });
 
     return rows;
   }
@@ -7420,4 +7460,103 @@ window.hemmaMenuGlass = {
   setTimeout(function () {
     waiting.forEach(function (el) { window.hemmaKick(el); });
   }, 0);
+})();
+
+// Return to Home after a spell without input, for wall tablets. Off unless a
+// dashboard asks for it in Hemma Studio under General > Dashboard.
+(function () {
+  if (window._hemmaIdleHome) return;
+  window._hemmaIdleHome = true;
+
+  var POLL_MS = 10000;
+  var OFF = /[?&]hemma_idle=0/.test(location.search);
+  // The tablet navbar's own test, so one dashboard reads the same under either.
+  var TABLET = window.matchMedia
+    ? window.matchMedia('(hover: none) and (pointer: coarse) and (min-width: 600px)')
+    : null;
+
+  var last = Date.now();
+  function bump() { last = Date.now(); }
+
+  ['pointerdown', 'touchstart', 'keydown', 'wheel', 'scroll'].forEach(function (t) {
+    window.addEventListener(t, bump, { capture: true, passive: true });
+  });
+  window.addEventListener('location-changed', bump, true);
+
+  function deep(root, tag, depth) {
+    if (!root || depth > 10 || !root.querySelector) return null;
+    var hit = root.querySelector(tag);
+    if (hit) return hit;
+    var kids = root.querySelectorAll('*');
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].shadowRoot) {
+        var f = deep(kids[i].shadowRoot, tag, depth + 1);
+        if (f) return f;
+      }
+    }
+    return null;
+  }
+
+  var _root = null;
+  function huiRoot() {
+    if (_root && _root.isConnected) return _root;
+    _root = deep(document, 'hui-root', 0);
+    return _root;
+  }
+
+  function config() {
+    var root = huiRoot();
+    var ll = (root && root.lovelace) || {};
+    return ll.editMode ? null : (ll.config || null);
+  }
+
+  // The setting is a room variable, like every other dashboard-scoped one, so
+  // it rides along in the hero card of each view.
+  function minutes(cfg) {
+    var views = (cfg && cfg.views) || [];
+    for (var i = 0; i < views.length; i++) {
+      var card = ((views[i].cards || [])[0]) || {};
+      var v = (card.variables || {}).hemma_idle_home;
+      if (v !== undefined && v !== null && v !== '') return parseFloat(v) || 0;
+    }
+    return 0;
+  }
+
+  // Never hard-code the path: dashboards get renamed and people run more than one.
+  function homePath(cfg) {
+    var views = (cfg && cfg.views) || [];
+    if (!views.length) return null;
+    var home = null;
+    for (var i = 0; i < views.length; i++) {
+      if (views[i].path === 'home') { home = views[i]; break; }
+    }
+    if (!home) home = views[0];
+    var parts = String(location.pathname).split('/').filter(Boolean);
+    if (!parts.length) return null;
+    return '/' + parts[0] + '/' + (home.path || '');
+  }
+
+  function norm(p) { return String(p || '').replace(/\/+$/, '') || '/'; }
+
+  function check() {
+    if (OFF || !TABLET || !TABLET.matches) return bump();
+    var cfg = config();
+    if (!cfg) return bump();
+    var mins = minutes(cfg);
+    if (!mins) return bump();
+    var home = homePath(cfg);
+    if (!home || norm(location.pathname) === norm(home)) return bump();
+    // Never pull the view out from under someone reading a popup.
+    if (window.hemmaPopup && window.hemmaPopup.surface) return bump();
+    if (Date.now() - last < mins * 60000) return;
+    history.pushState(null, '', home);
+    window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
+    bump();
+  }
+
+  setInterval(check, POLL_MS);
+  // A tablet coming back from sleep has been idle the whole time.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) check();
+  });
 })();

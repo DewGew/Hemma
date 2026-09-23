@@ -1,5 +1,5 @@
 
-const PANEL_VERSION = "2.1.0";
+const PANEL_VERSION = "2.1.1";
 const TEMPLATES_URL = "/api/hemma/templates";
 const TEMPLATES_URL_STATIC = "/hemma_panel/hemma-templates.json";
 
@@ -963,6 +963,54 @@ function syncPairTiles(pair) {
   return { synced, added, dropped, moved, unmatched };
 }
 
+// Rooms come and go on the wide side; the phone's sections have to follow.
+// linkPair already works out which side is missing a partner, but until now
+// that only reached the log, so a deleted room left its phone section behind.
+function syncPairSections(pair) {
+  const rooms = (pair.desktop.compact || {}).rooms || [];
+  const mobile = pair.mobile.compact || {};
+  const sections = mobile.rooms || [];
+  if (!rooms.length || !sections.length) return { added: 0, removed: 0 };
+
+  // Hemma only takes back what Hemma put there. A section holding anything
+  // placed by hand keeps its tiles, so it keeps its section.
+  const hemmas = (mt) => {
+    if (!mt) return true;
+    if (mt.variables && mt.variables.hemma_derived) return false;
+    const copied = (mt.variables || {}).hemma_from_room;
+    return copied === undefined ? !!tileTypeOf(mt) : !!copied;
+  };
+
+  const drop = new Set();
+  (pair.link.orphanSections || []).forEach((o) => {
+    const sec = sections[o.section];
+    if (!sec || sec.name === MOBILE_FAVORITES) return;
+    if (!(sec.tiles || []).every(hemmas)) return;
+    drop.add(o.section);
+  });
+  const removed = drop.size;
+  if (removed) mobile.rooms = sections.filter((_, n) => !drop.has(n));
+
+  const model = (mobile.rooms || []).find((sc) => sc.name !== MOBILE_FAVORITES)
+    || (mobile.rooms || [])[0];
+  let added = 0;
+  (pair.link.orphanRooms || []).forEach((o) => {
+    const room = rooms[o.room];
+    if (!room || !model) return;
+    const sec = { name: room.name, tiles: [] };
+    // Shape only. motion_entity and the rest belong to the room they came from.
+    if (model._header) sec._header = clone(model._header);
+    if (model._row) sec._row = clone(model._row);
+    const cats = (model.variables || {}).mobile_filter_categories;
+    if (cats) sec.variables = { mobile_filter_categories: clone(cats) };
+    mobile.rooms.push(sec);
+    added++;
+  });
+
+  if (added || removed) pair.link = linkPair(pair.desktop, pair.mobile);
+  return { added, removed };
+}
+
 function extractPair(desktopCfg, mobileCfg, templates, editable) {
   const desktop = extractConfig(desktopCfg);
   const mobile = extractMobileConfig(mobileCfg);
@@ -1067,6 +1115,15 @@ const SECTIONS = [
         boolDefault: true, auto: true, scope: "dashboard" },
       { key: "hemma_hide_header", sub: "chrome", label: "Hide the HA header", type: "bool",
         boolDefault: true, auto: true, scope: "dashboard" },
+      { key: "hemma_idle_home", sub: "chrome", label: "Return to Home when idle",
+        type: "select", auto: true, scope: "dashboard",
+        options: ["", "1", "2", "5", "10"],
+        optionLabels: { "": "Off", "1": "After 1 minute", "2": "After 2 minutes",
+          "5": "After 5 minutes", "10": "After 10 minutes" },
+        hint: "Wall tablets only, so a desktop browser and a phone are never affected. "
+          + "A tablet left on a room goes back to Home, so whoever walks past next sees "
+          + "the house rather than the bathroom. Any touch resets it and an open popup "
+          + "pauses it." },
       { key: "hemma_hide_dialog_logbook", sub: "dialogs", label: "Hide dialog logbook", type: "bool",
         boolDefault: true, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
       { key: "hemma_hide_dialog_light_actions", sub: "dialogs", label: "Hide light dialog actions", type: "bool",
@@ -5151,6 +5208,9 @@ class HemmaPanel extends HTMLElement {
         :host(.narrow) .sheet { overflow:visible; flex:1 1 auto; margin:0; }
         :host(.phone) .top { padding-top:calc(max(8px, env(safe-area-inset-top, 0px)) + var(--hemma-mobile-chrome-drop, 4px)); padding-bottom:8px; }
         :host(.phone) .burger { display:none; }
+        /* One label at a time: the short one is the phone's. */
+        #save .s-short, #diffs .s-short { display:none; }
+        #save .s-long, #diffs .s-long { display:inline; }
         :host(.phone) #save .s-long { display:none; }
         :host(.phone) #save .s-short { display:inline; }
         :host(.phone) #diffs .s-long { display:none; }
@@ -10465,6 +10525,11 @@ class HemmaPanel extends HTMLElement {
     let mcfg = null;
     if (pair && pair.safe !== false) {
       try {
+        const sec = syncPairSections(pair);
+        if (sec.added) this._log(
+          `phone layout: ${sec.added} section(s) added for new room(s)`, "ok");
+        if (sec.removed) this._log(
+          `phone layout: ${sec.removed} section(s) removed with their room`, "ok");
         const st = syncPairTiles(pair);
         if (st.synced) this._log(`phone layout: ${st.synced} tile(s) kept in step`, "ok");
         if (st.added) this._log(`phone layout: ${st.added} tile(s) copied across`, "ok");
@@ -15177,6 +15242,7 @@ class HemmaPanel extends HTMLElement {
     if ((this._state || {}).surface === "mobile") return this._state;
     const p = this._pair;
     if (!p || p.safe === false) return null;
+    syncPairSections(p);
     syncPairTiles(p);
     syncScenesMobile(p, this._scenesOn());
     syncCamerasMobile(p, this._hass);

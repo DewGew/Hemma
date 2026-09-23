@@ -158,10 +158,12 @@ hemma_entity:
     }
 
     /* Toggle tracks the tile unit, like the icon circle, so it stays proportional to the
-       card. Unitless: a wrapper span scales, the SVG keeps its natural box. On :host so it
-       also reaches cards whose root element the ha-card selector does not match. */
+       card. A fraction of the height, never height/200px: dividing a length by a length
+       is CSS Values 4 and Firefox drops the whole declaration. On :host so it also
+       reaches cards whose root element the ha-card selector does not match. */
     :host {
-      --hemma-toggle-scale: calc(var(--hemma-entity-height-current, 200px) / 200px);
+      --hemma-toggle-width: calc(var(--hemma-entity-height-current, 200px) * 0.23);
+      --hemma-toggle-height: calc(var(--hemma-entity-height-current, 200px) * 0.13);
     }
 
     ha-card {
@@ -172,8 +174,6 @@ hemma_entity:
          stroke 4 in a 36 viewBox), i.e. ~0.8x the icon circle. */
       --hemma-progress-size-mq: calc(var(--hemma-icon-circle-size, 44px) * var(--hemma-progress-icon-ratio, 0.9));
       --hemma-icon-circle-size: calc(var(--hemma-entity-height-current, 200px) * var(--hemma-icon-circle-ratio, 0.22));  /* hemma_thermostat's temp puck reads this too */
-      --hemma-toggle-width: calc(46px * var(--hemma-toggle-scale, 1));
-      --hemma-toggle-height: calc(26px * var(--hemma-toggle-scale, 1));
       /* Every top-corner extra centers on this, so the toggle, the progress ring and
          the thermostat's rail stay in line with the icon circle at every tile size. */
       --hemma-icon-center-y: calc(
@@ -237,7 +237,8 @@ hemma_entity:
       ha-card {
         --hemma-height-mq: 100%;  /* the grid track owns the height */
         --hemma-icon-circle-size: 42px;
-        --hemma-toggle-scale: 1;  /* height-current is not this tier's tile height */
+        --hemma-toggle-width: 46px;   /* height-current is not this tier's tile height */
+        --hemma-toggle-height: 26px;
         --hemma-tile-areas-mq: "i n" "i s";
         --hemma-tile-cols-mq: auto minmax(0, 1fr);
         --hemma-tile-rows-mq: auto auto;
@@ -263,7 +264,7 @@ hemma_entity:
       ha-card {
         /* Phone tiles stay flat: drop the desktop rim, not just dim it. */
         --hemma-box-shadow-mq: var(--hemma-tile-glass-rim, inset 0 1px 0 -0.5px rgba(255,255,255,0.10), 0 2px 8px rgba(0,0,0,0.10));
-        --hemma-toggle-width: calc(40px * var(--hemma-toggle-scale, 1));
+        --hemma-toggle-width: 40px;
         --hemma-progress-icon-ratio: 0.8;
         --hemma-entity-active-tint-current: var(--hemma-entity-active-tint-mobile, var(--hemma-entity-active-tint, rgba(255,255,255,1)));
       }
@@ -523,8 +524,8 @@ hemma_entity:
           @keyframes hemma-thumb-off-m{from{transform:translateX(12px)}to{transform:translateX(0)}}
           :host {
             display: block !important;
-            width: var(--hemma-toggle-width, calc(46px * var(--hemma-toggle-scale, 1))) !important;
-            height: var(--hemma-toggle-height, calc(26px * var(--hemma-toggle-scale, 1))) !important;
+            width: var(--hemma-toggle-width, 46px) !important;
+            height: var(--hemma-toggle-height, 26px) !important;
             overflow: visible !important;
             cursor: pointer;
           }

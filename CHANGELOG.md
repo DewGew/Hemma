@@ -1,6 +1,31 @@
 # Changelog
 
-## Unreleased
+## 2.1.1
+
+**Open Hemma Studio and press Save once after updating.** Several fixes below
+live in Hemma's card templates, and those reach your dashboard when Studio
+saves, not when HACS updates the integration. Until you save, the update is
+installed but the templates in your dashboard are still the old ones. This
+applies to the Firefox toggle fix in particular.
+
+- **The Save button no longer reads "Save changesSave".** Hemma Studio carries
+  both a wide and a narrow label for that button and only ever hid the wide one
+  on a phone, so every other width drew the two of them back to back.
+
+- **Toggles are the right size in Firefox.** A tile's toggle sized itself from
+  a ratio of two lengths. Chrome and Safari work that out; Firefox does not, and
+  because a custom property that fails takes every property built on it down
+  with it, the toggle lost its width entirely and grew to fill the tile. The
+  size is a fraction of the tile height now, which every browser accepts, and
+  the toggle is the same size as before everywhere else. Reported in
+  [#72](https://github.com/willsanderson/Hemma/issues/72).
+
+- **Hemma Studio on a phone is the same editor as on a desktop.** The phone had
+  no equivalent of the sidebar, so Badges and Tiles were unreachable and the
+  sections came in band order with no grouping. It now shows the same grouped
+  list, under the room's name and Dashboard, with Badges and Tiles as rows. The
+  large title also stopped being hidden behind the toolbar, which had left the
+  header collapsed for good.
 
 - **Hemma's scripts ship with the integration.** They used to be served from
   `www/hemma/scripts/`, the folder you copy in by hand, which HACS never
@@ -42,6 +67,48 @@
   Templates of your own that a tile already uses appear there on upgrade.
   Reported in [#67](https://github.com/willsanderson/Hemma/issues/67).
 
+- **Rooms you add or delete reach the phone layout.** Hemma matched each
+  desktop room to a phone section by name and worked out which had no partner,
+  but that only ever reached the log, so deleting a room left its section on the
+  phone with nothing to remove it, and a new room never got one. Saving now
+  keeps them in step both ways. A section holding a tile you placed by hand is
+  never removed, only ones whose tiles all came from the room. Reported in
+  [#72](https://github.com/willsanderson/Hemma/issues/72).
+
+- **The notification center takes sources of your own.** Adding a letterbox, a
+  weather warning or a bin collection meant editing `hemma-core.js`, which an
+  update then overwrote, so the same patch had to be reapplied every time. There
+  is now a hook: put objects on `window.HEMMA_NOTIFY_EXTENSIONS` with any of
+  `watch` (extra entities to read from the logbook), `describe` (turn a logbook
+  entry into a row, or return `undefined` to let Hemma's own rules handle it)
+  and `standing` (add to or replace the live rows). Each gets a small `api` with
+  `on`, `nameOf`, `tidyName` and `dc` so a source of yours reads like a built-in
+  one. An extension that throws is logged and skipped rather than taking the
+  notification center down with it. Proposed in
+  [#71](https://github.com/willsanderson/Hemma/issues/71).
+
+- **A wall tablet can return to Home on its own.** Left on a room, a tablet
+  stays there, so whoever walks past next sees the bathroom rather than the
+  house. Hemma Studio > General > Dashboard has "Return to Home when idle" with
+  a wait of 1, 2, 5 or 10 minutes, off by default. Tablets only, on the same
+  test the tablet navigation uses, so a desktop browser and a phone are never
+  affected. Any touch, key or scroll resets it, an open popup pauses it so it
+  never pulls you away from a camera, and a tablet waking from sleep is checked
+  straight away rather than at the next tick. Requested in
+  [#73](https://github.com/willsanderson/Hemma/issues/73).
+
+- **Hemma's own text can be translated.** Dashboard strings were written into
+  the templates in English with no way to change them short of editing the
+  templates, which an update then overwrote. There is now a translation layer:
+  English stays at the call site as the fallback, and any other language is
+  read from `custom_components/hemma/translations/dashboard/`. The first
+  strings through it are the phone's filter pills, the people badge, the
+  thermostat and the mobile weather card. Only English ships so far, so nothing
+  looks different yet; adding a language is a JSON file and a rebuild, and
+  Home Assistant's own vocabulary already follows your HA language. More of
+  Hemma's text moves across in later releases. Raised in
+  [#68](https://github.com/willsanderson/Hemma/issues/68).
+
 - **Performance mode.** Backdrop blur is what makes Hemma crawl on a cheap
   tablet: every blurred layer is a full screen GPU readback per frame, and they
   stack. Studio > General > Performance makes the dashboard's own surfaces
@@ -59,14 +126,10 @@
   bogus reading for a moment (`100 -> 3 -> 100`), which raised a "Battery low"
   notice for a device that was fine. A battery now counts as low only once it
   has read low for 30 minutes without a break. Set the wait under Notifications
-  > Advanced > "Low battery for at least (minutes)"; 0 restores the old
-  immediate notice. A battery that has been low since before the page loaded
+  > Advanced > "Low battery hold (minutes)"; 0 restores the old immediate
+  notice. A battery that has been low since before the page loaded
   still shows straight away, and a drop from 19% to 18% no longer restarts the
   wait. Reported in [#70](https://github.com/willsanderson/Hemma/issues/70).
-
-## 2.1.1
-
-Documentation only. Nothing in the integration itself changed.
 
 - **The README leads with the install steps.** Installation sat behind every
   screenshot, which in the HACS panel meant scrolling past all of them to
