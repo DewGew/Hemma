@@ -16,6 +16,45 @@ const REQUIREMENTS = [
 
 const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
 
+const TILE_OWN_KEYS = new Set(["enabled", "surfaces", "size", "hemma_derived",
+  "hemma_from_room", "hemma_ui_managed", "hemma_tile", "mobile_filter_category"]);
+
+const CUSTOM_TEMPLATE = "hemma_custom";
+
+// A pasted card is hosted by a Hemma tile rather than dropped in beside one:
+// the surface, the radius, the size and the hiding rules are the tile's, and
+// the card only draws inside it. Hemma's own keys move up to the host, since
+// it is the host that smart-row and the form read them from.
+const wrapCustomCard = (card, extra) => {
+  const inner = { ...card };
+  const own = {};
+  Object.keys(inner.variables || {}).forEach((k) => {
+    if (TILE_OWN_KEYS.has(k)) own[k] = inner.variables[k];
+  });
+  if (Object.keys(own).length) {
+    const rest = { ...inner.variables };
+    Object.keys(own).forEach((k) => delete rest[k]);
+    if (Object.keys(rest).length) inner.variables = rest;
+    else delete inner.variables;
+  }
+  const out = {
+    type: "custom:button-card",
+    template: CUSTOM_TEMPLATE,
+    name: inner.name || inner.title || "Custom card",
+    custom_fields: { card: inner },
+  };
+  const vars = { ...own, ...(extra || {}) };
+  if (Object.keys(vars).length) out.variables = vars;
+  return out;
+};
+
+const isBareCard = (c) => !!c && typeof c === "object" && !Array.isArray(c)
+  && !c.template && String(c.type || "").indexOf("custom:hemma-") !== 0;
+
+// Bare cards predate the host and are brought into it on the way in.
+const hostBareTiles = (list) => (list || []).map(
+  (c) => (isBareCard(c) ? wrapCustomCard(c) : c));
+
 function stable(x) {
   if (x === null || typeof x !== "object") return JSON.stringify(x);
   if (Array.isArray(x)) return "[" + x.map(stable).join(",") + "]";
@@ -75,7 +114,7 @@ function extractConfig(lovelace) {
       path: v.path,
       name: hero.name,
       variables: clone(hero.variables) || {},
-      tiles: clone(row.cards) || [],
+      tiles: hostBareTiles(clone(row.cards) || []),
       _hero: omit(hero, ["name", "variables"]),
       _row: omit(row, ["cards"]),
       _view: omit(v, ["type", "layout", "title", "path", "cards"]),
@@ -161,7 +200,8 @@ function extractMobileConfig(lovelace) {
     const card = kids[i] || {};
     const next = kids[i + 1];
     if (card.template === MOBILE_HEADER && next && next.type === SMART_ROW) {
-      const room = { tiles: clone(next.cards) || [], variables: clone(card.variables) || {} };
+      const room = { tiles: hostBareTiles(clone(next.cards) || []),
+        variables: clone(card.variables) || {} };
       put(room, "name", clone(card.name));
       room._header = omit(card, ["name", "variables"]);
       room._row = omit(next, ["cards"]);
@@ -646,10 +686,16 @@ function pairConflicts(pair) {
 }
 
 // Phone-only tile keys a sync must not wipe. `size` is not one: it is inert on the wide side.
-const MOBILE_ONLY_TILE_KEYS = ["mobile_filter_category"];
+const MOBILE_ONLY_TILE_KEYS = ["mobile_filter_category", "hemma_from_room"];
 
 function tileTwinKey(t) {
-  return stable([t.template, t.entity || ""]);
+  // A hosted card keeps its entity inside the card it hosts, so every custom
+  // tile would key the same and only the first would ever reach the phone.
+  if (t.template === CUSTOM_TEMPLATE) {
+    const card = (t.custom_fields || {}).card || {};
+    return stable([t.template, t.name || "", card.type || "", card.entity || ""]);
+  }
+  return stable([t.template || t.type, t.entity || ""]);
 }
 
 // Matched by template AND entity, never by position.
@@ -858,7 +904,13 @@ function syncPairTiles(pair) {
       if (!mt) return;
       onPhone.add(tileTwinKey(mt));
       const twin = byKey.get(tileTwinKey(mt));
-      if (!twin) { unmatched.push({ section: sec.name, tile: mt.name || mt.entity || "?" }); return; }
+      if (!twin) {
+        const copied = (mt.variables || {}).hemma_from_room;
+        if (!(copied === undefined ? !!tileTypeOf(mt) : copied)) {
+          unmatched.push({ section: sec.name, tile: mt.name || mt.entity || "?" });
+        }
+        return;
+      }
       const keep = {};
       MOBILE_ONLY_TILE_KEYS.forEach((k) => {
         if (mt.variables && mt.variables[k] !== undefined) keep[k] = clone(mt.variables[k]);
@@ -870,12 +922,16 @@ function syncPairTiles(pair) {
     });
 
     (room.tiles || []).forEach((t) => {
-      if (!t || !t.entity) return;
+      // No entity means a tile nobody has finished setting up, except a hosted
+      // card, whose entity is the card's business rather than the host's.
+      if (!t || (!t.entity && t.template !== CUSTOM_TEMPLATE)) return;
       const key = tileTwinKey(t);
       if (onPhone.has(key)) return;
       onPhone.add(key);
       sec.tiles = sec.tiles || [];
-      sec.tiles.push(clone(t));
+      const copy = clone(t);
+      copy.variables = { ...(copy.variables || {}), hemma_from_room: true };
+      sec.tiles.push(copy);
       added++;
     });
 
@@ -883,7 +939,12 @@ function syncPairTiles(pair) {
     sec.tiles = (sec.tiles || []).filter((mt) => {
       if (!mt) return false;
       if (mt.variables && mt.variables.hemma_derived) return true;
-      return byKey.has(tileTwinKey(mt));
+      if (byKey.has(tileTwinKey(mt))) return true;
+      // Only a tile Hemma copied out of the room follows its twin out again.
+      // One placed on the phone by hand never had a twin, so it stays. Tiles
+      // written before the marker existed fall back to "is this Hemma's shape".
+      const copied = (mt.variables || {}).hemma_from_room;
+      return !(copied === undefined ? !!tileTypeOf(mt) : copied);
     });
     dropped += before - sec.tiles.length;
 
@@ -990,8 +1051,6 @@ const SECTIONS = [
       { key: "image", label: "Background image", type: "image", always: true },
       { ...E("motion_entity", "Motion sensor", ["binary_sensor"]),
         hint: "Pulses a dot beside this room in the navigation, and shows a motion icon on the phone." },
-      { key: "__extras", label: "Other cards", type: "extras", noAdd: true,
-        hint: "Kept from the dashboard you imported. Hemma leaves them as they are, below the tiles." },
     ],
   },
   {
@@ -1001,6 +1060,7 @@ const SECTIONS = [
       { id: "chrome", label: "Dashboard" },
       { id: "dialogs", label: "Dialogs" },
       { id: "text", label: "Text" },
+      { id: "perf", label: "Performance" },
     ],
     fields: [
       { key: "show_assist", sub: "chrome", label: "Show Assist button", type: "bool",
@@ -1022,6 +1082,14 @@ const SECTIONS = [
         optionLabels: { "": "Default (theme)", inter: "Inter",
           hanken: "Hanken Grotesk", system: "System font" },
         hint: "System uses SF Pro on Apple devices." },
+      { key: "performance", sub: "perf", label: "Performance mode", type: "select",
+        auto: true, scope: "dashboard",
+        options: ["", "auto", "on"],
+        optionLabels: { "": "Off", auto: "Automatic", on: "On" },
+        hint: "Trades the blurred glass for opaque panels, which is what makes Hemma "
+          + "slow on cheap wall tablets. Automatic turns it on below 4GB of memory "
+          + "or 4 cores. To set it on one device only, open the dashboard there once "
+          + "with ?hemma_perf=on on the end of the URL." },
     ],
   },
   {
@@ -1089,6 +1157,8 @@ const SECTIONS = [
         auto: true, advanced: true, noAdd: true, ord: 21, placeholder: "10" },
       { ...T("notification_battery_threshold", "Low battery below (%)"),
         auto: true, advanced: true, noAdd: true, ord: 22, placeholder: "20" },
+      { ...T("notification_battery_hold_minutes", "Low battery hold (minutes)"),
+        auto: true, advanced: true, noAdd: true, ord: 23, placeholder: "30" },
     ],
   },
   {
@@ -1523,31 +1593,59 @@ function upgradeNavExtra(r) {
   return out;
 }
 
-function refreshTemplates(current, bundleTemplates) {
+function refreshTemplates(current, bundleTemplates, priorPrints) {
   const next = { ...(current || {}) };
+  const seen = priorPrints || {};
   const prints = {};
   const adopted = [];
-  let updated = 0, added = 0;
+  const mine = [];
+  const redeclared = [];
+  const unknown = [];
+  let updated = 0, added = 0, kept = 0;
 
   Object.keys(bundleTemplates).forEach((k) => {
-    const mine = next[k];
-    if (mine === undefined) added += 1;
-    else if (stable(mine) !== stable(bundleTemplates[k])) updated += 1;
-    next[k] = bundleTemplates[k];
-    prints[k] = hashStr(stable(bundleTemplates[k]));
-    adopted.push(k);
+    const have = next[k];
+    const ship = bundleTemplates[k];
+    const shipPrint = hashStr(stable(ship));
+    const take = () => { next[k] = ship; prints[k] = shipPrint; adopted.push(k); };
+    if (have === undefined) { added += 1; take(); return; }
+    const havePrint = hashStr(stable(have));
+    if (havePrint === shipPrint) { prints[k] = shipPrint; adopted.push(k); return; }
+    const last = seen[k];
+    if (last === havePrint) { updated += 1; take(); return; }
+    // No record of it either way, so an old Hemma and a hand edit look the
+    // same. Set it back, but name it rather than go quiet.
+    if (last === undefined) { unknown.push(k); take(); return; }
+    // Hemma is not what wrote this one, so it is the user's to keep. Its
+    // variables: block still declares the fields Studio builds its form from,
+    // so ship's declarations fill any the fork dropped without touching a value.
+    const theirs = (have && have.variables) || null;
+    const shipVars = (ship && ship.variables) || null;
+    if (shipVars && theirs && stable(theirs) !== stable({ ...shipVars, ...theirs })) {
+      next[k] = { ...have, variables: { ...shipVars, ...theirs } };
+      redeclared.push(k);
+    }
+    prints[k] = last;
+    kept += 1;
+    mine.push(k);
   });
 
   const removed = [];
   const foreign = [];
+  const orphan = [];
   Object.keys(next).forEach((k) => {
     if (bundleTemplates[k] !== undefined) return;
-    if (k.indexOf("hemma_") === 0) { delete next[k]; removed.push(k); }
-    else foreign.push(k);
+    const ours = k.indexOf("hemma_") === 0;
+    if (ours && seen[k] !== undefined && seen[k] === hashStr(stable(next[k]))) {
+      delete next[k];
+      removed.push(k);
+      return;
+    }
+    (ours ? orphan : foreign).push(k);
   });
 
-  return { templates: next, prints, adopted, updated, added, kept: 0,
-    removed, foreign };
+  return { templates: next, prints, adopted, mine, redeclared, unknown, updated,
+    added, kept, removed, foreign, orphan };
 }
 
 const slug = (s) =>
@@ -1782,7 +1880,6 @@ function retargetRoutes(root, urlPath, rooms, extras) {
 }
 
 
-
 // Inlined as data URIs: a fetch, even from cache, races the render that asks for them.
 const ICON_DATA = {
   "alarm-fill": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2018.6727%2021.9079%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2221.9079%22%20opacity%3D%220%22%20width%3D%2218.6727%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M9.33013%2020.2344C14.4884%2020.2344%2018.6727%2016.0603%2018.6727%2010.9042C18.6727%205.74811%2014.4884%201.5741%209.33013%201.5741C4.17612%201.5741%204.44089e-16%205.74811%204.44089e-16%2010.9042C4.44089e-16%2016.0603%204.17612%2020.2344%209.33013%2020.2344ZM4.89525%2011.985C4.50976%2011.985%204.21341%2011.6887%204.21341%2011.3011C4.21341%2010.9302%204.50976%2010.6317%204.89525%2010.6317L8.6504%2010.6317L8.6504%205.3952C8.6504%205.00971%208.94886%204.71547%209.31978%204.71547C9.70738%204.71547%2010.0037%205.00971%2010.0037%205.3952L10.0037%2011.3011C10.0037%2011.6887%209.70738%2011.985%209.31978%2011.985ZM1.31884%204.08096C1.45591%204.08096%201.56384%204.05604%201.70091%203.94811L4.98116%201.48034C5.14315%201.35784%205.21791%201.21253%205.21791%201.05054C5.21791%200.842923%205.13069%200.67269%204.95412%200.521049C4.58241%200.178473%203.92238%200%203.34093%200C1.81075%200%200.594398%201.21846%200.594398%202.73598C0.594398%203.09695%200.660723%203.46636%200.760411%203.68854C0.866228%203.92932%201.06751%204.08096%201.31884%204.08096ZM17.3518%204.08096C17.5927%204.08096%2017.794%203.91897%2017.9123%203.68854C18.0202%203.47671%2018.0783%203.09695%2018.0783%202.73598C18.0783%201.21846%2016.8599%200%2015.3214%200C14.74%200%2014.08%200.178473%2013.7082%200.521049C13.542%200.67269%2013.4445%200.842923%2013.4445%201.05054C13.4445%201.21253%2013.5296%201.35784%2013.6916%201.48034L16.9593%203.94811C17.0964%204.05604%2017.2043%204.08096%2017.3518%204.08096ZM1.17042%2019.9665C1.46466%2020.2629%201.94331%2020.2629%202.2479%2019.9562L4.08347%2018.1185L3.03092%2017.0638L1.18077%2018.9119C0.876179%2019.2061%200.884419%2019.6827%201.17042%2019.9665ZM17.5023%2019.9665C17.7862%2019.6827%2017.7944%2019.2061%2017.492%2018.9119L15.6315%2017.0638L14.5789%2018.1185L16.4227%2019.9562C16.7294%2020.2629%2017.206%2020.2629%2017.5023%2019.9665Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
@@ -1950,6 +2047,7 @@ const TILE_TINT = "var(--hemma-color-teal, #00C3D0)";
 
 // Fallback glyph per tile kind, for tiles that set no icon of their own.
 const TILE_ICON = {
+  custom: "default",
   light: "light", thermostat: "thermostat", media: "speaker", fan: "fan",
   game: "play",
   cover: "curtain-open", vacuum: "vacuum", air_purifier: "purifier",
@@ -2254,6 +2352,8 @@ const TILE_TYPES = [
       ICON_FIELD,
       { key: "room_name", label: "Popup title", type: "text", advanced: true },
     ] },
+  { id: "custom", label: "Custom card", template: "hemma_custom", hidden: true,
+    noEntity: true, domains: [], fields: [] },
   { id: "lock_group", label: "Lock group", hidden: true, multiEntity: true,
     template: ["hemma_lock", "hemma_popup_lock"],
     domains: ["lock"], fields: [
@@ -2288,6 +2388,21 @@ const TILE_TYPES = [
     ] },
 ];
 
+const CUSTOM_TILE = { id: "__custom", label: "Custom card\u2026" };
+
+// A pasted card has no template, so none of its own keys are Hemma's to edit.
+// What Hemma reads sits in variables, and that is all this type offers.
+const RAW_TILE = { id: "__raw", label: "Custom card", noEntity: true,
+  domains: [], fields: [], raw: true };
+const CUSTOM_IN_ROW = "row";
+const CUSTOM_BELOW = "below";
+
+const EXTRAS_FIELD = {
+  key: "__extras", label: "Other cards", type: "extras",
+  hint: "Cards Hemma does not manage. They sit below the tiles, exactly as "
+    + "they are written. Add one with Custom card in the tile picker.",
+};
+
 const HINT_BLOCKS = ".grouphead p, .band.detail .card > .chead .blurb, .hint,"
   + " .sortstrip .sortnote,"
   + " .band .grouphead";
@@ -2311,25 +2426,323 @@ const MOBILE_TILE_FIELDS = [SURFACE_FIELD, SIZE_FIELD];
 const tileFieldsFor = (type, phone) => (type && type.fields ? type.fields : [])
   .concat(phone === true || phone === "mobile" ? MOBILE_TILE_FIELDS : []);
 
-const tileTypeOf = (tile) => {
+const tileLabel = (tile) => {
   const t = tile.template;
-  if (typeof t === "string") return TILE_TYPES.find((x) => x.template === t) || null;
+  return Array.isArray(t) ? t.join(" + ") : String(t || tile.type || "card");
+};
+
+// Tile types the user brought, derived from the templates Hemma does not own.
+// Nothing new is stored: a template that is not hemma_'s is a tile type.
+const USER_TILE_TYPES = [];
+
+
+const ENTITY_ID = /^[a-z_]+\.[a-z0-9_]+$/;
+
+
+const prettyKey = (k) => String(k).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+
+function userTypeFields(tpl) {
+  const declared = (tpl && tpl.variables) || {};
+  return Object.keys(declared).filter((k) => !TILE_OWN_KEYS.has(k)).map((k) => {
+    const def = declared[k];
+    if (typeof def === "boolean") {
+      return { key: k, label: prettyKey(k), type: "bool", boolDefault: def };
+    }
+    if (typeof def === "string" && ENTITY_ID.test(def)) {
+      return { key: k, label: prettyKey(k), domains: [def.split(".")[0]] };
+    }
+    return { key: k, label: prettyKey(k), type: "text" };
+  });
+}
+
+// A template earns a place in the picker by evidence, not by not being Hemma's.
+// Either a tile in some room already uses it, or it says so itself. Popup and
+// base templates say neither, so they stay out.
+function syncUserTileTypes(templates, rooms, alsoInUse, prints) {
+  USER_TILE_TYPES.length = 0;
+  const inUse = new Set(alsoInUse || []);
+  const ours = prints || {};
+  (rooms || []).forEach((r) => (r.tiles || []).forEach((t) => {
+    if (t && typeof t.template === "string") inUse.add(t.template);
+  }));
+  Object.keys(templates || {}).forEach((name) => {
+    if (name.indexOf("hemma_") === 0) return;
+    // The fingerprint, not the name, is what says who owns a template. One that
+    // arrived in Hemma's bundle is Hemma's however it happens to be spelled,
+    // and calling it "yours" would promise an edit that the next save reverts.
+    if (ours[name] !== undefined) return;
+    const tpl = templates[name] || {};
+    const optedIn = !!(tpl.variables && tpl.variables.hemma_tile);
+    if (!inUse.has(name) && !optedIn) return;
+    USER_TILE_TYPES.push({
+      id: "user:" + name,
+      label: prettyKey(name),
+      template: name,
+      user: true,
+      domains: ACTION_DOMAINS,
+      entityPlaceholder: "The entity this tile shows",
+      fields: userTypeFields(tpl),
+    });
+  });
+  return USER_TILE_TYPES.length;
+}
+
+const findType = (pool, t) => {
+  if (typeof t === "string") return pool.find((x) => x.template === t) || null;
   if (Array.isArray(t)) {
-    return TILE_TYPES.find(
+    return pool.find(
       (x) => Array.isArray(x.template) && stable(x.template) === stable(t)
     ) || null;
   }
   return null;
 };
 
-const tileLabel = (tile) => {
-  const t = tile.template;
-  return Array.isArray(t) ? t.join(" + ") : String(t || tile.type || "card");
-};
+// Built-ins only. Pair sync asks "is this Hemma's shape", and a user's tile is
+// deliberately not, so this must not widen when their types are registered.
+const tileTypeOf = (tile) => findType(TILE_TYPES, tile.template);
+
+// Everything the form can edit, the user's types included.
+const tileTypeAny = (tile) =>
+  tileTypeOf(tile) || findType(USER_TILE_TYPES, tile.template);
 
 function newTile(type) {
   return { type: "custom:button-card", template: type.template, entity: "", name: type.label };
 }
+
+// Candidate for hemma-panel.js: enough YAML to read a card config off the
+// clipboard. Anything it cannot read, it refuses by line rather than guessing.
+
+function stripComment(line) {
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === q) q = null; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (c === "#" && (i === 0 || /\s/.test(line[i - 1]))) return line.slice(0, i);
+  }
+  return line;
+}
+
+// "content: |" is how half the cards in the wild carry their text, and the
+// parser below is indent driven, so the block is folded into one quoted scalar
+// before it ever sees it. Quoting also protects a markdown "## heading" from
+// the comment stripper.
+function foldBlockScalars(src) {
+  const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  const quote = (s) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n") + '"';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\t/g, "  ");
+    const m = line.match(/^(\s*)([^:#]+):\s*([|>])([+-]?)\d*\s*$/);
+    if (!m) { out.push(line); continue; }
+    const pad = m[1], key = m[2], style = m[3], chomp = m[4];
+    const body = [];
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+      const l = lines[j].replace(/\t/g, "  ");
+      if (!l.trim()) { body.push(""); continue; }
+      if (l.length - l.replace(/^ +/, "").length <= pad.length) break;
+      body.push(l);
+    }
+    while (body.length && !body[body.length - 1].trim()) body.pop();
+    if (!body.length) { out.push(pad + key + ": \"\""); i = j - 1; continue; }
+    const strip = Math.min.apply(null, body.filter((b) => b.trim())
+      .map((b) => b.length - b.replace(/^ +/, "").length));
+    let text = body.map((b) => b.slice(strip)).join("\n");
+    if (style === ">") {
+      text = text.split(/\n{2,}/).map((p) => p.replace(/\n/g, " ")).join("\n\n");
+    }
+    if (chomp !== "-") text += "\n";
+    out.push(pad + key + ": " + quote(text));
+    i = j - 1;
+  }
+  return out.join("\n");
+}
+
+function yamlLines(src) {
+  const out = [];
+  String(src).replace(/\r\n?/g, "\n").split("\n").forEach((raw) => {
+    const body = stripComment(raw.replace(/\t/g, "  "));
+    if (!body.trim()) return;
+    out.push({ indent: body.length - body.replace(/^ +/, "").length, text: body.trim() });
+  });
+  return out;
+}
+
+function yamlScalar(t) {
+  if (t === "" || t === "~" || t === "null") return null;
+  if (t === "true") return true;
+  if (t === "false") return false;
+  if (/^-?\d+$/.test(t)) return parseInt(t, 10);
+  if (/^-?\d*\.\d+$/.test(t)) return parseFloat(t);
+  const q = t[0];
+  if ((q === '"' || q === "'") && t.slice(-1) === q && t.length > 1) {
+    const body = t.slice(1, -1);
+    return q === '"'
+      ? body.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+      : body.replace(/''/g, "'");
+  }
+  if (q === "{" || q === "[") {
+    try { return JSON.parse(t); } catch (e) {
+      throw new Error("Could not read this value: " + t);
+    }
+  }
+  return t;
+}
+
+function yamlNode(lines, i, indent) {
+  return lines[i].text[0] === "-"
+    ? yamlList(lines, i, indent) : yamlMap(lines, i, indent);
+}
+
+function yamlMap(lines, i, indent) {
+  const out = {};
+  while (i < lines.length && lines[i].indent >= indent) {
+    if (lines[i].indent > indent) throw new Error("Unexpected indent at: " + lines[i].text);
+    const m = lines[i].text.match(/^([^:]+):(?:\s+(.*))?$/);
+    if (!m) throw new Error("Expected \"key: value\" at: " + lines[i].text);
+    const key = m[1].trim().replace(/^["']|["']$/g, "");
+    const rest = (m[2] || "").trim();
+    if (rest) { out[key] = yamlScalar(rest); i++; continue; }
+    const nxt = lines[i + 1];
+    if (nxt && (nxt.indent > indent
+      || (nxt.indent === indent && nxt.text[0] === "-"))) {
+      const r = yamlNode(lines, i + 1, nxt.indent);
+      out[key] = r[0]; i = r[1]; continue;
+    }
+    out[key] = null; i++;
+  }
+  return [out, i];
+}
+
+function yamlList(lines, i, indent) {
+  const out = [];
+  while (i < lines.length && lines[i].indent === indent && lines[i].text[0] === "-") {
+    const rest = lines[i].text.slice(1).trim();
+    if (!rest) {
+      const nxt = lines[i + 1];
+      if (nxt && nxt.indent > indent) {
+        const r = yamlNode(lines, i + 1, nxt.indent);
+        out.push(r[0]); i = r[1];
+      } else { out.push(null); i++; }
+      continue;
+    }
+    if (/^[^:]+:(\s|$)/.test(rest)) {
+      // "- key: value" opens a map; its siblings sit under the dash.
+      const inner = [{ indent: 0, text: rest }];
+      const off = lines[i].indent + 2;
+      let j = i + 1;
+      while (j < lines.length && lines[j].indent >= off) {
+        inner.push({ indent: lines[j].indent - off, text: lines[j].text });
+        j++;
+      }
+      out.push(yamlMap(inner, 0, 0)[0]);
+      i = j; continue;
+    }
+    out.push(yamlScalar(rest)); i++;
+  }
+  return [out, i];
+}
+
+// One paste box, two things worth pasting: a card, or a template that becomes a
+// reusable tile type. Telling them apart is what lets people skip the raw
+// config editor entirely.
+function parsePasted(text) {
+  const src = String(text || "").trim();
+  if (!src) throw new Error("Paste a card or a template first.");
+  let doc;
+  if (src[0] === "{" || src[0] === "[") {
+    try { doc = JSON.parse(src); } catch (e) {
+      throw new Error("That looks like JSON but does not parse: " + e.message);
+    }
+  } else {
+    const lines = yamlLines(foldBlockScalars(src));
+    if (!lines.length) throw new Error("Paste a card or a template first.");
+    if (lines[0].indent) throw new Error("The first line should not be indented.");
+    doc = yamlNode(lines, 0, 0)[0];
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    throw new Error("A card is a set of keys, starting with \"type:\".");
+  }
+  if (doc.type) return { kind: "card", card: doc };
+
+  const keys = Object.keys(doc);
+  const body = keys.length === 1 ? doc[keys[0]] : null;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    if (keys[0].indexOf("hemma_") === 0) {
+      throw new Error("Names beginning with \"hemma_\" belong to Hemma and are "
+        + "replaced when it updates. Give yours a different name.");
+    }
+    return { kind: "template", name: keys[0], template: body };
+  }
+  throw new Error("A card needs a \"type:\" line.");
+}
+
+const parseCardText = (text) => {
+  const got = parsePasted(text);
+  if (got.kind !== "card") throw new Error("That is a template, not a card.");
+  return got.card;
+};
+
+// The inverse of the parser above, held to the same grammar: whatever this
+// writes, parsePasted has to read back.
+function yamlScalarText(v) {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "boolean" || typeof v === "number") return String(v);
+  if (typeof v === "object") return JSON.stringify(v);
+  const s = String(v);
+  // " #" is a comment to the parser and ": " opens a map, so neither stays bare.
+  const bare = s !== ""
+    && !/^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
+    && !/:\s|:$|\s#|^\s|\s$|\n/.test(s)
+    && !/^(true|false|null|~|-?\d+(\.\d+)?)$/.test(s);
+  return bare ? s
+    : '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
+}
+
+function yamlEmit(obj, indent, out) {
+  const pad = " ".repeat(indent);
+  Object.keys(obj).forEach((k) => {
+    const v = obj[k];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      if (!Object.keys(v).length) { out.push(pad + k + ": {}"); return; }
+      out.push(pad + k + ":");
+      yamlEmit(v, indent + 2, out);
+      return;
+    }
+    if (Array.isArray(v)) {
+      if (!v.length) { out.push(pad + k + ": []"); return; }
+      out.push(pad + k + ":");
+      v.forEach((item) => {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const inner = [];
+          yamlEmit(item, 0, inner);
+          inner.forEach((line, n) => out.push(pad + "  " + (n ? "  " : "- ") + line));
+          return;
+        }
+        out.push(pad + "  - " + yamlScalarText(item));
+      });
+      return;
+    }
+    if (typeof v === "string" && v.indexOf("\n") >= 0) {
+      // Written back the way it was pasted, so Edit stays readable.
+      const keep = /\n$/.test(v);
+      out.push(pad + k + ": |" + (keep ? "" : "-"));
+      v.replace(/\n$/, "").split("\n").forEach((line) => {
+        out.push(line ? pad + "  " + line : "");
+      });
+      return;
+    }
+    out.push(pad + k + ": " + yamlScalarText(v));
+  });
+}
+
+const cardToText = (card) => {
+  const out = [];
+  yamlEmit(card, 0, out);
+  return out.join("\n") + "\n";
+};
 
 
 const ENTITY_ACTIVE_STATES = ["on", "open", "opening", "unlocked", "unlocking",
@@ -6201,19 +6614,92 @@ class HemmaPanel extends HTMLElement {
         .band.detail .card > .chead { cursor:default; }
         /* Label over its summary, the control at the end: the same shape as a
            tile row, so an unmanaged card does not read as a setting. */
+        /* Flex, not the shared grid: this row reads as a tile row, and the
+           grid columns it would inherit are for label-and-control settings.
+           --sicon is set here because nothing in a .row defines it. */
         .row.extrarow {
-          grid-template-columns:minmax(0, 1fr) auto; align-items:center; row-gap:2px;
+          display:flex; align-items:center; gap:12px;
         }
-        .row.extrarow > label { grid-column:1; grid-row:1; min-width:0; }
+        .row.extrarow > .sicon { --sicon:30px; flex:0 0 var(--sicon); }
+        .row.extrarow > label { flex:1 1 auto; min-width:0; }
         .row.extrarow > .extrasub {
-          grid-column:1; grid-row:2; justify-self:start; min-width:0; max-width:100%;
+          flex:0 1 auto; min-width:0; max-width:50%;
           font-size:13px; color:var(--ink-2);
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
         }
-        .row.extrarow > .rowmenu { grid-column:2; grid-row:1 / span 2; align-self:center; }
+        .row.extrarow > .rowmenu { flex:0 0 auto; }
+        /* Its own group, so it sits off the tile panel by the same gap the
+           columns use rather than reading as the last row of it. */
+        .card.extracard { margin-top:var(--gap); border-radius:var(--r-group); }
+        .card.extracard > .subtitle:first-child { padding-top:8px; }
+        .card.extracard .hint { margin-top:2px; }
+        textarea.fin.fmono {
+          display:block; width:100%; box-sizing:border-box;
+          font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;
+          min-height:min(26em, 46vh); resize:vertical;
+          white-space:pre; overflow:auto; tab-size:2;
+          /* A selected first or last line is drawn to the edge, so it needs to
+             clear the corner arc rather than be cut by it. */
+          padding:14px 16px; border-radius:16px;
+        }
+        .askstack.wide .fieldwarn { margin:10px 0 0; }
+        .askstack.wide { width:min(780px, 94vw); }
+        .askstack.wide .askcard { padding:28px 26px 18px; text-align:left; }
+        .askstack.wide .askcard h3 { text-align:left; }
+        .askstack.wide .askcard p { text-align:left; max-width:46em; }
+        .askstack.wide .askcard .flist > .frow.askpaste { padding:0; background:none; }
+        /* The paste box is the only surface in here. The list's own fill and
+           its overflow:hidden were clipping the focus ring at the corners. */
+        .askstack.wide .askcard .flist {
+          background:none; border-radius:0; overflow:visible;
+        }
+        .askstack.wide .askcard .flist > .frow + .frow::before { content:none; }
+        /* The one surface in the dialog, on the same token the rows it replaced
+           used. Against the glass, --field alone reads as a hole. */
+        .askstack.wide textarea.fin.fmono {
+          background-color:var(--hemma-popup-row-fill, rgba(255,255,255,0.10));
+          border-color:var(--hemma-popup-ui-divider, rgba(255,255,255,0.10));
+        }
+        .askstack.wide textarea.fin.fmono:focus {
+          background-color:var(--hemma-popup-row-fill-hi, rgba(255,255,255,0.14));
+          border-color:var(--accent);
+        }
+        .askstack.wide .askchoice {
+          justify-content:flex-end; gap:12px; padding:14px 2px 0; min-height:0;
+        }
+        /* A footer control, not a settings row: the 17px row size reads huge here. */
+        .askstack.wide .askchoice .combo > input {
+          font-size:14.5px; height:34px; padding:0 12px;
+        }
+        :host(.nohints) .askstack.wide .askcard > p {
+          height:0; min-height:0; opacity:0; overflow:hidden;
+          margin-top:0; margin-bottom:0;
+        }
+        :host(.nohints) .askstack.wide .askcard .flist { margin-top:14px; }
+        /* The stacked full width buttons are the phone's sheet pattern. On a
+           desktop dialog they read as two banners, so both sizes get the
+           macOS row: Cancel, then the one that acts. */
+        :host(:not(.phone)) .askacts {
+          flex-direction:row; justify-content:center; align-items:center;
+          gap:10px; margin-top:18px;
+        }
+        /* An alert centers its two actions; a form footer lines them up with
+           the field above it. */
+        :host(:not(.phone)) .askstack.wide .askacts { justify-content:flex-end; }
+        :host(:not(.phone)) .askacts button {
+          width:auto; min-width:104px; height:36px; font-size:14.5px;
+        }
+        :host(:not(.phone)) .askacts button.ghost { min-width:0; height:36px; }
+        .askchoice {
+          display:flex; align-items:center; justify-content:space-between;
+          gap:12px; margin-top:10px;
+        }
+        .askchoice > .asklabel { color:var(--ink-2); font-size:14px; flex:0 0 auto; }
+        .askchoice > .combo { flex:0 1 auto; min-width:0; }
         .card > .chead .plus, .card > .chead .sw { cursor:pointer; }
         .tile.shut > :not(.thead):not(.delbtn) { display:none; }
         .tile.shut > .thead { cursor:pointer; }
+        .tile.locked.shut > .thead { cursor:default; }
         .count {
           color:var(--ink-2); font-size:12px; font-weight:450;
           overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -9258,11 +9744,20 @@ class HemmaPanel extends HTMLElement {
       prog.at(1);
 
       const extras = { ...clone(ex.extras || {}) };
-      extras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
+      const rt = refreshTemplates(ex.templates, bundle.templates, extras[FINGERPRINT_KEY]);
+      extras[FINGERPRINT_KEY] = rt.prints;
+      if (rt.kept) {
+        this._log(`kept ${rt.kept} template(s) you had changed: ` + rt.mine.join(", "), "ok");
+      }
+      if (rt.foreign.length || rt.orphan.length) {
+        const carried = rt.foreign.concat(rt.orphan);
+        this._log(`brought across ${carried.length} template(s) of your own: `
+          + carried.join(", "), "ok");
+      }
       const sib = (all || []).find(
         (d) => d.kind === "mobile" && d.url_path === src.url_path + "-mobile");
       seedScenePrefs(rooms, [src.cfg, sib && sib.cfg]);
-      const built = expandConfig(ex.compact, ex.scaffold, extras, bundle.templates);
+      const built = expandConfig(ex.compact, ex.scaffold, extras, rt.templates);
       const fixed = retargetRoutes(built, url_path, rooms);
       applyScenePick(fixed.config, rooms);
       this._log(`rewrote ${fixed.rewritten} navigation route list(s)`);
@@ -9292,10 +9787,10 @@ class HemmaPanel extends HTMLElement {
         try {
           const mex = extractMobileConfig(sib.cfg);
           const mextras = { ...clone(mex.extras || {}) };
-          mextras[FINGERPRINT_KEY] = fingerprintOf(bundle.templates);
+          mextras[FINGERPRINT_KEY] = rt.prints;
           const mcfg = expandAny(
             { ...mex, surface: "mobile" },
-            { extras: mextras, templates: bundle.templates });
+            { extras: mextras, templates: rt.templates });
           applyScenePick(mcfg, rooms);
           if (this._importVerify(mcfg)) throw new Error("phone layout round trip differs");
           const mmade = await this._hass.callWS({
@@ -9541,6 +10036,9 @@ class HemmaPanel extends HTMLElement {
       this._stateUrl = url_path;
       this._pair = await this._loadPair(url_path, cfg);
       if (this._pair) this._state = this._pair.desktop;
+      const nUser = syncUserTileTypes(cfg.button_card_templates,
+        (this._state.compact || {}).rooms, null, cfg[FINGERPRINT_KEY]);
+      if (nUser) this._log(`${nUser} tile type(s) of your own in the picker`, "ok");
       this._room = this._roomFromRoute();
       this._routeUsed = true;
       this._log(`loaded "${url_path}"  ${JSON.stringify(cfg).length.toLocaleString()} bytes`);
@@ -9843,23 +10341,58 @@ class HemmaPanel extends HTMLElement {
     let extras = s.extras;
     let scaffold = s.scaffold;
     let adopted = [];
+
+    // Everything outside views is the dashboard's, not this session's, so it is
+    // read back at save time rather than written from the copy taken at load.
+    let live = null;
+    try {
+      live = await this._ws({ type: "lovelace/config", url_path });
+    } catch (e) {
+      this._log("could not re-read the dashboard before saving: " + e.message, "warn");
+    }
+    if (live) {
+      templates = { ...(live.button_card_templates || {}), ...(this._ownTemplates || {}) };
+      extras = omit(live, ["views", "button_card_templates"]);
+      if (this._raw && stable(live.views) !== stable(this._raw.views)) {
+        this._log("this dashboard's rooms changed somewhere else since it was "
+          + "opened - saving replaces them with what is on screen", "warn");
+      }
+    }
+
     try {
       const bundle = await this._bundleOnce(true);
-      const r = refreshTemplates(s.templates, bundle.templates);
+      const r = refreshTemplates(templates, bundle.templates, extras[FINGERPRINT_KEY]);
       templates = r.templates;
+      syncUserTileTypes(templates, (s.compact || {}).rooms, null, r.prints);
       adopted = r.adopted;
-      extras = { ...s.extras };
+      extras = { ...extras };
       extras[FINGERPRINT_KEY] = r.prints;
       if (r.updated || r.added) {
         this._log(`refreshed ${r.updated} template(s)` + (r.added ? `, added ${r.added}` : ""), "ok");
+      }
+      if (r.kept) {
+        this._log(`left ${r.kept} template(s) you have changed as they are: `
+          + r.mine.join(", "), "ok");
+      }
+      if (r.unknown.length) {
+        this._log(`${r.unknown.length} template(s) differed from Hemma's with nothing `
+          + `on record about them, and were set back: ` + r.unknown.join(", "), "warn");
+      }
+      if (r.redeclared.length) {
+        this._log(`restored missing field declarations in ${r.redeclared.length} `
+          + `template(s) you have changed: ` + r.redeclared.join(", "), "ok");
       }
       if (r.removed.length) {
         this._log(`removed ${r.removed.length} retired template(s): `
           + r.removed.join(", "), "ok");
       }
       if (r.foreign.length) {
-        this._log(`left ${r.foreign.length} template(s) alone, not Hemma's: `
+        this._log(`left ${r.foreign.length} template(s) of your own alone: `
           + r.foreign.join(", "));
+      }
+      if (r.orphan.length) {
+        this._log(`kept ${r.orphan.length} hemma_ template(s) Hemma did not write: `
+          + r.orphan.join(", "));
       }
       const bnav = s.surface !== "mobile" && bundle.scaffold && bundle.scaffold.nav;
       if (bnav && stable(withoutRoutes(omit(bnav, SCENE_KEYS)))
@@ -9937,7 +10470,14 @@ class HemmaPanel extends HTMLElement {
         if (nc) this._log(`phone Cameras tile: ${nc} camera(s)`, "ok");
         st.unmatched.slice(0, 6).forEach((u) => this._log(
           `phone tile "${u.tile}" in ${u.section} has no match here - left as it is`, "warn"));
-        const mextras = { ...clone(pair.mobile.extras) };
+        let mbase = pair.mobile.extras;
+        try {
+          const mlive = await this._ws({ type: "lovelace/config", url_path: pair.mobileUrl });
+          mbase = omit(mlive, ["views", "button_card_templates"]);
+        } catch (e) {
+          this._log("could not re-read the phone layout before saving: " + e.message, "warn");
+        }
+        const mextras = { ...clone(mbase) };
         mextras[FINGERPRINT_KEY] = extras[FINGERPRINT_KEY];
         mcfg = markPhoneManaged(
           expandAny(pair.mobile, { extras: mextras, templates }), bellOnFor(pair), assistOnFor(pair));
@@ -10836,7 +11376,6 @@ class HemmaPanel extends HTMLElement {
     const ids = Object.keys(this._hass.states);
 
     const isSet = (f) => {
-      if (f.key === "__extras") return !!(room._extraCards || []).length;
       const v = f.key === "__name" ? room.name : room.variables[f.key];
       return v !== undefined && v !== "" && !(Array.isArray(v) && !v.length);
     };
@@ -11777,6 +12316,27 @@ class HemmaPanel extends HTMLElement {
     });
   }
 
+  // The same picker as Move, but the tile stays where it is. A clone, so the
+  // two are separate tiles from here on and _tileKey can tell them apart.
+  _copyTileMenu(anchor, room, tile) {
+    const rooms = (this._state && this._state.compact.rooms) || [];
+    const items = rooms.filter((r) => r !== room).map((r) => ({
+      id: r.path,
+      label: r.name || r.path,
+      glyph: (r.variables || {}).room_icon || autoRoomGlyph(r.name),
+    }));
+    if (!items.length) return;
+    this._menuAt(anchor, items, (path) => {
+      const to = rooms.find((r) => r.path === path);
+      if (!to) return;
+      to.tiles = to.tiles || [];
+      to.tiles.push(clone(tile));
+      this._markDirty();
+      this._renderForm();
+      this._status("Copied to " + (to.name || to.path), "ok");
+    });
+  }
+
   // Shared popover for the section + buttons, same material as the combobox.
   _menuAt(anchor, items, onPick) {
     // Pressing the same control again should shut the menu, not reopen it.
@@ -12568,7 +13128,7 @@ class HemmaPanel extends HTMLElement {
     if (!sel || sel.group !== g.id) return grp;
     if (g.id === "tiles") {
       const tile = ((room && room.tiles) || []).find((t) => this._tileKey(t) === sel.key);
-      const type = tile && tileTypeOf(tile);
+      const type = tile && tileTypeAny(tile);
       // A tile whose template the panel does not know still has a name.
       if (!type) return { ...grp, label: sel.label || grp.label };
       return {
@@ -12593,7 +13153,7 @@ class HemmaPanel extends HTMLElement {
     const room = this._state && this._state.compact.rooms[this._room];
     const tile = ((room && room.tiles) || []).find((t) => this._tileKey(t) === key);
     if (!tile) return key;
-    const type = tileTypeOf(tile);
+    const type = tileTypeAny(tile);
     return tile.name || (type && type.label) || "Tile";
   }
 
@@ -12735,7 +13295,7 @@ class HemmaPanel extends HTMLElement {
       const scrim = document.createElement("div");
       scrim.className = "fscrim";
       const stack = document.createElement("div");
-      stack.className = "askstack";
+      stack.className = "askstack" + (opts.wide ? " wide" : "");
       const frost = document.createElement("div");
       frost.className = "fglass";
       const box = document.createElement("div");
@@ -12758,15 +13318,17 @@ class HemmaPanel extends HTMLElement {
 
       let input = null;
       let icon = opts.icon || "";
+      let choice = null;
       if (opts.value !== undefined) {
         const list = document.createElement("div");
         list.className = "flist";
         const row = document.createElement("div");
-        row.className = "frow field";
-        input = document.createElement("input");
-        input.className = "fin lead";
+        row.className = "frow field" + (opts.multiline ? " askpaste" : "");
+        input = document.createElement(opts.multiline ? "textarea" : "input");
+        input.className = "fin lead" + (opts.multiline ? " fmono" : "");
         input.value = opts.value || "";
         input.spellcheck = false;
+        if (opts.multiline) { input.rows = opts.rows || 9; input.wrap = "off"; }
         if (opts.placeholder) input.placeholder = opts.placeholder;
         row.appendChild(input);
         list.appendChild(row);
@@ -12802,6 +13364,20 @@ class HemmaPanel extends HTMLElement {
           };
           list.appendChild(irow);
         }
+        if (opts.choices && opts.choices.length) {
+          const crow = document.createElement("div");
+          crow.className = "frow field askchoice";
+          const clab = document.createElement("span");
+          clab.className = "asklabel";
+          clab.textContent = opts.choiceLabel || "Place";
+          crow.appendChild(clab);
+          const labels = {};
+          opts.choices.forEach((c) => { labels[c.id] = c.label; });
+          choice = opts.choices[0].id;
+          crow.appendChild(this._combo(choice, opts.choices.map((c) => c.id), "",
+            (v) => { choice = v; }, { fixed: true, labels }).wrap);
+          list.appendChild(crow);
+        }
         box.appendChild(list);
       }
 
@@ -12831,15 +13407,33 @@ class HemmaPanel extends HTMLElement {
 
       const onKey = (ev) => {
         if (ev.key === "Escape") { ev.preventDefault(); finish(null); }
-        else if (ev.key === "Enter" && input) { ev.preventDefault(); ok.click(); }
+        else if (ev.key === "Enter" && input && !opts.multiline) {
+          ev.preventDefault(); ok.click();
+        }
       };
 
       cancel.onclick = () => finish(null);
+      let warn = null;
       ok.onclick = () => {
         if (!input) return finish(true);
         const v = input.value.trim();
         if (!v) { input.focus(); return; }
-        finish(opts.icons ? { value: v, icon: icon } : v);
+        if (opts.validate) {
+          const why = opts.validate(v);
+          if (why) {
+            if (!warn) {
+              warn = document.createElement("div");
+              warn.className = "fieldwarn";
+              box.insertBefore(warn, acts);
+            }
+            warn.textContent = why;
+            input.focus();
+            return;
+          }
+          if (warn) { warn.remove(); warn = null; }
+        }
+        if (opts.icons) return finish({ value: v, icon: icon });
+        finish(choice === null ? v : { value: v, choice: choice });
       };
       scrim.onclick = () => finish(null);
       document.addEventListener("keydown", onKey, true);
@@ -12878,6 +13472,9 @@ class HemmaPanel extends HTMLElement {
     if (placeholder) input.placeholder = placeholder;
     const menu = document.createElement("div");
     menu.className = "combo-menu";
+    // Inside a dialog the overlay sits below the ask pane, so a menu mounted
+    // there opens behind the scrim and looks like nothing happened.
+    const comboHost = () => (wrap.closest && wrap.closest(".askpane")) || this.$("overlay");
     wrap.appendChild(input);
     const entityish = !fixed && !iconMode && (list || []).some((o) => String(o).indexOf(".") > 0);
 
@@ -12959,7 +13556,13 @@ class HemmaPanel extends HTMLElement {
         menu.appendChild(e);
         if (this._openCombo && this._openCombo !== close) this._openCombo();
         this._openCombo = close;
-        if (!menu.parentNode) { menu._closing = false; this.$("overlay").appendChild(menu); playMenuIn(menu, place(), false); }
+        if (!menu.parentNode) {
+        menu._closing = false;
+        const host = comboHost();
+        if (host !== this.$("overlay")) menu.style.zIndex = "400";
+        host.appendChild(menu);
+        playMenuIn(menu, place(), false);
+      }
         else place();
         active = -1;
         return;
@@ -13002,7 +13605,13 @@ class HemmaPanel extends HTMLElement {
       active = shown.indexOf(current);
       if (this._openCombo && this._openCombo !== close) this._openCombo();
       this._openCombo = close;
-      if (!menu.parentNode) { menu._closing = false; this.$("overlay").appendChild(menu); playMenuIn(menu, place(), false); }
+      if (!menu.parentNode) {
+        menu._closing = false;
+        const host = comboHost();
+        if (host !== this.$("overlay")) menu.style.zIndex = "400";
+        host.appendChild(menu);
+        playMenuIn(menu, place(), false);
+      }
       else place();
       paint();
     };
@@ -13195,7 +13804,10 @@ class HemmaPanel extends HTMLElement {
       const o = c || {};
       const v = o.content || o.title || o.name || o.entity || o.camera_image
         || (Array.isArray(o.entities) && o.entities.length ? o.entities.length + " entities" : "");
-      const t = String(v || "").replace(/\s+/g, " ").trim();
+      // A markdown body is the whole card, so the first line is the summary.
+      const first = String(v || "").split("\n").filter((l) => l.trim())[0] || "";
+      const t = first.replace(/^#{1,6}\s*/, "").replace(/[*_`]/g, "")
+        .replace(/\s+/g, " ").trim();
       return t.length > 52 ? t.slice(0, 52) + "\u2026" : t;
     };
     const title = document.createElement("div");
@@ -13205,6 +13817,11 @@ class HemmaPanel extends HTMLElement {
     cards.forEach((card, i) => {
       const row = document.createElement("div");
       row.className = "row extrarow";
+      const g = document.createElement("span");
+      g.className = "sicon";
+      g.style.setProperty("--i", "url('" + iconUrl(ICON_DEFAULT) + "')");
+      g.style.setProperty("--sc", TILE_TINT);
+      row.appendChild(g);
       const lab = document.createElement("label");
       lab.textContent = label(card);
       row.appendChild(lab);
@@ -13215,17 +13832,31 @@ class HemmaPanel extends HTMLElement {
         s.textContent = sub;
         row.appendChild(s);
       }
+      // A menu, not a destination, so this row ends in a button rather than
+      // the chevron the rows above it use.
       const dots = document.createElement("button");
       dots.className = "mini icon rowmenu";
       dots.title = "More";
       dots.setAttribute("aria-label", "More");
       dots.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
       dots.onpointerdown = (ev) => ev.stopPropagation();
-      dots.onclick = () => this._menuAt(dots, [{ id: "remove", label: "Remove card", destructive: true }], async (id) => {
+      dots.onclick = () => this._menuAt(dots, [
+        { id: "edit", label: "Edit card\u2026" },
+        { id: "up", label: "Move into the tile row" },
+        { id: "remove", label: "Remove card", destructive: true },
+      ], async (id) => {
+        if (id === "edit") return this._editExtraCard(room, i);
+        if (id === "up") {
+          const [moved] = room._extraCards.splice(i, 1);
+          room.tiles = (room.tiles || []).concat([wrapCustomCard(moved)]);
+          this._markDirty();
+          this._renderForm();
+          return this._status("Moved into the tile row", "ok");
+        }
         if (id !== "remove") return;
         const yes = await this._ask({
           title: "Remove this card?",
-          message: "It came from the dashboard you imported and is not part of Hemma. This cannot be undone.",
+          message: "Hemma does not manage this card, so it cannot put it back. This cannot be undone.",
           confirmLabel: "Remove", destructive: true,
         });
         if (!yes) return;
@@ -13243,6 +13874,150 @@ class HemmaPanel extends HTMLElement {
       h.textContent = f.hint;
       fs.appendChild(h);
     }
+  }
+
+  async _addCustomCard(room) {
+    // A phone layout has no slot below the row, so it is not offered one.
+    const canPlace = (this._state || {}).surface !== "mobile";
+    const got = await this._ask({
+      title: "Custom card",
+      message: "Paste a card, or a button_card_templates entry to add a tile type "
+        + "of your own that every room can use. Same YAML or JSON you would use "
+        + "in Home Assistant's raw editor, kept exactly as you write it.",
+      value: "",
+      multiline: true,
+      wide: true,
+      rows: 12,
+      placeholder: "type: custom:my-card\nentity: sensor.example",
+      confirmLabel: "Add",
+      choiceLabel: "Place",
+      choices: canPlace ? [
+        { id: CUSTOM_IN_ROW, label: "In the tile row" },
+        { id: CUSTOM_BELOW, label: "Below the tiles" },
+      ] : null,
+      validate: (v) => { try { parseCardText(v); return ""; } catch (e) { return e.message; } },
+    });
+    if (!got) return;
+    const text = typeof got === "string" ? got : got.value;
+    const where = typeof got === "string" ? CUSTOM_IN_ROW : got.choice;
+    let read;
+    try { read = parsePasted(text); } catch (e) { return this._status(e.message, "err"); }
+
+    if (read.kind === "template") return this._installTemplate(room, read);
+    const card = read.card;
+
+    if (where === CUSTOM_BELOW) {
+      room._extraCards = (room._extraCards || []).concat([card]);
+      this._markDirty();
+      this._renderForm();
+      this._status("Card added below the tiles", "ok");
+      return;
+    }
+    room.tiles.push(wrapCustomCard(card));
+    this._markDirty();
+    this._renderForm();
+    this._status("Card added", "ok");
+    requestAnimationFrame(() => {
+      const tiles = this.shadowRoot.querySelectorAll(".tilegrid .tile");
+      const el = tiles[tiles.length - 1];
+      if (el) this._scrollTo(el, true);
+    });
+  }
+
+  // Mutated in place, never replaced: the tile object IS its key, so a new one
+  // would drop the open detail view back to the list mid-edit.
+  // The kept card has no host to hold Hemma's keys, so it is edited whole.
+  async _editExtraCard(room, i) {
+    const card = (room._extraCards || [])[i];
+    if (!card) return;
+    const got = await this._ask({
+      title: "Edit card",
+      message: "The card exactly as Hemma stores it. Hemma does not manage this "
+        + "one, so what you write here is what it draws.",
+      value: cardToText(card),
+      multiline: true,
+      wide: true,
+      rows: 12,
+      confirmLabel: "Save",
+      validate: (v) => { try { parseCardText(v); return ""; } catch (e) { return e.message; } },
+    });
+    if (!got) return;
+    const text = typeof got === "string" ? got : got.value;
+    let next;
+    try { next = parseCardText(text); } catch (e) { return this._status(e.message, "err"); }
+    room._extraCards[i] = next;
+    this._markDirty();
+    this._renderForm();
+    this._status("Card updated", "ok");
+  }
+
+  async _editRawCard(room, tile) {
+    const hosted = tile.template === CUSTOM_TEMPLATE;
+    const own = {};
+    let shown;
+    if (hosted) {
+      shown = clone((tile.custom_fields || {}).card || {});
+    } else {
+      shown = {};
+      Object.keys(tile).forEach((k) => { shown[k] = tile[k]; });
+      if (tile.variables) {
+        const rest = {};
+        Object.keys(tile.variables).forEach((k) => {
+          if (TILE_OWN_KEYS.has(k)) own[k] = tile.variables[k];
+          else rest[k] = tile.variables[k];
+        });
+        if (Object.keys(rest).length) shown.variables = rest;
+        else delete shown.variables;
+      }
+    }
+    const got = await this._ask({
+      title: "Edit card",
+      message: "The card as Hemma stores it. What you set in Hemma, the size and "
+        + "where it shows, is kept for you and is not written here.",
+      value: cardToText(shown),
+      multiline: true,
+      wide: true,
+      rows: 12,
+      confirmLabel: "Save",
+      validate: (v) => { try { parseCardText(v); return ""; } catch (e) { return e.message; } },
+    });
+    if (!got) return;
+    const text = typeof got === "string" ? got : got.value;
+    let card;
+    try { card = parseCardText(text); } catch (e) { return this._status(e.message, "err"); }
+    if (hosted) {
+      tile.custom_fields = { ...(tile.custom_fields || {}), card: card };
+    } else {
+      Object.keys(tile).forEach((k) => delete tile[k]);
+      Object.assign(tile, card);
+      if (Object.keys(own).length) tile.variables = { ...(tile.variables || {}), ...own };
+    }
+    this._markDirty();
+    this._renderForm();
+    this._status("Card updated", "ok");
+  }
+
+  // A pasted template is stored on the dashboard, not in Hemma's own folder, so
+  // it stays the user's: no fingerprint, never replaced, and in the picker for
+  // every room from here on.
+  _installTemplate(room, read) {
+    const s = this._state;
+    if (!s) return;
+    s.templates = { ...(s.templates || {}), [read.name]: read.template };
+    this._ownTemplates = { ...(this._ownTemplates || {}), [read.name]: read.template };
+    syncUserTileTypes(s.templates, (s.compact || {}).rooms, [read.name],
+      (s.extras || {})[FINGERPRINT_KEY]);
+    const type = USER_TILE_TYPES.find((t) => t.template === read.name);
+    if (!type) return this._status("Could not read \u201c" + read.name + "\u201d.", "err");
+    room.tiles.push(newTile(type));
+    this._markDirty();
+    this._renderForm();
+    this._status("Added \u201c" + type.label + "\u201d to the tile picker", "ok");
+    requestAnimationFrame(() => {
+      const tiles = this.shadowRoot.querySelectorAll(".tilegrid .tile");
+      const el = tiles[tiles.length - 1];
+      if (el) this._scrollTo(el, true);
+    });
   }
 
   _imageField(room, row, fs, pane) {
@@ -16191,17 +16966,23 @@ class HemmaPanel extends HTMLElement {
 
     const bar = document.createElement("div");
     bar.className = "addbar";
-    const addable = TILE_TYPES.filter((t) => !t.hidden)
-      .slice().sort((x, y) => x.label.localeCompare(y.label));
+    const byLabel = (x, y) => x.label.localeCompare(y.label);
+    // Hemma's types, then the ones the user's own templates provide, then the
+    // escape hatch for a card that has no template at all.
+    const addable = TILE_TYPES.filter((t) => !t.hidden).slice().sort(byLabel)
+      .concat(USER_TILE_TYPES.slice().sort(byLabel))
+      .concat([CUSTOM_TILE]);
     let pickType = "";
     const typeLabels = { "": "" };
-    addable.forEach((t) => { typeLabels[t.id] = t.label; });
+    addable.forEach((t) => {
+      typeLabels[t.id] = t.user ? t.label + "  (yours)" : t.label;
+    });
     const add = document.createElement("button");
     add.className = "plus";
     add.setAttribute("aria-label", "Add a tile");
     add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
     const syncAdd = () => {
-      const ready = !!TILE_TYPES.find((t) => t.id === pickType);
+      const ready = !!addable.find((t) => t.id === pickType);
       add.disabled = !ready;
       add.title = ready ? "Add a tile" : "Choose a tile type first";
     };
@@ -16210,8 +16991,9 @@ class HemmaPanel extends HTMLElement {
     sel.style.width = "190px";
     syncAdd();
     add.onclick = () => {
-      const type = TILE_TYPES.find((t) => t.id === pickType);
+      const type = addable.find((t) => t.id === pickType);
       if (!type) return;
+      if (type.id === CUSTOM_TILE.id) return this._addCustomCard(room);
       room.tiles.push(newTile(type));
       this._renderForm();
       // Bring it into view so it can be filled in without hunting for it.
@@ -16263,6 +17045,14 @@ class HemmaPanel extends HTMLElement {
     fs.appendChild(grid);
 
     pane.appendChild(fs);
+
+    if ((this._state || {}).surface !== "mobile") {
+      const ex = document.createElement("section");
+      ex.className = "card extracard";
+      ex.dataset.k = "__extras";
+      this._extrasField(room, ex, EXTRAS_FIELD);
+      if (ex.childElementCount) pane.appendChild(ex);
+    }
   }
 
   _tileCardSafe(room, tile, i, pane) {
@@ -16290,12 +17080,12 @@ class HemmaPanel extends HTMLElement {
   }
 
   _tileCard(room, tile, i, pane) {
-    const type = tileTypeOf(tile);
+    const type = tileTypeAny(tile) || RAW_TILE;
     const glyphNow = () => (type.glyphFromEntity
       ? type.glyphFromEntity[String(tile.entity || "").split(".")[0]] : null);
 
     const box = document.createElement("div");
-    box.className = "tile" + (type ? "" : " locked");
+    box.className = "tile";
     box.dataset.k = this._tileKey(tile);
 
     const head = document.createElement("div");
@@ -16320,21 +17110,20 @@ class HemmaPanel extends HTMLElement {
       box.classList.toggle("armed", this._armed === key);
     };
     head.appendChild(rm);
-    if (type && TILE_ICON[type.id]) {
+    const rowIcon = (tile.variables || {}).icon || tile.icon
+      || glyphNow() || TILE_ICON[type.id] || (type.raw ? ICON_DEFAULT : null);
+    if (rowIcon) {
       const g = document.createElement("span");
       g.className = "sicon";
-      const tv2 = tile.variables || {};
-      const chosen = tv2.icon || tile.icon;
-      g.style.setProperty("--i",
-        "url('" + iconUrl(chosen || glyphNow() || TILE_ICON[type.id]) + "')");
+      g.style.setProperty("--i", "url('" + iconUrl(rowIcon) + "')");
       // Same tint the dashboard gives it, from the map the preview shares.
       g.style.setProperty("--sc", TILE_COLOR[type.id] || TILE_TINT);
       head.appendChild(g);
     }
     const title = document.createElement("div");
     title.className = "grow";
-    const kind = type ? (tile.name && tile.name.trim() ? "" : type.label)
-      : tileLabel(tile) + " - not editable here";
+    const kind = type.raw ? tileLabel(tile).replace(/^custom:/, "")
+      : (tile.name && tile.name.trim() ? "" : type.label);
     title.innerHTML = `${tile.name || "(unnamed)"}${kind ? ` <span class="kind">${kind}</span>` : ""}`;
     head.appendChild(title);
     const tFoldKey = room.path + "|tile|" + this._tileKey(tile);
@@ -16400,11 +17189,31 @@ class HemmaPanel extends HTMLElement {
     const elsewhere = ((this._state && this._state.compact.rooms) || [])
       .filter((r) => r !== room).length > 0;
     const menu = elsewhere
-      ? [{ id: "move", label: "Move to Room\u2026" }, { id: "remove", label: "Remove tile" }]
+      ? [{ id: "move", label: "Move to Room\u2026" },
+         { id: "copy", label: "Copy to Room\u2026" },
+         { id: "remove", label: "Remove tile" }]
       : [{ id: "remove", label: "Remove tile" }];
+    if (type.raw || type.id === "custom") {
+      menu.unshift({ id: "edit", label: "Edit card\u2026" });
+      // A phone view has no slot under the row, so it is not offered one.
+      if ((this._state || {}).surface !== "mobile") {
+        menu.splice(1, 0, { id: "down", label: "Move below the tiles" });
+      }
+    }
     dots.onclick = () => this._menuAt(dots, menu, (id) => {
+      if (id === "edit") return this._editRawCard(room, tile);
+      if (id === "down") {
+        const inner = tile.template === CUSTOM_TEMPLATE
+          ? clone((tile.custom_fields || {}).card || {}) : omit(tile, ["variables"]);
+        room.tiles.splice(i, 1);
+        room._extraCards = (room._extraCards || []).concat([inner]);
+        this._markDirty();
+        this._renderForm();
+        return this._status("Moved below the tiles", "ok");
+      }
       if (id === "remove") return removeTile();
       if (id === "move") return this._moveTileMenu(dots, room, tile);
+      if (id === "copy") return this._copyTileMenu(dots, room, tile);
     });
     head.appendChild(dots);
     // Drag the header to reorder. Presses on the buttons are left alone.
@@ -16526,8 +17335,6 @@ class HemmaPanel extends HTMLElement {
     box.appendChild(head);
     box.appendChild(del);
     if (this._armed === this._tileKey(tile) && this._editTiles) box.classList.add("armed");
-
-    if (!type) return box;
 
     const body = document.createElement("div");
     body.className = "tbody";
@@ -16659,6 +17466,24 @@ class HemmaPanel extends HTMLElement {
       }
     } else {
       addRow("Name", nameIn);
+    }
+
+    // Only a template that reads variables.icon can use one of Hemma's icons.
+    // button-card's own icon: key wants an mdi name, so it stays in the YAML.
+    if (type.raw && tile.template) {
+      addRow("Icon", this._combo((tile.variables || {}).icon || "",
+        [ICON_DEFAULT].concat(HEMMA_ICONS), "default",
+        (v) => {
+          const val = v === ICON_DEFAULT ? "" : v;
+          if (val) {
+            if (!tile.variables) tile.variables = {};
+            tile.variables.icon = val;
+          } else if (tile.variables) {
+            delete tile.variables.icon;
+            if (!Object.keys(tile.variables).length) delete tile.variables;
+          }
+          this._renderForm();
+        }, { icon: true, iconFallback: null }).wrap);
     }
 
     if (grp) {

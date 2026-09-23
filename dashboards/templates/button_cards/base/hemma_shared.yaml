@@ -157,7 +157,8 @@ hemma_shared:
       transform: scale(var(--hero-img-scale-current, 1.08));
       transform-origin: center;
       transition: filter .45s ease, transform .5s ease;
-      animation: hemmaRoomParallax 0.5s 0.05s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+      animation: hemmaRoomParallax var(--hemma-hero-anim-dur, 0.5s)
+        var(--hemma-hero-anim-delay, 0.05s) cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
     }
 
     @keyframes hemmaRoomParallax {
@@ -166,7 +167,7 @@ hemma_shared:
     }
 
     #name{
-      animation: heroNameFade .4s ease both;
+      animation: heroNameFade var(--hemma-hero-anim-dur, .4s) ease both;
     }
 
     @keyframes heroNameFade{

@@ -36,6 +36,31 @@ function resolveCardConfig(cfg) {
   return c;
 }
 
+// Performance mode, asked twice: hemma-core owns the answer, but it is a
+// separate resource, so early on the only evidence is the stylesheet it wrote.
+function perfOn() {
+  try {
+    if (window._hemmaPerf && window._hemmaPerf.on()) return true;
+  } catch (e) {}
+  try {
+    const v = getComputedStyle(document.documentElement)
+      .getPropertyValue('--hemma-anim-duration').trim();
+    return v === '0s' || v === '0';
+  } catch (e) { return false; }
+}
+
+// Opt in with ?hemma_rowlog=1 on the dashboard URL. Off, this costs one
+// property read per call and prints nothing.
+let ROWLOG = null;
+function rowLog() {
+  if (ROWLOG === null) {
+    try { ROWLOG = /[?&]hemma_rowlog=1/.test(location.search) || !!window.HEMMA_ROW_DEBUG; }
+    catch (e) { ROWLOG = false; }
+  }
+  if (!ROWLOG) return;
+  console.info.apply(console, ['hemma-row'].concat([].slice.call(arguments)));
+}
+
 function isCardDisabled(cfg, phone) {
   const c = resolveCardConfig(cfg);
   const v = c && c.variables && c.variables.enabled;
@@ -44,6 +69,13 @@ function isCardDisabled(cfg, phone) {
   if (s === 'phone')   return !phone;
   if (s === 'desktop') return !!phone;
   return false;
+}
+
+// A card with no template is one Hemma only stores: it draws whatever it likes
+// at whatever height, and the tracks here are fixed.
+function isRawCard(cfg) {
+  const c = resolveCardConfig(cfg);
+  return !!c && !c.template && !String(c.type || '').startsWith('custom:hemma-');
 }
 
 function startsClosed(cfg) {
@@ -560,6 +592,36 @@ class HemmaSmartRow extends HTMLElement {
     this.shadowRoot.appendChild(container);
     this._container = container;
 
+    // The build appends card by card, yielding every 8ms, so the row would fill
+    // in left to right. Held back and shown once instead: in performance mode
+    // there is no entrance animation to cover that, and with one the tiles
+    // animate together rather than in build order. Unconditional on purpose,
+    // since asking whether performance mode is on depends on hemma-core having
+    // run, and these are separate resources. visibility keeps the layout, and
+    // the timer means a throw mid-build can never leave a row invisible.
+    // Only in performance mode. With animations on, the entrance covers the
+    // build and holding the row would change how the dashboard normally looks.
+    const holdRow = perfOn();
+    // The per-tile entrance delay is written inline on each wrapper, so no
+    // amount of overriding from html can reach it. In performance mode it is
+    // flattened here and again whenever the row is shown, because this is a
+    // point that provably runs.
+    const flattenEntrance = () => {
+      if (!perfOn()) return;
+      this._wrappers.forEach((w) => {
+        w.style.setProperty('--hemma-anim-delay', '0s');
+        w.style.setProperty('--hemma-anim-duration', '0s');
+        w.style.removeProperty('--hemma-init-play');
+      });
+    };
+    rowLog('build start', { perf: holdRow, sort: this._sortEnabled,
+      scroll: this._scrollMode, cards: (this._config.cards || []).length });
+    const showRow = () => { flattenEntrance(); container.style.visibility = ''; };
+    if (holdRow) {
+      container.style.visibility = 'hidden';
+      setTimeout(showRow, 2000);
+    }
+
     // Sort disabled: render in config order, no detection or reordering.
     if (!this._sortEnabled) {
       this._cards = this._config.cards.map((cfg) => {
@@ -599,10 +661,13 @@ class HemmaSmartRow extends HTMLElement {
       this._cardsCreated = true;
       this._initialized  = true;
       this._initializing = false;
+      showRow();
       return;
     }
 
     const yieldFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+
+
 
     this._cards       = [];
     this._wrappers    = [];
@@ -628,6 +693,7 @@ class HemmaSmartRow extends HTMLElement {
       wrapper.dataset.idx = String(i);
       wrapper.style.setProperty('--hemma-position-index', String(i));
       if (cardFlag(cfg, 'full_width')) wrapper.dataset.fullwidth = '1';
+      if (isRawCard(cfg)) wrapper.dataset.raw = '1';
       if (cardFlag(cfg, 'collapsed_spacer')) wrapper.dataset.collapsedSpacer = '1';
       if (getCardSize(cfg) === 'large') {
         wrapper.dataset.size = 'large';
@@ -656,6 +722,19 @@ class HemmaSmartRow extends HTMLElement {
       }
     }
 
+    const painted = this._cards.filter(Boolean)
+      .map((c) => c.updateComplete).filter((p) => p && typeof p.then === 'function');
+    if (painted.length) { try { await Promise.all(painted); } catch (e) {} }
+    // A timer, not a frame: requestAnimationFrame does not fire in a background
+    // tab, and the row must never wait on one to become visible.
+    await new Promise((r) => setTimeout(r, 0));
+    showRow();
+    this._builtAt = Date.now();
+    rowLog('revealed', { held: holdRow, delay0: perfOn() });
+    // Anything that re-stamps the delay after this gets flattened again.
+    setTimeout(flattenEntrance, 150);
+    setTimeout(flattenEntrance, 600);
+
     this._cardsCreated = true;
     this._initializing = false;
 
@@ -682,8 +761,12 @@ class HemmaSmartRow extends HTMLElement {
 
       // Active cards move to the front, keeping config order among themselves.
       order.forEach((origIdx, pos) => { this._wrappers[origIdx].style.order = pos; });
+      // Inline on the wrapper, so it beats anything inherited: performance mode
+      // cannot switch this off from html, it has to not be written.
+      const stagger = perfOn() ? null : 0.04;
       order.forEach((origIdx, sortedPos) => {
-        this._wrappers[origIdx].style.setProperty('--hemma-anim-delay', `${(sortedPos * 0.04).toFixed(2)}s`);
+        this._wrappers[origIdx].style.setProperty('--hemma-anim-delay',
+          stagger === null ? '0s' : `${(sortedPos * stagger).toFixed(2)}s`);
       });
 
       if (!!window._hemmaFromBg) {
@@ -789,7 +872,7 @@ class HemmaSmartRow extends HTMLElement {
     const delay = window._hemmaNoFilterAnim ? 100 : SORT_DELAY_MS;
     this._sortTimer = setTimeout(() => {
       this._sortTimer = null;
-      this._applyOrder(true);
+      this._applyOrder(!perfOn());
     }, delay);
   }
 
@@ -797,6 +880,10 @@ class HemmaSmartRow extends HTMLElement {
 
   _applyOrder(animate) {
     if (!this._wrappers.length) return;
+    if (perfOn()) animate = false;
+    rowLog('applyOrder', { animate: !!animate, perf: perfOn(),
+      sinceBuilt: Date.now() - (this._builtAt || 0),
+      noFilterAnim: !!window._hemmaNoFilterAnim });
 
     const inactive = this._config.cards.map((_, i) => i).filter(i => !this._activeSet.has(i));
     const newOrder  = [...this._activationOrder, ...inactive];
@@ -960,6 +1047,12 @@ class HemmaSmartRow extends HTMLElement {
         #container > .card-wrapper[data-size="large"] { grid-row: span 2; }
         /* Passes the track height down for the card's own height:100%. */
         #container > .card-wrapper > * { display: block; height: 100%; }
+        /* And holds a pasted card to it. Safari leaks past overflow alone. */
+        #container > .card-wrapper[data-raw="1"] {
+          overflow: hidden;
+          border-radius: var(--hemma-tile-radius-phone, 26px);
+          clip-path: inset(0 round var(--hemma-tile-radius-phone, 26px));
+        }
         /* That display beats the hidden attribute's UA display:none, so a card
            that has turned itself off still paints whenever its wrapper is open.
            Collapsing the wrapper is what normally keeps it off screen, and that

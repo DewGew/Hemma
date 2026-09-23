@@ -149,6 +149,43 @@
     return isNaN(px) ? 60 : px + 40; // plus an approximate navbar height
   }
 
+  // A card placed under the tile row is the one thing in this view still in
+  // normal flow, so its height has to come off the hero or the view grows past
+  // the viewport and the whole dashboard scrolls.
+  var lastExtras = -1;
+  function extrasHeight() {
+    var row = findActiveEntityRow();
+    if (!row) return 0;
+    var node = row;
+    while (node.parentElement && node.parentElement.children.length < 2) {
+      node = node.parentElement;
+    }
+    if (!node.parentElement) return 0;
+    var kids = node.parentElement.children;
+    var total = 0, seen = false;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i] === node) { seen = true; continue; }
+      if (!seen) continue;
+      var r = kids[i].getBoundingClientRect();
+      if (r.height <= 0) continue;
+      total += r.height;
+      // The gap a card sits in counts too, or the view is short by it.
+      try {
+        var cs = getComputedStyle(kids[i]);
+        total += (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+      } catch (e) {}
+    }
+    return total;
+  }
+
+  function applyExtras() {
+    if (!isDesktopOrTablet()) return;
+    var px = Math.round(extrasHeight());
+    if (px === lastExtras) return;
+    lastExtras = px;
+    html.style.setProperty('--hemma-extras-h', px + 'px');
+  }
+
   function setHeaderTop(px) {
     var rounded = Math.round(px);
     if (rounded !== lastHeaderTop) {
@@ -159,6 +196,7 @@
 
   function computeAndApplyHeader() {
     if (!isDesktopOrTablet()) return;
+    applyExtras();
 
     var headerStack = findRoomHeaderStack();
     if (!headerStack) return;
@@ -221,6 +259,7 @@
   window.addEventListener('location-changed', function () {
     // Drop stale observations and re-discover once the new view has rendered.
     headerObservedEls = [];
+    lastExtras = -1;
     if (headerRO) { try { headerRO.disconnect(); } catch (e) {} }
     setTimeout(initHeader, 400);
   });

@@ -145,8 +145,12 @@ hemma_badge_presence_group:
 
       const getState = (eid) =>
         String(hass.states[eid]?.state || '').toLowerCase().replace(/_/g, ' ');
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
       const getName = (eid) =>
-        String(hass.states[eid]?.attributes?.friendly_name || '').split(' ')[0] || 'Person';
+        String(hass.states[eid]?.attributes?.friendly_name || '').split(' ')[0]
+        || T('presence.person', 'Person');
       const isHome = (eid) => { const s = getState(eid); return s === 'home' || s === 'just arrived'; };
 
       const homeCount   = entities.filter(isHome).length;
@@ -155,12 +159,14 @@ hemma_badge_presence_group:
       let title, status;
       if (entities.length === 1) {
         title  = getName(entities[0]);
-        status = isHome(entities[0]) ? 'Home' : 'Away';
+        status = isHome(entities[0])
+          ? L('component.person.entity_component._.state.home', 'Home')
+          : L('component.person.entity_component._.state.not_home', 'Away');
       } else {
-        title = 'People';
-        if (homeCount === entities.length)  status = 'All Home';
-        else if (homeCount === 0)           status = 'All Away';
-        else                                status = `${awayEntities.length} Away`;
+        title = T('presence.group.title', 'People');
+        if (homeCount === entities.length)  status = T('presence.all_home', 'All Home');
+        else if (homeCount === 0)           status = T('presence.all_away', 'All Away');
+        else status = T('presence.n_away', '{n} Away', { n: awayEntities.length });
       }
 
       const esc = (t) => String(t || '').replaceAll('"', '&quot;');

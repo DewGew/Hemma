@@ -13,10 +13,12 @@ VERSION = json.loads(
 URL_BASE = "/hemma_panel"
 
 SCRIPTS_URL_BASE = "/hemma_scripts"
-SCRIPTS_DIR = "www/hemma/scripts"
+SCRIPTS_DIR = f"custom_components/{DOMAIN}/scripts"
 
-# Order matters: hemma-core defines what the others build on.
+# Order matters: hemma-core defines what the others build on, and hemma-i18n
+# wants to be in place before core flushes its waiter queue.
 SHARED_SCRIPTS = (
+    "hemma-i18n.js",
     "hemma-core.js",
     "hemma-icons.js",
     "hemma-redirect.js",

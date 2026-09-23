@@ -139,7 +139,7 @@ Five things changed in 2.1 that are worth knowing:
 
 - **browser_mod is no longer required.** Every popup is now Hemma's own. You can remove it if nothing else uses it.
 - **navbar-card is no longer required**, replaced by Hemma's own `hemma-nav`.
-- **Dashboard resources moved.** Hemma now serves its scripts itself and registers them for you. Entries still pointing at `/local/hemma/scripts/` are repointed automatically on first setup. If you see a warning in the log about a resource Hemma no longer ships, remove that one entry by hand.
+- **Dashboard resources moved.** Hemma's scripts now ship inside the integration, so HACS keeps them up to date with everything else, and Hemma registers them for you. Existing resource entries are repointed automatically on first setup. If you see a warning in the log about a resource Hemma no longer ships, remove that one entry by hand. Anything left behind in `/config/www/hemma/scripts/` is no longer read and can be deleted.
 - **Weather appears only where you configured it.** The weather entity used to be remembered per browser rather than per dashboard, so a second dashboard could draw the first one's forecast. If a dashboard has been showing weather you never set up there, it stops after upgrading.
 - **Motion dots are set per room now.** The pulsing dot beside a room in the navigation is configured in Appearance rather than through a helper. Pick the room's motion sensor once and it covers both the navigation and the phone. An imported dashboard starts without one, so set it on each room you want it on.
 

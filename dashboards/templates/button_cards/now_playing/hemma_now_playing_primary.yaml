@@ -940,8 +940,8 @@ hemma_now_playing_primary:
       pointer-events: none;
       z-index: 5;
       padding: var(--hemma-badge-ring-thickness, 1.3px);
-      backdrop-filter: brightness(var(--hemma-badge-ring-boost, 1.5)) saturate(var(--hemma-badge-ring-sat, 1.8));
-      -webkit-backdrop-filter: brightness(var(--hemma-badge-ring-boost, 1.5)) saturate(var(--hemma-badge-ring-sat, 1.8));
+      backdrop-filter: var(--hemma-badge-ring-backdrop, brightness(var(--hemma-badge-ring-boost, 1.5)) saturate(var(--hemma-badge-ring-sat, 1.8)));
+      -webkit-backdrop-filter: var(--hemma-badge-ring-backdrop, brightness(var(--hemma-badge-ring-boost, 1.5)) saturate(var(--hemma-badge-ring-sat, 1.8)));
       mix-blend-mode: screen;
       box-shadow:
         inset 0 0.5px 0 rgba(255,255,255,0.34),

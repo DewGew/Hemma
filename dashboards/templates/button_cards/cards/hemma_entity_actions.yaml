@@ -325,6 +325,9 @@ hemma_entity_actions:
         (var(--hemma-actions-hit) - var(--hemma-actions-icon-size)) / 2);
       --hemma-side-lit: var(--hemma-active-overlay-opacity, 0);
       --hemma-actions-ink: color-mix(in srgb, #000 calc(var(--hemma-side-lit) * 100%), #fff);
+      /* Matches the tile toggle, whose track is rgba(0,0,0,0.75) under
+         --hemma-toggle-opacity. That 0.75 is the theme's track-fill alpha. */
+      --hemma-actions-dots-opacity: calc(0.75 * var(--hemma-toggle-opacity, 0.8));
       --hemma-actions-pill-bg-on: color-mix(in srgb,
         rgba(0, 0, 0, 0.20) calc(var(--hemma-side-lit) * 100%),
         rgba(255, 255, 255, 0.26));
@@ -409,7 +412,7 @@ hemma_entity_actions:
       width: var(--hemma-actions-more-size);
       height: var(--hemma-actions-more-size);
       fill: var(--hemma-actions-ink);
-      opacity: 0.9;
+      opacity: var(--hemma-actions-dots-opacity);
       pointer-events: none;
     }
 

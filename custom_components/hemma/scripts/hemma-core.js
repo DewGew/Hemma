@@ -326,6 +326,122 @@ window.hemmaMenuGlass = {
   };
 })();
 
+// ── Performance mode ─────────────────────────────────────────────────────────
+(function () {
+  if (window._hemmaPerf) return;
+
+  var ID = 'hemma-perf-style';
+  var KEY = 'hemma_perf';
+  var MODES = { off: 1, on: 1, auto: 1 };
+
+  var DKEY = 'hemma_perf_dash';
+  // Seeded from the last resolved Studio setting: it only reaches us when
+  // hemma_room renders, by which time the entrance has already started.
+  var dashboard = (function () {
+    try { return clean(localStorage.getItem(DKEY)) || 'off'; } catch (e) { return 'off'; }
+  })();
+  var device = null;
+
+  // A backdrop blur costs a full-screen readback per layer per frame. Nulling the
+  // variables reaches every card: a document stylesheet cannot cross a shadow
+  // boundary, but custom properties inherit through it.
+  // Performance mode is about what is on screen the whole time. Popups and
+  // dialogs keep their blur: they paint only while open, and the lights
+  // popup has no plate, so its rows rely on that blur to read as a layer.
+  var CSS = 'html{'
+    + '--app-header-backdrop-filter:none!important;'
+    + '--ha-card-backdrop-filter:none!important;'
+    + '--hemma-toolbar-backdrop:none!important;'
+    + '--hemma-glass-backdrop:none!important;'
+    + '--hemma-pill-backdrop:none!important;'
+    + '--hemma-pill-highlight:none!important;'
+    + '--hemma-sidebar-backdrop:none!important;'
+    + '--hemma-scene-chip-backdrop:none!important;'
+    + '--badge-blur:0px!important;'
+    + '--hemma-badge-media-backdrop:none!important;'
+    + '--hemma-badge-ring-backdrop:none!important;'
+    // The room photo is the one full-screen filter, and it repaints on every swap.
+    + '--hemma-view-photo-filter:none!important;'
+    + '--hero-img-blur:0px!important;'
+    + '--hero-img-blur-mobile:0px!important;'
+    + '--hemma-mobile-hero-blur:0px!important;'
+    + '--hemma-card-will-change:auto!important;'
+    // The entrance is the heaviest moment on a slow tablet: every tile, the
+    // photo and the title compositing at once, while the page is still loading.
+    + '--hemma-anim-duration:0s!important;'
+    + '--hemma-anim-delay:0s!important;'
+    + '--hemma-hero-anim-dur:0s!important;'
+    + '--hemma-hero-anim-delay:0s!important;'
+    // Opaque stand-ins, or every surface above turns into clear glass.
+    + '--hemma-glass-background:var(--hemma-perf-glass-fill,rgb(44,46,52))!important;'
+    + '--hemma-pill-fill:var(--hemma-perf-pill-fill,rgb(38,40,46))!important;'
+    + '--hemma-sidebar-fill:var(--hemma-perf-sidebar-fill,rgb(18,20,24))!important;'
+    + '--badge-background:var(--hemma-perf-badge-fill,rgb(10,12,14))!important;'
+    // The tiles. rgba(0,0,0,0.40) was a tint on a blurred photo; with the
+    // blur gone it is a window onto the lawn.
+    + '--hemma-entity-background:var(--hemma-perf-tile-fill,rgb(32,34,38))!important;'
+    + '--ha-card-background:var(--hemma-perf-card-fill,rgb(32,34,38))!important;'
+    + '}';
+
+  function clean(v) {
+    v = String(v == null ? '' : v).trim().toLowerCase();
+    return MODES[v] ? v : '';
+  }
+
+  // Fully Kiosk and the companion app each get one start URL, so ?hemma_perf=on
+  // has to stick to the device. Every other screen in the house keeps the glass.
+  function pinned() {
+    var m = /[?&]hemma_perf=([a-z]+)/.exec(location.search || '');
+    var v = m ? clean(m[1]) : '';
+    if (v) { try { localStorage.setItem(KEY, v); } catch (e) {} return v; }
+    try { return clean(localStorage.getItem(KEY)); } catch (e) { return ''; }
+  }
+
+  function weak() {
+    var n = navigator || {};
+    var mem = n.deviceMemory, cpu = n.hardwareConcurrency;
+    if (mem && mem <= 4) return true;
+    if (cpu && cpu <= 4) return true;
+    // Neither is exposed on iOS, where the floor is fast enough not to guess.
+    return false;
+  }
+
+  function resolve() {
+    var v = pinned() || dashboard || 'off';
+    if (v === 'auto') {
+      if (device === null) device = weak();
+      return device;
+    }
+    return v === 'on';
+  }
+
+  function apply() {
+    var head = document.head || document.documentElement;
+    var el = document.getElementById(ID);
+    var want = resolve();
+    if (want === !!el) return;
+    if (!want) { el.remove(); return; }
+    el = document.createElement('style');
+    el.id = ID;
+    el.textContent = CSS;
+    head.appendChild(el);
+  }
+
+  window._hemmaPerf = {
+    // Called from hemma_room's variable block so the Studio setting lands too.
+    // The device pin still wins: the tablet is the one that knows it is slow.
+    dashboard: function (v) {
+      var next = clean(v) || 'off';
+      try { localStorage.setItem(DKEY, next); } catch (e) {}
+      if (next !== dashboard) { dashboard = next; apply(); }
+      return resolve() ? '1' : '0';
+    },
+    on: function () { return resolve(); }
+  };
+
+  apply();
+})();
+
 // ── Now Playing collector ────────────────────────────────────────────────────
 (function () {
   if (!window.HEMMA_ACTIVE_STATES) {
@@ -5705,14 +5821,14 @@ window.hemmaMenuGlass = {
           +   'align-items:start;justify-items:center;padding:24px;'
           +   'box-sizing:border-box;'
           // Blur only - the darkening read as a scrim on top of the popup's own.
-          +   'backdrop-filter:blur(18px);'
-          +   '-webkit-backdrop-filter:blur(18px);}'
+          +   'backdrop-filter:var(--hemma-media-overlay-backdrop,blur(18px));'
+          +   '-webkit-backdrop-filter:var(--hemma-media-overlay-backdrop,blur(18px));}'
           + '.hui-mov[hidden]{display:none;}'
           + '.hui-mov{transition:opacity .19s ease,'
           +   'backdrop-filter .19s ease,-webkit-backdrop-filter .19s ease;}'
           + '.hui-mov.hui-closing{opacity:0;'
-          +   'backdrop-filter:blur(0px);'
-          +   '-webkit-backdrop-filter:blur(0px);}'
+          +   'backdrop-filter:var(--hemma-media-overlay-backdrop,blur(0px));'
+          +   '-webkit-backdrop-filter:var(--hemma-media-overlay-backdrop,blur(0px));}'
           + '.hui-mdet{transition:transform .19s cubic-bezier(0.4, 0, 1, 1);}'
           + '.hui-mov.hui-closing .hui-mdet{transform:scale(0.97);}'
           + '.hui-mdet[hidden]{display:none;}'
@@ -6070,6 +6186,8 @@ window.hemmaMenuGlass = {
   // One flapping device must not be able to fill the panel on its own.
   var PER_ENTITY_MAX = 3;
   var POLL_MS = 60000;
+  // A battery has to read low for this long before it counts; devices glitch.
+  var BATTERY_HOLD_MIN = 30;
   var KEY = 'hemma_notify_read_v1';
   var COUNT_IN_BADGE = true;
 
@@ -6348,6 +6466,8 @@ window.hemmaMenuGlass = {
   }
 
 
+  var _lowSince = {};
+
   function standing(hass) {
     var rows = [];
     var S = hass.states;
@@ -6405,15 +6525,32 @@ window.hemmaMenuGlass = {
 
     var lowPct = Number(window.HEMMA_NOTIFY_BATTERY);
     if (!isFinite(lowPct)) lowPct = 20;
+    var holdMin = Number(window.HEMMA_NOTIFY_BATTERY_HOLD);
+    if (!isFinite(holdMin) || holdMin < 0) holdMin = BATTERY_HOLD_MIN;
+    var nowMs = Date.now();
     var low = [];
     ids.forEach(function (id) {
       var st = S[id];
-      if (id.indexOf('sensor.') === 0 && dc(st) === 'battery') {
-        var n = parseFloat(st.state);
-        if (isFinite(n) && n <= lowPct) low.push({ st: st, pct: n });
-      } else if (id.indexOf('binary_sensor.') === 0 && dc(st) === 'battery' && st.state === 'on') {
-        low.push({ st: st, pct: null });
+      if (dc(st) !== 'battery') return;
+      var pct = null;
+      var isLow;
+      if (id.indexOf('sensor.') === 0) {
+        pct = parseFloat(st.state);
+        // Unavailable is no news: hold the clock rather than start it over.
+        if (!isFinite(pct)) return;
+        isLow = pct <= lowPct;
+      } else if (id.indexOf('binary_sensor.') === 0) {
+        if (st.state !== 'on' && st.state !== 'off') return;
+        isLow = st.state === 'on';
+      } else {
+        return;
       }
+      if (!isLow) { delete _lowSince[id]; return; }
+      // 19 -> 18 moves last_changed, so only the first sighting starts the clock.
+      if (!_lowSince[id]) {
+        _lowSince[id] = Math.min(Date.parse(st.last_changed || '') || nowMs, nowMs);
+      }
+      if (nowMs - _lowSince[id] >= holdMin * 60000) low.push({ st: st, pct: pct });
     });
     if (low.length && on('battery')) {
       low.sort(function (a, b) { return (a.pct == null ? -1 : a.pct) - (b.pct == null ? -1 : b.pct); });
@@ -6749,6 +6886,7 @@ window.hemmaMenuGlass = {
     if (cfg.types !== undefined) window.HEMMA_NOTIFY_TYPES = cfg.types;
     if (cfg.appliances !== undefined) window.HEMMA_NOTIFY_APPLIANCES = cfg.appliances;
     if (cfg.battery !== undefined) window.HEMMA_NOTIFY_BATTERY = cfg.battery;
+    if (cfg.battery_hold !== undefined) window.HEMMA_NOTIFY_BATTERY_HOLD = cfg.battery_hold;
     if (cfg.open_minutes !== undefined) window.HEMMA_NOTIFY_OPEN_MINUTES = cfg.open_minutes;
     if (cfg.co2 !== undefined) window.HEMMA_NOTIFY_CO2 = cfg.co2;
     if (cfg.read_entity !== undefined) {
@@ -7230,6 +7368,7 @@ window.hemmaMenuGlass = {
         return { entity: e, remaining: timers[e] || undefined };
       }),
       battery: num(V.notification_battery_threshold),
+      battery_hold: num(V.notification_battery_hold_minutes),
       open_minutes: num(V.notification_open_minutes),
       co2: num(V.notification_co2_ppm),
       read_entity: V.notification_read_entity || null,
@@ -7275,6 +7414,8 @@ window.hemmaMenuGlass = {
 (function () {
   var waiting = window._hemmaCoreWaiters;
   window._hemmaCoreWaiters = null;
+  // Retained so a sibling resource landing after this flush can re-kick them.
+  window._hemmaKicked = waiting;
   if (!waiting || typeof window.hemmaKick !== 'function') return;
   setTimeout(function () {
     waiting.forEach(function (el) { window.hemmaKick(el); });

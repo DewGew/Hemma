@@ -1,5 +1,69 @@
 # Changelog
 
+## Unreleased
+
+- **Hemma's scripts ship with the integration.** They used to be served from
+  `www/hemma/scripts/`, the folder you copy in by hand, which HACS never
+  updates. Updating to 2.1 therefore paired the new Studio with 2.0's
+  JavaScript, and every element added in 2.1 was undefined: room navigation
+  broke with "Custom element doesn't exist: hemma-nav", and the popups with it.
+  The scripts now live inside `custom_components/hemma/`, so HACS updates them
+  with everything else and there is nothing to copy. Anything left in
+  `/config/www/hemma/scripts/` is no longer read and can be deleted. Reported in
+  [#69](https://github.com/willsanderson/Hemma/issues/69).
+
+- **A template you have edited is kept.** Every save used to copy all of
+  Hemma's templates over whatever was in the dashboard, so a hand edit, a
+  translation, or a template of your own with a `hemma_` name was reverted or
+  deleted by an unrelated save. Hemma now records a hash of what it last wrote
+  for each template and compares before touching it: its own it may update,
+  yours it leaves alone and names in the log. The same check gates deletion, so
+  the name no longer decides anything. The panel also re-reads the dashboard at
+  save time, so `kiosk_mode` and anything else changed elsewhere is no longer
+  overwritten by a stale copy. Reported in
+  [#66](https://github.com/willsanderson/Hemma/issues/66).
+
+- **A tile placed only on the phone stays there.** Syncing a linked desktop and
+  phone dashboard dropped any phone tile with no desktop twin, and the log line
+  for it said "left as it is". Hemma now marks the tiles it copies out of a room
+  and only those follow their twin out.
+
+- **Cards of your own, in the tile picker.** The type dropdown ends in Custom
+  card, which takes the same YAML or JSON you would paste into Home Assistant's
+  raw editor and places it either in the tile row or below the tiles. A card in
+  the row is hosted by a Hemma tile, so it gets the same surface, radius, blur
+  and size as everything beside it, and it can be named, sized, hidden per
+  surface, edited, copied to another room or moved below the tiles afterwards.
+  A card below the tiles can be edited, moved back up or removed, and the view
+  still fits one screen: the room photo shortens by the height of whatever sits
+  under the tiles instead of the dashboard scrolling. The same box also takes a
+  `button_card_templates` entry, which becomes a reusable tile type offered in
+  every room, with a settings field per key its `variables:` block declares.
+  Templates of your own that a tile already uses appear there on upgrade.
+  Reported in [#67](https://github.com/willsanderson/Hemma/issues/67).
+
+- **Performance mode.** Backdrop blur is what makes Hemma crawl on a cheap
+  tablet: every blurred layer is a full screen GPU readback per frame, and they
+  stack. Studio > General > Performance makes the dashboard's own surfaces
+  opaque instead, set to Off, On, or Automatic, which switches on below 4GB of
+  memory or 4 cores. Tiles, cards, the sidebar, badges, pills, the header,
+  scene chips and the room photo all lose their blur, and the entrance
+  animations go with them. Popups keep theirs: they paint only while open, so
+  they are not what makes a tablet feel slow. The device that needs it is
+  usually one tablet rather than the house, so opening the dashboard there once
+  with `?hemma_perf=on` pins it for that device and beats the dashboard
+  setting. Suggested in
+  [#65](https://github.com/willsanderson/Hemma/issues/65).
+
+- **A low battery has to stay low before it says so.** Some devices report a
+  bogus reading for a moment (`100 -> 3 -> 100`), which raised a "Battery low"
+  notice for a device that was fine. A battery now counts as low only once it
+  has read low for 30 minutes without a break. Set the wait under Notifications
+  > Advanced > "Low battery for at least (minutes)"; 0 restores the old
+  immediate notice. A battery that has been low since before the page loaded
+  still shows straight away, and a drop from 19% to 18% no longer restarts the
+  wait. Reported in [#70](https://github.com/willsanderson/Hemma/issues/70).
+
 ## 2.1.1
 
 Documentation only. Nothing in the integration itself changed.

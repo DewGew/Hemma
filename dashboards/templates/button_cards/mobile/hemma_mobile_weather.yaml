@@ -41,6 +41,9 @@ hemma_mobile_weather:
     notification_co2_ppm: null
     notification_open_minutes: null
     notification_battery_threshold: null
+    # A glitched reading (100 -> 3 -> 100) must not raise a notice: a battery
+    # counts as low only once it has read low for this long.
+    notification_battery_hold_minutes: null
     # A helper (input_datetime, input_text or input_number) holding when
     # notifications were last marked read. Set it and every surface shares
     # one read state; leave it null and each browser keeps its own.
@@ -63,9 +66,19 @@ hemma_mobile_weather:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
       const f = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-      const labels = {all:'Home',climate:'Climate',lights:'Lights',presence:'People',media:'Media',security:'Security',energy:'Energy'};
-      return labels[f] || 'Home';
+      const labels = {
+        all: T('filter.all', 'Home'),
+        climate: T('filter.climate', 'Climate'),
+        lights: T('filter.lights', 'Lights'),
+        presence: T('filter.presence', 'People'),
+        media: T('filter.media', 'Media'),
+        security: T('filter.security', 'Security'),
+        energy: T('filter.energy', 'Energy')
+      };
+      return labels[f] || labels.all;
     ]]]
 
   extra_styles: |
