@@ -3739,7 +3739,7 @@ class HemmaPanel extends HTMLElement {
           --field-hi:rgba(0,0,0,0.26);
           --field-rim:rgba(255,255,255,0.14);
           --lift:linear-gradient(to bottom, rgba(96,96,106,0.62), rgba(78,78,88,0.68));
-          --sw-off:rgba(0,0,0,0.30);
+          --sw-off:rgba(120,120,128,0.44);
           --card-tint:rgba(255,255,255,0.07);
           /* --pane with its alpha resolved, for surfaces that cannot be glass. */
           --pane-solid:linear-gradient(to bottom, #6b6b75, #5d5d67 46%, #575761);
@@ -4099,8 +4099,6 @@ class HemmaPanel extends HTMLElement {
         button:disabled.ok { opacity:1; }
         button.ok { background:var(--fill); color:var(--on-fill); }
         button.ok svg { width:19px; height:19px; display:block; }
-        #save .s-short { display:none; }
-        #diffs .s-short { display:none; }
 
         .combo > input { border-radius:13px; }
         .toprow > select, .toprow > button:not(.burger), .toprow > :where(.navpill) > button:not(.burger) {
@@ -5053,9 +5051,6 @@ class HemmaPanel extends HTMLElement {
         :host(.editing-rooms) #rooms .tab, :host(.editing-dashes) #dashes .tab {
           cursor:text;
         }
-        #g-dashes { margin-top:34px; }
-        #dashes .tab .roomglyph { display:none; }
-        #dashes .tab .dashkind {
           flex:0 0 auto; margin-left:13px; padding:1px 6px; border-radius:999px;
           background:var(--chip); color:var(--ink-2);
           font-size:10px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase;
@@ -5142,7 +5137,9 @@ class HemmaPanel extends HTMLElement {
         /* --top-h carries 26px the desktop columns want behind the bar; the phone scrolls instead. */
         :host(.narrow:not(.split)) .body { height:auto; display:block; overflow:visible;
           padding:0 18px 18px; }
-        :host(.phone) .body { padding-top:calc(max(8px, env(safe-area-inset-top, 0px)) + 56px + var(--hemma-mobile-chrome-drop, 4px)); }
+        /* Has to out-rank :host(.narrow:not(.split)) .body above, whose padding
+           shorthand would otherwise zero this and leave the title under the bar. */
+        :host(.phone:not(.split)) .body { padding-top:calc(max(8px, env(safe-area-inset-top, 0px)) + 56px + var(--hemma-mobile-chrome-drop, 4px)); }
         :host(.narrow) .status { margin:10px 2px 12px; }
         :host(.narrow) .plinth { order:2; }
         :host(.narrow) .canvashead { order:1; margin:0 0 14px; }
@@ -5180,9 +5177,28 @@ class HemmaPanel extends HTMLElement {
         .bigtitle:hover:not(:disabled), .navtitle:hover:not(:disabled) { filter:none; }
         .bigtitle:active:not(:disabled) { transform:none; opacity:.55; }
         .navtitle:active:not(:disabled) { transform:none; opacity:.55; }
+        /* The phone list is the sidebar: headings break the grouped card stack
+           into the same two groups, and a group row reads like a section row. */
+        /* iOS grouped cards inset their content by 14, not the 16 desktop uses. */
+        :host(.phone) { --card-pad-h:14px; }
+        :host(.phone) .cols.phonelist { gap:0; }
+        :host(.phone) .cols.phonelist > .col { flex:0 0 auto; }
+        :host(.phone) .cols.phonelist > .col + .sidehead.phonehead { margin-top:26px; }
+        :host(.phone) .sidehead.phonehead {
+          margin:2px var(--card-pad-h) 8px; font-size:15px; font-weight:600;
+          letter-spacing:-0.01em;
+          color:color-mix(in srgb, var(--ink) 78%, transparent);
+        }
+        :host(.phone) .card.grouprow > .chead { cursor:pointer; }
+        /* Badges and Tiles are rows in the list and the room is in the title,
+           so the switcher would be a third way to say the same thing. */
+        :host(.phone) .groupseg { display:none; }
+        :host(.phone) .navrow:not(:has(.detailbar)) { display:none; }
+
         :host(.phone) .bigtitle {
           display:flex; max-width:100%; min-width:0;
-          padding:0 0 4px; margin:0;
+          /* Flush with the group headings, which sit at the cards' icon column. */
+          padding:0 0 4px var(--card-pad-h); margin:0;
         }
         :host(.phone) .bigtitle .bt-label {
           font-size:38px; line-height:1; letter-spacing:-0.03em;
@@ -5429,9 +5445,10 @@ class HemmaPanel extends HTMLElement {
           -webkit-mask:var(--updown) center/contain no-repeat; mask:var(--updown) center/contain no-repeat;
         }
         :host(.phone) .row .drop svg { width:15px; height:15px; }
-        :host(.phone) .sw { width:51px; height:31px; flex:0 0 51px; }
-        :host(.phone) .sw::after { top:2px; left:2px; width:27px; height:27px; }
-        :host(.phone) .sw[aria-checked="true"]::after { transform:translateX(20px); }
+        /* iOS 27 Settings geometry, measured: 62x27 track, 37x23 capsule knob. */
+        :host(.phone) .sw { width:62px; height:27px; flex:0 0 62px; }
+        :host(.phone) .sw::after { top:2px; left:2px; width:37px; height:23px; }
+        :host(.phone) .sw[aria-checked="true"]::after { transform:translateX(21px); }
         :host(.phone) .thead { touch-action:auto; }
         .cols { display:flex; gap:var(--gap); align-items:flex-start; }
         .col, .tilegrid {
@@ -6731,12 +6748,11 @@ class HemmaPanel extends HTMLElement {
         .sw {
           position:relative; width:42px; height:20px; flex:0 0 42px; padding:0; border:0;
           border-radius:999px; cursor:pointer; background:var(--sw-off);
-          box-shadow:inset 0 0 0 .5px var(--chip-rim);
           transition:background .34s var(--sw-ease), filter .16s ease;
         }
         .sw::after {
           content:""; position:absolute; top:2px; left:2px; width:24px; height:16px;
-          border-radius:999px; background:#fff; box-shadow:0 .5px 1.5px rgba(0,0,0,0.12);
+          border-radius:999px; background:#fff;
           transition:transform .38s var(--sw-ease);
         }
         .sw[aria-checked="true"] { background:var(--sw-on); }
@@ -7733,8 +7749,6 @@ class HemmaPanel extends HTMLElement {
           box-shadow:inset 0 0 0 1px var(--field-rim);
         }
         .addbar .plus:hover:not(:disabled) { background-color:rgba(46,46,52,0.44); }
-        #tilespane { margin-top:var(--gap); }
-        #tilespane:empty { display:none; }
         .tilewrap { display:block; }
         .addbar select { border-radius:999px; padding:9px 15px; }
 
@@ -12065,6 +12079,11 @@ class HemmaPanel extends HTMLElement {
       if (sec.group === "badges" && sec.bid) fs.dataset.bid = sec.bid;
     });
 
+    // The phone has no sidebar, so its list has to be the sidebar: same order,
+    // same two groups, and Badges and Tiles as rows rather than hidden behind
+    // the switcher.
+    if (isPhone(this)) this._phoneSectionList(bandFor, room);
+
     this._orderBadgeCards(room, bandFor.badges && bandFor.badges.colA);
     // Inside the Scenes card, under its own fields.
     this._renderSceneColors(room,
@@ -12080,9 +12099,15 @@ class HemmaPanel extends HTMLElement {
       } else {
         band.classList.add("detail");
         band.querySelectorAll(".grouphead").forEach((n) => n.remove());
+        band.querySelectorAll(".sidehead").forEach((n) => n.remove());
         hit.classList.add("sel");
         // A thing you asked to see is not also folded.
         hit.classList.remove("shut");
+        // An empty phone panel still paints a surface, so it goes rather than hides.
+        const keep = hit.parentElement;
+        band.querySelectorAll(".phonepanel").forEach((c) => {
+          if (c !== keep) c.remove();
+        });
         const bar = document.createElement("div");
         bar.className = "detailbar"
           + (this._sel.group === "rooms" ? " rootlevel" : "");
@@ -12113,6 +12138,34 @@ class HemmaPanel extends HTMLElement {
         seg.remove();
         nav.appendChild(bar);
       }
+    }
+    if (!this._sel && isPhone(this) && this._group !== GROUPS[0].id
+      && !nav.querySelector(".detailbar")) {
+      const grp = GROUPS.find((x) => x.id === this._group);
+      const bar = document.createElement("div");
+      bar.className = "detailbar listbar";
+      const back = document.createElement("button");
+      back.className = "back";
+      back.type = "button";
+      const home = (this._headFor(GROUPS[0], room) || {}).label || "the list";
+      back.title = "Back to " + home;
+      back.setAttribute("aria-label", "Back to " + home);
+      back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+        + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'
+        + '<path d="m15 5-7 7 7 7"/></svg>';
+      back.onclick = () => {
+        this._group = GROUPS[0].id;
+        this._sel = null;
+        this._navDir = -1;
+        this._toPageTop = true;
+        this._renderForm();
+      };
+      const h3 = document.createElement("h3");
+      h3.textContent = (grp && grp.label) || "";
+      bar.appendChild(back);
+      bar.appendChild(h3);
+      seg.remove();
+      nav.appendChild(bar);
     }
     if (!this._sel && this.classList.contains("split")
       && !this.classList.contains("flow") && !nav.querySelector(".detailbar")) {
@@ -12238,6 +12291,74 @@ class HemmaPanel extends HTMLElement {
       dashRows.forEach((f) => f());
     }
     nav.scrollTop = keep;
+  }
+
+  _phoneSectionList(bandFor, room) {
+    const slot = bandFor.rooms && bandFor.rooms.colA;
+    const cols = slot && slot.parentElement;
+    if (!slot || !cols) return;
+    const cards = [...slot.children].filter((c) => c.classList
+      && c.classList.contains("card") && c.dataset && c.dataset.k);
+    if (!cards.length) return;
+    const isDash = (k) => {
+      const sec = SECTIONS.find((x) => x.group === "rooms" && x.label === k);
+      return !!(sec && sec.scope === "dashboard");
+    };
+    const head = (text) => {
+      const h = document.createElement("h2");
+      h.className = "sidehead phonehead";
+      h.textContent = text;
+      return h;
+    };
+    const groupRow = (g) => {
+      const card = document.createElement("section");
+      card.className = "card grouprow shut";
+      const ch = document.createElement("div");
+      ch.className = "chead";
+      const gi = document.createElement("span");
+      gi.className = "sicon";
+      gi.style.setProperty("--i", "url('" + iconUrl(g.icon) + "')");
+      if (g.iconColor) gi.style.setProperty("--sc", g.iconColor);
+      ch.appendChild(gi);
+      const h2 = document.createElement("h2");
+      h2.textContent = g.label;
+      ch.appendChild(h2);
+      const chev = document.createElement("span");
+      chev.className = "fold";
+      chev.setAttribute("aria-hidden", "true");
+      chev.setAttribute("aria-expanded", "false");
+      chev.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+        + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'
+        + '<path d="m6 9 6 6 6-6"/></svg>';
+      ch.appendChild(chev);
+      ch.onclick = () => {
+        this._group = g.id;
+        this._sel = null;
+        this._navDir = 0;
+        this._toPageTop = true;
+        this._instantNav = true;
+        this._renderForm();
+      };
+      card.appendChild(ch);
+      return card;
+    };
+    const mine = cards.filter((c) => !isDash(c.dataset.k));
+    const dash = cards.filter((c) => isDash(c.dataset.k));
+    cols.classList.add("phonelist");
+    slot.classList.add("phonepanel");
+    const gh = slot.querySelector(":scope > .grouphead");
+    if (gh) gh.remove();
+    cols.insertBefore(head((room && (room.name || room.path)) || "Room"), slot);
+    mine.forEach((c) => slot.appendChild(c));
+    GROUPS.forEach((g) => {
+      if (g.id === "badges" || g.id === "tiles") slot.appendChild(groupRow(g));
+    });
+    if (!dash.length) return;
+    const col = document.createElement("div");
+    col.className = "col phonepanel";
+    dash.forEach((c) => col.appendChild(c));
+    cols.appendChild(head("Dashboard"));
+    cols.appendChild(col);
   }
 
   _focusPreview() {
@@ -13199,6 +13320,11 @@ class HemmaPanel extends HTMLElement {
       targets.forEach((t) => t.animate(
         [{ opacity: 0, transform: "translateX(" + dx + "px)" },
          { opacity: 1, transform: "none" }],
+        { duration: 360, easing: SEG_EASE, fill: "backwards" }));
+      // Headings carry no backdrop-filter, so they take the depth entrance.
+      root.querySelectorAll(".sidehead").forEach((h) => h.animate(
+        [{ opacity: 0, transform: "perspective(900px) translateZ(-70px)" },
+         { opacity: 1, transform: "perspective(900px) translateZ(0)" }],
         { duration: 360, easing: SEG_EASE, fill: "backwards" }));
     }
     if (!swapped) return;
