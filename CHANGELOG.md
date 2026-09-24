@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.2
+
+- **Performance mode keeps Hemma's animations.** It switched off the entrance
+  along with the blur, on the assumption that animation was part of what makes a
+  slow device struggle. It is not. Every entrance in Hemma animates opacity and
+  transform only, which a browser hands to the compositor and draws without
+  repainting anything; the cost was always the blur behind them. Switching it off
+  also raced with the timing each row writes onto its own tiles as it builds, so
+  the entrance often played half way and the tiles arrived in a stagger that
+  looked like a fault. Performance mode now changes the blur and the surfaces
+  that depend on it, and nothing else.
+
+- **The buttons above a phone dashboard crowd the corner less.** The pill
+  holding them is 40px tall rather than 44px.
+
 ## 2.1.1
 
 **Open Hemma Studio and press Save once after updating.** Several fixes below

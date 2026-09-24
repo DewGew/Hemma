@@ -1,5 +1,5 @@
 
-const PANEL_VERSION = "2.1.1";
+const PANEL_VERSION = "2.1.2";
 const TEMPLATES_URL = "/api/hemma/templates";
 const TEMPLATES_URL_STATIC = "/hemma_panel/hemma-templates.json";
 
