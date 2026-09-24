@@ -1,11 +1,11 @@
-![hemma](https://github.com/user-attachments/assets/03d47c26-ec57-474d-a654-0eb4b508e1b0)
+<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/34ea8a3f-2f33-4337-9ca9-742e1f51f664" />
 
 
 ## Hemma
 
 A modern, mobile-friendly dashboard for Home Assistant, built and configured from a UI.
 
-Hemma installs as an integration and adds **Hemma** to your sidebar. There is no dashboard YAML to write and no card configuration to paste. You pick your rooms and entities, press Save, and Hemma writes the dashboard. 
+Hemma installs as an integration and is added to your sidebar. There is no dashboard YAML to write and no card configuration to paste. You pick your rooms and entities, press Save, and Hemma writes the dashboard. 
 
 Creating a dashboard gives you two layouts from one setup: desktop and tablet, and a phone layout inspired by Apple Home. Phones are routed to the phone one automatically.
 
@@ -87,11 +87,11 @@ Everything is optional. A room with nothing but a light group is a valid room, a
 ## Screenshots
 
 ### Desktop
-![desktop](https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc)
+<img width="1729" height="1089" alt="desktop" src="https://github.com/user-attachments/assets/bdbca823-eb97-4ca0-8c49-b504c67beec8" />
 
 ### Light and dark
-![living room-light](https://github.com/user-attachments/assets/ba69a8d6-d1d8-4b2d-a728-057cae3e2809)
-![livingroom-dark](https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675)
+<img width="1729" height="1089" alt="livingroom-day" src="https://github.com/user-attachments/assets/6be96a9f-7f78-4e77-b470-9825976ce5a8" />
+<img width="1729" height="1089" alt="livingroom-night" src="https://github.com/user-attachments/assets/d32dfa80-2097-4f27-afa4-2e1a92f6eb68" />
 
 ### Mobile
 <img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/beb8537b-89f5-4f1b-ac7b-85af30117b68" />
