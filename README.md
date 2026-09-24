@@ -5,7 +5,7 @@
 
 A modern, mobile-friendly dashboard for Home Assistant, built and configured from a UI.
 
-Hemma installs as an integration and adds **Hemma** to your sidebar. There is no dashboard YAML to write and no card configuration to paste. You pick your rooms and entities, press Save, and Hemma writes the dashboard. 
+Hemma installs as an integration and is added to your sidebar. There is no dashboard YAML to write and no card configuration to paste. You pick your rooms and entities, press Save, and Hemma writes the dashboard. 
 
 Creating a dashboard gives you two layouts from one setup: desktop and tablet, and a phone layout inspired by Apple Home. Phones are routed to the phone one automatically.
 
