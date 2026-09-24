@@ -1,4 +1,4 @@
-![hemma](https://github.com/user-attachments/assets/03d47c26-ec57-474d-a654-0eb4b508e1b0)
+<img width="1729" height="1383" alt="hemma" src="https://github.com/user-attachments/assets/34ea8a3f-2f33-4337-9ca9-742e1f51f664" />
 
 
 ## Hemma
@@ -87,11 +87,11 @@ Everything is optional. A room with nothing but a light group is a valid room, a
 ## Screenshots
 
 ### Desktop
-![desktop](https://github.com/user-attachments/assets/3740d75b-780c-4f37-8c40-fecf400783bc)
+<img width="1729" height="1089" alt="desktop" src="https://github.com/user-attachments/assets/bdbca823-eb97-4ca0-8c49-b504c67beec8" />
 
 ### Light and dark
-![living room-light](https://github.com/user-attachments/assets/ba69a8d6-d1d8-4b2d-a728-057cae3e2809)
-![livingroom-dark](https://github.com/user-attachments/assets/ea2979bd-ddee-4b11-a5b0-4174d4dea675)
+<img width="1729" height="1089" alt="livingroom-light" src="https://github.com/user-attachments/assets/bdb3a838-ef30-4e3e-9dac-caad0a3350d6" />
+<img width="1729" height="1089" alt="livingroom-dark" src="https://github.com/user-attachments/assets/536ebf08-c64e-4486-88d1-cf9ae3fcb56b" />
 
 ### Mobile
 <img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/beb8537b-89f5-4f1b-ac7b-85af30117b68" />
