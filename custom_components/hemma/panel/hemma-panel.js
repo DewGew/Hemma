@@ -1120,10 +1120,7 @@ const SECTIONS = [
         options: ["", "1", "2", "5", "10"],
         optionLabels: { "": "Off", "1": "After 1 minute", "2": "After 2 minutes",
           "5": "After 5 minutes", "10": "After 10 minutes" },
-        hint: "Wall tablets only, so a desktop browser and a phone are never affected. "
-          + "A tablet left on a room goes back to Home, so whoever walks past next sees "
-          + "the house rather than the bathroom. Any touch resets it and an open popup "
-          + "pauses it." },
+        hint: "Tablets only. Brings one back to Home after a while without use." },
       { key: "hemma_hide_dialog_logbook", sub: "dialogs", label: "Hide dialog logbook", type: "bool",
         boolDefault: true, auto: true, scope: "dashboard", needsMod: "kiosk-mode" },
       { key: "hemma_hide_dialog_light_actions", sub: "dialogs", label: "Hide light dialog actions", type: "bool",
@@ -1143,10 +1140,8 @@ const SECTIONS = [
         auto: true, scope: "dashboard",
         options: ["", "auto", "on"],
         optionLabels: { "": "Off", auto: "Automatic", on: "On" },
-        hint: "Trades the blurred glass for opaque panels, which is what makes Hemma "
-          + "slow on cheap wall tablets. Automatic turns it on below 4GB of memory "
-          + "or 4 cores. To set it on one device only, open the dashboard there once "
-          + "with ?hemma_perf=on on the end of the URL." },
+        hint: "Solid panels instead of blurred glass, so the dashboard draws faster. "
+          + "Automatic turns it on for slower devices." },
     ],
   },
   {

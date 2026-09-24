@@ -60,18 +60,18 @@ hemma_mobile_chrome:
               + (variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes('conversation') ? 1 : 0);
             return n > 1 ? '0 8px' : '0';
           ]]]
-      - height: 44px
+      - height: 40px
       - width: >
           [[[
             const n = (variables.show_notifications !== false ? 1 : 0) + (variables.show_edit ? 1 : 0)
               + (variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes('conversation') ? 1 : 0);
-            return n > 1 ? 'max-content' : '44px';
+            return n > 1 ? 'max-content' : '40px';
           ]]]
       - border-radius: >
           [[[
             const n = (variables.show_notifications !== false ? 1 : 0) + (variables.show_edit ? 1 : 0)
               + (variables.show_assist !== false && ((hass && hass.config && hass.config.components) || []).includes('conversation') ? 1 : 0);
-            return n > 1 ? '22px' : '50%';
+            return n > 1 ? '20px' : '50%';
           ]]]
       - background: none
       - border: none !important
@@ -84,7 +84,7 @@ hemma_mobile_chrome:
       - "--hemma-assist-fill": transparent
       - "--hemma-assist-size": 17px
       # Full capsule height, so an active button fills the pill end to end.
-      - "--hemma-chrome-btn-size": 44px
+      - "--hemma-chrome-btn-size": 40px
       - "--hemma-bell-size": 17.5px
       - "--hemma-bell-count-top": 6px
       - "--hemma-bell-count-right": 4px
@@ -164,7 +164,7 @@ hemma_mobile_chrome:
     }
     :host ha-card{
       position: relative !important;
-      border-radius: 22px !important;
+      border-radius: 20px !important;
       background: none !important;
       backdrop-filter: none !important;
       -webkit-backdrop-filter: none !important;

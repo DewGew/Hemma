@@ -366,12 +366,10 @@ window.hemmaMenuGlass = {
     + '--hero-img-blur-mobile:0px!important;'
     + '--hemma-mobile-hero-blur:0px!important;'
     + '--hemma-card-will-change:auto!important;'
-    // The entrance is the heaviest moment on a slow tablet: every tile, the
-    // photo and the title compositing at once, while the page is still loading.
-    + '--hemma-anim-duration:0s!important;'
-    + '--hemma-anim-delay:0s!important;'
-    + '--hemma-hero-anim-dur:0s!important;'
-    + '--hemma-hero-anim-delay:0s!important;'
+    // Entrances stay. Every one of them animates transform and opacity only,
+    // which the compositor handles without a repaint, so they cost nothing once
+    // the blur above is gone. Suppressing them raced with the delays smart-row
+    // writes inline per tile and left a half-played entrance that read as a bug.
     // Opaque stand-ins, or every surface above turns into clear glass.
     + '--hemma-glass-background:var(--hemma-perf-glass-fill,rgb(44,46,52))!important;'
     + '--hemma-pill-fill:var(--hemma-perf-pill-fill,rgb(38,40,46))!important;'

@@ -592,35 +592,8 @@ class HemmaSmartRow extends HTMLElement {
     this.shadowRoot.appendChild(container);
     this._container = container;
 
-    // The build appends card by card, yielding every 8ms, so the row would fill
-    // in left to right. Held back and shown once instead: in performance mode
-    // there is no entrance animation to cover that, and with one the tiles
-    // animate together rather than in build order. Unconditional on purpose,
-    // since asking whether performance mode is on depends on hemma-core having
-    // run, and these are separate resources. visibility keeps the layout, and
-    // the timer means a throw mid-build can never leave a row invisible.
-    // Only in performance mode. With animations on, the entrance covers the
-    // build and holding the row would change how the dashboard normally looks.
-    const holdRow = perfOn();
-    // The per-tile entrance delay is written inline on each wrapper, so no
-    // amount of overriding from html can reach it. In performance mode it is
-    // flattened here and again whenever the row is shown, because this is a
-    // point that provably runs.
-    const flattenEntrance = () => {
-      if (!perfOn()) return;
-      this._wrappers.forEach((w) => {
-        w.style.setProperty('--hemma-anim-delay', '0s');
-        w.style.setProperty('--hemma-anim-duration', '0s');
-        w.style.removeProperty('--hemma-init-play');
-      });
-    };
-    rowLog('build start', { perf: holdRow, sort: this._sortEnabled,
+    rowLog('build start', { sort: this._sortEnabled,
       scroll: this._scrollMode, cards: (this._config.cards || []).length });
-    const showRow = () => { flattenEntrance(); container.style.visibility = ''; };
-    if (holdRow) {
-      container.style.visibility = 'hidden';
-      setTimeout(showRow, 2000);
-    }
 
     // Sort disabled: render in config order, no detection or reordering.
     if (!this._sortEnabled) {
@@ -661,7 +634,6 @@ class HemmaSmartRow extends HTMLElement {
       this._cardsCreated = true;
       this._initialized  = true;
       this._initializing = false;
-      showRow();
       return;
     }
 
@@ -728,12 +700,8 @@ class HemmaSmartRow extends HTMLElement {
     // A timer, not a frame: requestAnimationFrame does not fire in a background
     // tab, and the row must never wait on one to become visible.
     await new Promise((r) => setTimeout(r, 0));
-    showRow();
     this._builtAt = Date.now();
-    rowLog('revealed', { held: holdRow, delay0: perfOn() });
-    // Anything that re-stamps the delay after this gets flattened again.
-    setTimeout(flattenEntrance, 150);
-    setTimeout(flattenEntrance, 600);
+    rowLog('revealed', {});
 
     this._cardsCreated = true;
     this._initializing = false;
@@ -761,12 +729,10 @@ class HemmaSmartRow extends HTMLElement {
 
       // Active cards move to the front, keeping config order among themselves.
       order.forEach((origIdx, pos) => { this._wrappers[origIdx].style.order = pos; });
-      // Inline on the wrapper, so it beats anything inherited: performance mode
-      // cannot switch this off from html, it has to not be written.
-      const stagger = perfOn() ? null : 0.04;
+      // Inline on the wrapper, so it beats anything inherited.
       order.forEach((origIdx, sortedPos) => {
         this._wrappers[origIdx].style.setProperty('--hemma-anim-delay',
-          stagger === null ? '0s' : `${(sortedPos * stagger).toFixed(2)}s`);
+          `${(sortedPos * 0.04).toFixed(2)}s`);
       });
 
       if (!!window._hemmaFromBg) {
@@ -872,7 +838,7 @@ class HemmaSmartRow extends HTMLElement {
     const delay = window._hemmaNoFilterAnim ? 100 : SORT_DELAY_MS;
     this._sortTimer = setTimeout(() => {
       this._sortTimer = null;
-      this._applyOrder(!perfOn());
+      this._applyOrder(true);
     }, delay);
   }
 
@@ -880,8 +846,7 @@ class HemmaSmartRow extends HTMLElement {
 
   _applyOrder(animate) {
     if (!this._wrappers.length) return;
-    if (perfOn()) animate = false;
-    rowLog('applyOrder', { animate: !!animate, perf: perfOn(),
+    rowLog('applyOrder', { animate: !!animate,
       sinceBuilt: Date.now() - (this._builtAt || 0),
       noFilterAnim: !!window._hemmaNoFilterAnim });
 
