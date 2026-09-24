@@ -90,8 +90,8 @@ Everything is optional. A room with nothing but a light group is a valid room, a
 <img width="1729" height="1089" alt="desktop" src="https://github.com/user-attachments/assets/bdbca823-eb97-4ca0-8c49-b504c67beec8" />
 
 ### Light and dark
-<img width="1729" height="1089" alt="livingroom-light" src="https://github.com/user-attachments/assets/bdb3a838-ef30-4e3e-9dac-caad0a3350d6" />
-<img width="1729" height="1089" alt="livingroom-dark" src="https://github.com/user-attachments/assets/536ebf08-c64e-4486-88d1-cf9ae3fcb56b" />
+<img width="1729" height="1089" alt="livingroom-day" src="https://github.com/user-attachments/assets/6be96a9f-7f78-4e77-b470-9825976ce5a8" />
+<img width="1729" height="1089" alt="livingroom-night" src="https://github.com/user-attachments/assets/d32dfa80-2097-4f27-afa4-2e1a92f6eb68" />
 
 ### Mobile
 <img width="850" height="600" alt="mobile" src="https://github.com/user-attachments/assets/beb8537b-89f5-4f1b-ac7b-85af30117b68" />
