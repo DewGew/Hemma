@@ -261,6 +261,17 @@ class HemmaSmartRow extends HTMLElement {
   }
 
   set hass(hass) {
+    // The filter is per device, so the entity is rewritten before any card in
+    // the row sees it. hemma-core may not have loaded yet, in which case this
+    // is the shared value it always was.
+    this._rawHass = hass;
+    const F = window._hemmaFilter;
+    if (F && !this._filterOff) {
+      this._filterOff = F.onChange(() => {
+        if (this._rawHass) this.hass = this._rawHass;
+      });
+    }
+    hass = F ? F.apply(hass) : hass;
     this._hass = hass;
 
     if (!this._cardsCreated) {
@@ -312,7 +323,9 @@ class HemmaSmartRow extends HTMLElement {
 
     // The filter entity is global: only scroll_mode rows may honor it.
     const filter = this._scrollMode
-      ? this._hass?.states['input_select.hemma_mobile_filter']?.state
+      ? (window._hemmaFilter
+          ? window._hemmaFilter.get()
+          : this._hass?.states['input_select.hemma_mobile_filter']?.state)
       : undefined;
     const filterChanged = this._lastKnownFilter !== undefined && filter !== this._lastKnownFilter;
     this._lastKnownFilter = filter;

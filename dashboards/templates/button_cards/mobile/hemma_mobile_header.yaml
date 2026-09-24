@@ -38,17 +38,14 @@ hemma_mobile_header:
         if (this._config?.name === 'Favorites') return 'none';
         const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
         const roomKey = variables.room_key || (!variables.hide_caret && slug ? 'room_' + slug : null);
-        return roomKey ? 'call-service' : 'none';
+        return roomKey ? 'fire-dom-event' : 'none';
       ]]]
-    service: input_select.select_option
-    service_data:
-      entity_id: input_select.hemma_mobile_filter
-      option: |
-        [[[
-          const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
-          const roomKey = variables.room_key || (!variables.hide_caret && slug ? 'room_' + slug : null);
-          return roomKey || 'all';
-        ]]]
+    hemma_filter: |
+      [[[
+        const slug = String(this._config?.name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const roomKey = variables.room_key || (!variables.hide_caret && slug ? 'room_' + slug : null);
+        return roomKey || 'all';
+      ]]]
     haptic: light
 
   show_icon: false

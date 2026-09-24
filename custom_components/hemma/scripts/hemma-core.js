@@ -4809,6 +4809,11 @@ window.hemmaMenuGlass = {
     if (!flagOn()) return;
     var cfg = ev.detail && ev.detail.hemma_popup;
     if (!cfg) return;
+    // A tap that sets the mobile filter is not a tap that opens a popup. The
+    // badge inherits its popup from hemma_popup_base, and button-card merges a
+    // card's tap_action over the template's rather than replacing it, so one
+    // event can carry both intentions.
+    if (ev.detail.hemma_filter !== undefined) return;
     ev.stopPropagation();
     window.hemmaPopup.open(cfg);
   }, true);
@@ -7557,4 +7562,88 @@ window.hemmaMenuGlass = {
   document.addEventListener('visibilitychange', function () {
     if (!document.hidden) check();
   });
+})();
+
+// The mobile filter, per device. It lives in an input_select so the button-card
+// templates re-render when it changes, but an entity is one value for the whole
+// house, so two phones open at once drove each other. Each device now keeps its
+// own and the entity is rewritten on the way to the cards, which leaves the
+// templates untouched and the helper still correct for automations.
+(function () {
+  if (window._hemmaFilter) return;
+
+  var ENTITY = 'input_select.hemma_mobile_filter';
+  var KEY = 'hemma_mobile_filter';
+  var listeners = [];
+  var current = null;
+
+  function get() {
+    if (current !== null) return current;
+    try { current = localStorage.getItem(KEY) || 'all'; } catch (e) { current = 'all'; }
+    return current;
+  }
+
+  function set(v) {
+    v = String(v == null ? 'all' : v) || 'all';
+    if (get() === v) return v;
+    current = v;
+    try { localStorage.setItem(KEY, v); } catch (e) {}
+    listeners.slice().forEach(function (fn) { try { fn(v); } catch (e) {} });
+    return v;
+  }
+
+  // One hass object arrives per update and is handed to every card, so the
+  // rewrite is memoised on it rather than repeated down the tree.
+  var lastIn = null, lastVal = null, lastOut = null;
+
+  function apply(hass) {
+    if (!hass || !hass.states) return hass;
+    var ent = hass.states[ENTITY];
+    if (!ent) return hass;                    // no helper: nothing to stand in for
+    var v = get();
+    if (ent.state === v) return hass;
+    if (hass === lastIn && v === lastVal) return lastOut;
+    var states = Object.assign({}, hass.states);
+    states[ENTITY] = Object.assign({}, ent, { state: v });
+    var out = Object.assign({}, hass);
+    out.states = states;
+    lastIn = hass; lastVal = v; lastOut = out;
+    return out;
+  }
+
+  // Keeps the helper current for anyone automating on it. The other devices
+  // ignore it, because each one rewrites it with its own value on the way in.
+  function share(hass, v) {
+    if (!hass || typeof hass.callService !== 'function') return;
+    var ent = hass.states && hass.states[ENTITY];
+    if (!ent || ent.state === v) return;
+    try {
+      hass.callService('input_select', 'select_option', { entity_id: ENTITY, option: v });
+    } catch (e) {}
+  }
+
+  // The badge row and the room headers tap through this, since a button-card
+  // tap_action cannot call a function directly.
+  window.addEventListener('ll-custom', function (ev) {
+    var d = ev.detail || {};
+    if (!('hemma_filter' in d)) return;
+    ev.stopPropagation();
+    var v = set(d.hemma_filter);
+    var ha = document.querySelector('home-assistant');
+    share(ha && ha.hass, v);
+  }, true);
+
+  window._hemmaFilter = {
+    ENTITY: ENTITY,
+    get: get,
+    set: set,
+    apply: apply,
+    share: share,
+    onChange: function (fn) {
+      listeners.push(fn);
+      return function () {
+        listeners = listeners.filter(function (x) { return x !== fn; });
+      };
+    },
+  };
 })();

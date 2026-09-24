@@ -212,15 +212,12 @@ hemma_mobile_filter_badges:
             template: hemma_badge_climate_group
             entity: input_select.hemma_mobile_filter
             tap_action:
-              action: call-service
-              service: input_select.select_option
-              service_data:
-                entity_id: input_select.hemma_mobile_filter
-                option: >
-                  [[[
-                    const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-                    return cur === 'climate' ? 'all' : 'climate';
-                  ]]]
+              action: fire-dom-event
+              hemma_filter: >
+                [[[
+                  const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+                  return cur === 'climate' ? 'all' : 'climate';
+                ]]]
             variables:
               enabled: '[[[ return variables.show_climate !== false ]]]'
               temp_sensor: '[[[ return variables.temp_sensor_1 || variables.temp_sensor ]]]'
@@ -238,15 +235,12 @@ hemma_mobile_filter_badges:
             template: hemma_badge_light_group
             entity: input_select.hemma_mobile_filter
             tap_action:
-              action: call-service
-              service: input_select.select_option
-              service_data:
-                entity_id: input_select.hemma_mobile_filter
-                option: >
-                  [[[
-                    const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-                    return cur === 'lights' ? 'all' : 'lights';
-                  ]]]
+              action: fire-dom-event
+              hemma_filter: >
+                [[[
+                  const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+                  return cur === 'lights' ? 'all' : 'lights';
+                ]]]
             variables:
               enabled: '[[[ return variables.show_lights !== false ]]]'
               light_group_entity: '[[[ return variables.light_group_entity ]]]'
@@ -259,15 +253,12 @@ hemma_mobile_filter_badges:
             template: hemma_badge_presence_group
             entity: input_select.hemma_mobile_filter
             tap_action:
-              action: call-service
-              service: input_select.select_option
-              service_data:
-                entity_id: input_select.hemma_mobile_filter
-                option: >
-                  [[[
-                    const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-                    return cur === 'presence' ? 'all' : 'presence';
-                  ]]]
+              action: fire-dom-event
+              hemma_filter: >
+                [[[
+                  const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+                  return cur === 'presence' ? 'all' : 'presence';
+                ]]]
             variables:
               enabled: '[[[ return variables.show_people !== false ]]]'
               entity_1: '[[[ return variables.presence_entity_1 ]]]'
@@ -277,15 +268,12 @@ hemma_mobile_filter_badges:
             template: hemma_badge_media_group
             entity: input_select.hemma_mobile_filter
             tap_action:
-              action: call-service
-              service: input_select.select_option
-              service_data:
-                entity_id: input_select.hemma_mobile_filter
-                option: >
-                  [[[
-                    const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-                    return cur === 'media' ? 'all' : 'media';
-                  ]]]
+              action: fire-dom-event
+              hemma_filter: >
+                [[[
+                  const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+                  return cur === 'media' ? 'all' : 'media';
+                ]]]
             variables:
               enabled: '[[[ return variables.show_media !== false ]]]'
               always_visible: true
@@ -316,15 +304,12 @@ hemma_mobile_filter_badges:
             template: hemma_badge_security_group
             entity: input_select.hemma_mobile_filter
             tap_action:
-              action: call-service
-              service: input_select.select_option
-              service_data:
-                entity_id: input_select.hemma_mobile_filter
-                option: >
-                  [[[
-                    const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-                    return cur === 'security' ? 'all' : 'security';
-                  ]]]
+              action: fire-dom-event
+              hemma_filter: >
+                [[[
+                  const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+                  return cur === 'security' ? 'all' : 'security';
+                ]]]
             variables:
               enabled: '[[[ return variables.show_security !== false ]]]'
               lock_entity: '[[[ return variables.security_lock_entity || variables.lock_entity ]]]'
@@ -335,15 +320,12 @@ hemma_mobile_filter_badges:
             template: hemma_badge_energy_group
             entity: input_select.hemma_mobile_filter
             tap_action:
-              action: call-service
-              service: input_select.select_option
-              service_data:
-                entity_id: input_select.hemma_mobile_filter
-                option: >
-                  [[[
-                    const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
-                    return cur === 'energy' ? 'all' : 'energy';
-                  ]]]
+              action: fire-dom-event
+              hemma_filter: >
+                [[[
+                  const cur = states['input_select.hemma_mobile_filter']?.state ?? 'all';
+                  return cur === 'energy' ? 'all' : 'energy';
+                ]]]
             variables:
               enabled: '[[[ return variables.show_energy !== false ]]]'
               row_entity: input_select.hemma_mobile_filter

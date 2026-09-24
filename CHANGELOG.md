@@ -2,6 +2,43 @@
 
 ## 2.1.2
 
+**If Hemma looks unchanged after updating, clear your browser's cache.** Hemma
+stamps its scripts so a browser should fetch the new ones, but Home Assistant's
+frontend caches hard enough that the stamp does not always win. On the iOS app
+that means clearing the app cache; in a desktop browser a hard reload usually
+does it. Template fixes also need one Save in Hemma Studio, as in 2.1.1.
+
+- **Each phone keeps its own filter.** The overlay you get from tapping a badge
+  or a room header was stored in a Home Assistant helper, and a helper is one
+  value for the whole house, so two phones open at the same time drove each
+  other: tapping Lights on one opened it on the other, and closing it closed
+  both. Each device now remembers its own. The helper is still set, so anything
+  you automate against it keeps working, and the other phones simply ignore it.
+  Reported in [#76](https://github.com/willsanderson/Hemma/issues/76).
+
+- **The skip buttons use Apple's glyphs.** Previous and next were the triangle
+  and bar from Material. Apple Music, the iOS now playing sheet and Control
+  Center all use two rounded triangles with no bar, and Hemma's play and pause
+  already came from that set, so the two of them stood out. They sit slightly
+  smaller than play and pause, as they do in Apple Music, and are nudged off
+  center because a triangle looks heavy on its flat side. The faint ring that
+  sat behind them at rest has gone with it: those two buttons carried a halo
+  three times stronger than play's, which on a flat card read as an outline
+  nobody asked for. Suggested, with the glyphs, in
+  [#74](https://github.com/willsanderson/Hemma/issues/74).
+
+- **Conditional cards in a tile row are left alone.** 2.1.1 wrapped every card
+  in a row that was not one of Hemma's own into a host tile, so it could give a
+  pasted card Hemma's surface and sizing. A `conditional` card is not a tile
+  though: it decides for itself whether to appear, and the host stayed behind
+  when the inner card hid, leaving an empty tile that also broke sorting. Worse,
+  the rewrite made the phone layout fail its round trip, so Studio quietly
+  skipped saving the phone half and the two dashboards drifted apart. Hemma now
+  hosts only cards that behave like a tile, and a stack, a carousel or anything
+  else carrying cards of its own is passed through untouched. A dashboard
+  already rewritten by 2.1.1 is put back as it is read. Reported in
+  [#75](https://github.com/willsanderson/Hemma/issues/75).
+
 - **Performance mode keeps Hemma's animations.** It switched off the entrance
   along with the blur, on the assumption that animation was part of what makes a
   slow device struggle. It is not. Every entrance in Hemma animates opacity and

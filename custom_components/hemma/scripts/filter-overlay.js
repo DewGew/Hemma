@@ -487,7 +487,10 @@
     // The filter entity is global, so a popup left open elsewhere would leak into this one.
     if (inst._hass?.states?.['input_select.hemma_mobile_filter']?.state !== 'all') {
       try {
-        inst._hass.callService('input_select', 'select_option', {
+        if (window._hemmaFilter) {
+          window._hemmaFilter.set('all');
+          window._hemmaFilter.share(inst._rawHass || inst._hass, 'all');
+        } else inst._hass.callService('input_select', 'select_option', {
           entity_id: 'input_select.hemma_mobile_filter',
           option: 'all',
         });
@@ -806,7 +809,16 @@
     }
 
     set hass(v) {
+      // Per device, like the row: rewrite before the overlay or its cards read it.
+      this._rawHass = v;
+      const F = window._hemmaFilter;
+      if (F && !this._filterOff) {
+        this._filterOff = F.onChange(() => {
+          if (this._rawHass) this.hass = this._rawHass;
+        });
+      }
       const prevFilter = this._hass?.states?.['input_select.hemma_mobile_filter']?.state;
+      v = F ? F.apply(v) : v;
       this._hass = v;
       for (const el of this._cardEls) { try { el.hass = v; } catch (_) {} }
       const filter = v?.states?.['input_select.hemma_mobile_filter']?.state;
@@ -1311,7 +1323,10 @@
       // Call the service first, so its round trip overlaps the blur fade.
       window._hemmaNoFilterAnim = true;
       try {
-        this._hass.callService('input_select', 'select_option', {
+        if (window._hemmaFilter) {
+          window._hemmaFilter.set('all');
+          window._hemmaFilter.share(this._rawHass || this._hass, 'all');
+        } else this._hass.callService('input_select', 'select_option', {
           entity_id: 'input_select.hemma_mobile_filter',
           option: 'all',
         });

@@ -160,6 +160,9 @@ See **[docs/ADVANCED.md](docs/ADVANCED.md)** for the folder layout, template var
 
 - Original Homio concept and base implementation: [iamtherufus/Homio](https://github.com/iamtherufus/Homio)
 - Hemma customization and ongoing tweaks: [@willsanderson](https://github.com/willsanderson)
+- Bug hunting and feature ideas: [@SH1FT-W](https://github.com/SH1FT-W), who has
+  found and written up more of Hemma's rough edges than anyone, often with a
+  working fix attached. Hemma is noticeably better for it.
 
 #### Enjoying Hemma? Buy me a coffee :v::smiley:
 
