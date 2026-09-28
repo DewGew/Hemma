@@ -20,6 +20,7 @@ hemma_badge_base:
       force_eval: true
       value: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           if (typeof window.hemmaCameraAlert !== 'function') {
             window.hemmaCameraAlert = function (hass, states, cams, windowMinutes) {
               const reg = (hass && hass.entities) || {};
@@ -40,7 +41,7 @@ hemma_badge_base:
                 if (/ding|doorbell|button/.test(id)) ding = true;
                 else if (/motion/.test(id)) motion = true;
               });
-              return ding ? 'Doorbell' : motion ? 'Motion Detected' : '';
+              return ding ? T('cameras.doorbell', 'Doorbell') : motion ? T('cameras.motion_detected', 'Motion Detected') : '';
             };
           }
           return true;

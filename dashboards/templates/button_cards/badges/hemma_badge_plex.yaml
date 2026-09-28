@@ -136,9 +136,10 @@ hemma_badge_plex:
 
   name: >
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
       const sid = variables?.session_entity;
       const a = (sid && hass.states[sid]?.attributes) || {};
-      const plexUser = a.user || 'Unknown';
+      const plexUser = a.user || L('state.default.unknown', 'Unknown');
       const full = a.full_title || a.title || '';
 
       const esc = (s) => String(s ?? '')

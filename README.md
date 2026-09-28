@@ -145,6 +145,34 @@ Five things changed in 2.1 that are worth knowing:
 - **Mobile dashboard** with filter pills, room popups, a collapsing header, and a wallpaper that samples your room photos for its gradient
 - **Motion** shows a pulsing dot beside a room in the navigation, and a motion icon on the phone
 - **Light and dark** throughout, with day and night room images
+- **Your language.** The dashboard and Hemma Studio follow your Home Assistant language, and numbers and money follow your Home Assistant settings
+
+---
+
+## Translating Hemma
+
+Hemma follows the language set in your Home Assistant profile. Words Home Assistant already translates, like On, Off and Locked, come from Home Assistant itself. Everything else Hemma says lives in one file per language in `custom_components/hemma/translations/dashboard/`.
+
+`en.json` is the English original. Each line is a name on the left and the text on the right:
+
+```json
+"lights.all_off": "All Off",
+"lights.n_on": "{n} On",
+```
+
+To translate Hemma, copy `en.json` to a file named after your language code, like `sv.json` or `de.json`, and change only the text on the right. A few things to keep as they are:
+
+- **The name on the left.** It is how Hemma finds the line.
+- **Anything in braces,** like `{n}` or `{name}`. Hemma writes a number or a name there, so move it wherever your language needs it, but keep it: `"{n} On"` can become `"{n} tända"`.
+- **A `%` sign.** In Hemma Studio labels like `"Button % action"` it is where Hemma writes the number, so `"Åtgärd för knapp %"` works. Elsewhere it is a real percent sign. Either way, keep the same number of them.
+
+The lines starting with `studio.` are Hemma Studio, the editor. The rest are the dashboard itself, which is the part most people see, so it is a good place to start. You don't have to translate everything at once. Anything you leave out, or delete from your copy, shows in English, so a partly translated file works fine.
+
+To see what a language still needs, compare your file with `en.json`: any line in `en.json` that is not in yours is still English. If you can run Python, `python3 tools/i18ncheck.py --missing sv` prints exactly those lines, ready to translate, and `python3 tools/i18ncheck.py` shows how much of each language is done.
+
+**To share it,** open a pull request adding your file. It ships in the next release for everyone who uses that language.
+
+**To try it on your own Home Assistant first,** put the file in `custom_components/hemma/translations/dashboard/`, reload the Hemma integration (Settings > Devices & services > Hemma > Reload), and clear your browser's cache. Hemma rebuilds its translations when it loads, so there is nothing to run. If a file has a mistake in it, Hemma skips that file and says which one in the Home Assistant log. Keep a copy somewhere else: an update from HACS replaces that folder, which is another reason to send it as a pull request.
 
 ---
 

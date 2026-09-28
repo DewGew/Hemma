@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from .assets import HemmaAssetsView
 from .images import HemmaImagesView
 from .templates import HemmaTemplatesView, rebuild_if_stale
+from .i18n import rebuild_if_stale as rebuild_translations_if_stale
 from .const import (
     ASSETS_DIR,
     DOMAIN,
@@ -155,6 +156,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # The bundle is derived from the template tree, so rebuild before the panel loads.
     await hass.async_add_executor_job(rebuild_if_stale, hass.config.config_dir)
+    # Before the resources are stamped, so a rebuilt table is fetched fresh.
+    await hass.async_add_executor_job(rebuild_translations_if_stale)
 
     scripts_dir = hass.config.path(SCRIPTS_DIR)
 

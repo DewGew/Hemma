@@ -80,18 +80,19 @@ hemma_badge_energy_group:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
       const eid = variables.power_entity;
       const power = eid ? parseFloat(states[eid]?.state) : NaN;
       let sub = '';
       if (!isNaN(power)) {
-        sub = power >= Number(variables.extreme_threshold ?? 3000) ? 'Extreme Usage'
-            : power >= Number(variables.heavy_threshold   ?? 1000) ? 'Heavy Usage'
-            : power >= Number(variables.normal_threshold  ?? 200)  ? 'Normal'
-            : 'Idle';
+        sub = power >= Number(variables.extreme_threshold ?? 3000) ? T('energy.extreme_usage', 'Extreme Usage')
+            : power >= Number(variables.heavy_threshold   ?? 1000) ? T('energy.heavy_usage', 'Heavy Usage')
+            : power >= Number(variables.normal_threshold  ?? 200)  ? T('energy.normal', 'Normal')
+            : T('energy.idle', 'Idle');
       }
       return `
         <div class="badge-wrap">
-          <div class="badge-title">Energy</div>
+          <div class="badge-title">${T('filter.energy', 'Energy')}</div>
           ${sub ? `<div class="badge-sub">${sub}</div>` : ''}
         </div>
       `;

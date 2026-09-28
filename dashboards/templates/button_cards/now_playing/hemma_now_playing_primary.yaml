@@ -97,7 +97,7 @@ hemma_now_playing_primary:
       ]]]
     entity: '[[[ return variables.src?.entity || null; ]]]'
     hemma_popup:
-      title: "Now Playing"
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; }); return T('now_playing.title', 'Now Playing'); ]]]"
       dismissable: true
       # Card builder in hemma-core.js (window._hemmaPlexPopupCard); shared with popups/hemma_popup_plex.yaml and this template's _art.yaml/_chip.yaml siblings.
       dismiss_on_background: true

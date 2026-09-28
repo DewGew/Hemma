@@ -8,7 +8,7 @@ hemma_popup_updates:
         return window.hemmaPopupAction ? window.hemmaPopupAction() : 'more-info';
       ]]]
     hemma_popup:
-      title: Software Updates
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; }); return T('updates.title', 'Software Updates'); ]]]"
       dismissable: true
       popup_styles:
       - style: all
@@ -47,6 +47,7 @@ hemma_popup_updates:
           .content .container { padding-top: 14px !important; }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
           const updateIds = Object.keys(states).filter(id => id.startsWith('update.'));
           const _allIds = JSON.stringify(updateIds);
           const updates = updateIds.map(id => states[id])
@@ -137,7 +138,7 @@ hemma_popup_updates:
                "Up to date" is not the answer while a restart is still owed, so
                the outstanding one gets the slot instead. */
             if (!n && !restartEntities.length) {
-              add('hero', UI.hero({ label: 'Status', value: 'Up to date' }));
+              add('hero', UI.hero({ label: T('updates.status', 'Status'), value: T('updates.up_to_date', 'Up to date') }));
             }
 
             /* The action is a ROW in the group it acts on, not a card of its
@@ -294,7 +295,7 @@ hemma_popup_updates:
                 image: logoOf(e),
                 label: nameOf(e),
                 sub: verOf(e),
-                action: e.attributes.in_progress ? 'Updating' : 'Update',
+                action: e.attributes.in_progress ? T('updates.updating', 'Updating') : T('updates.update', 'Update'),
                 actionTone: 'accent',
                 /* An update whose notes say it needs a restart is not finished
                    when it installs - the new version is not running yet, which
@@ -307,15 +308,15 @@ hemma_popup_updates:
                    sends every row down the "Installed" branch. */
                 actionLive: {
                   rules: [
-                    { attr: 'in_progress', text: 'Updating',
+                    { attr: 'in_progress', text: T('updates.updating', 'Updating'),
                       color: 'var(--hemma-popup-ui-fill-2, rgba(255,255,255,0.45))' },
                     { attr: 'state', eq: 'off',
                       and: [{ attr: 'release_summary', has: 'restart' }],
-                      text: 'Restart required', color: WARN },
-                    { attr: 'state', eq: 'off', text: 'Installed',
+                      text: T('updates.restart_required', 'Restart required'), color: WARN },
+                    { attr: 'state', eq: 'off', text: T('updates.installed', 'Installed'),
                       color: 'var(--hemma-popup-ui-good, #30D158)' },
                   ],
-                  text: 'Update',
+                  text: T('updates.update', 'Update'),
                   color: TEAL,
                 },
               }));
@@ -326,24 +327,27 @@ hemma_popup_updates:
                  turn is the whole point: an update that needs a restart is not
                  finished when it installs, and the popup you installed from is
                  still open and is where you would look for the button. */
+              const RESTART_NOW = T('updates.restart_now', 'Restart Now'), UPDATE_ALL = T('updates.update_all', 'Update All');
+              const WAITING = T('updates.waiting_restart', 'Waiting on a restart'), AVAILABLE = T('updates.available', 'Available Updates');
+              const RESTART_Q = T('updates.restart_confirm', 'Restart Home Assistant now?'), INSTALL_ALL_Q = T('updates.install_all_q', 'Install all {n} updates now?');
               const headBtn = actionButton(
                 '[[[' + headCount
-                  + ' if (_waiting) return ' + JSON.stringify(btnLabel('Restart Now', WARN)) + ';'
-                  + ' if (_pending.length > 1) return ' + JSON.stringify(btnLabel('Update All', TEAL)) + ';'
+                  + ' if (_waiting) return ' + JSON.stringify(btnLabel(RESTART_NOW, WARN)) + ';'
+                  + ' if (_pending.length > 1) return ' + JSON.stringify(btnLabel(UPDATE_ALL, TEAL)) + ';'
                   + ' return ""; ]]]',
                 '[[[' + headCount
                   + ' if (_waiting) return { action: "call-service",'
                   + '   service: "homeassistant.restart", service_data: {},'
-                  + '   confirmation: { text: "Restart Home Assistant now?" } };'
+                  + '   confirmation: { text: ' + JSON.stringify(RESTART_Q) + ' } };'
                   + ' if (_pending.length > 1) return { action: "call-service",'
                   + '   service: "update.install", target: { entity_id: _pending },'
                   + '   service_data: {},'
-                  + '   confirmation: { text: "Install all " + _pending.length + " updates now?" } };'
+                  + '   confirmation: { text: ' + JSON.stringify(INSTALL_ALL_Q) + '.split("{n}").join(_pending.length) } };'
                   + ' return { action: "none" }; ]]]');
               add('listhead', { card: sectionHead(
                 '[[[' + headCount
-                  + ' return _waiting ? ' + JSON.stringify(headText('Waiting on a restart'))
-                  + ' : ' + JSON.stringify(headText('Available Updates')) + '; ]]]',
+                  + ' return _waiting ? ' + JSON.stringify(headText(WAITING))
+                  + ' : ' + JSON.stringify(headText(AVAILABLE)) + '; ]]]',
                 headBtn) });
               add('list', UI.group(rows, null));
             }
@@ -353,22 +357,22 @@ hemma_popup_updates:
                 image: logoOf(e),
                 label: nameOf(e),
                 sub: e.attributes.installed_version || null,
-                value: 'Restart required',
+                value: T('updates.restart_required', 'Restart required'),
                 valueTone: 'warn',
               }));
               /* Same shape: the restart belongs to the section that is waiting
                  on it, not to the floor of the popup. */
               const restartBtn = (!n && restartEntities.length)
-                ? actionButton(btnLabel('Restart Now', WARN), {
+                ? actionButton(btnLabel(T('updates.restart_now', 'Restart Now'), WARN), {
                     action: 'call-service',
                     service: 'homeassistant.restart',
                     service_data: {},
-                    confirmation: { text: 'Restart Home Assistant now?' },
+                    confirmation: { text: T('updates.restart_confirm', 'Restart Home Assistant now?') },
                   })
                 : null;
               if (n || restartBtn) {
                 add('resthead', { card: sectionHead(
-                  headText('Waiting on a restart'), restartBtn) });
+                  headText(T('updates.waiting_restart', 'Waiting on a restart')), restartBtn) });
               }
               add('restart', UI.group(rrows, null));
             }

@@ -28,6 +28,7 @@ hemma_updates:
 
   state_display: |
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const restart = Object.keys(states)
         .filter(id => id.startsWith('update.'))
         .some(id => {
@@ -37,9 +38,9 @@ hemma_updates:
             && String(a.release_summary || '').toLowerCase().includes('restart');
         });
       const n = Number(entity.state);
-      if (Number.isFinite(n) && n === 1) return '1 Update';
-      if (Number.isFinite(n) && n > 1) return `${n} Updates`;
-      return restart ? 'Restart required' : 'Up to date';
+      if (Number.isFinite(n) && n === 1) return T('updates.one', '1 Update');
+      if (Number.isFinite(n) && n > 1) return T('updates.n', '{n} Updates', { n });
+      return restart ? T('updates.restart_required', 'Restart required') : T('updates.up_to_date', 'Up to date');
     ]]]
 
   state:

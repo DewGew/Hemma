@@ -1,5 +1,84 @@
 # Changelog
 
+## 2.2.0
+
+**If Hemma looks unchanged after updating, clear your browser's cache.** On the
+iOS app that means clearing the app cache; in a desktop browser a hard reload
+usually does it. The template fixes below also need one Save in Hemma Studio.
+
+Hemma now follows your Home Assistant language, on the dashboard and in Hemma
+Studio. Only a little of it is translated so far, so this release is mostly
+about making translation possible. If you'd like Hemma in your language, see
+**Translating Hemma** below.
+
+### Translations
+
+- **Hemma uses your Home Assistant language.** Words Home Assistant already
+  translates, like On, Off, Locked, Home and Away, now come from Home
+  Assistant, so they match the rest of your setup. Everything else Hemma says
+  is in one translation file, about 980 lines covering the badges, tiles,
+  popups, notifications and all of Hemma Studio. Anything that isn't
+  translated yet shows in English. Requested in
+  [#68](https://github.com/willsanderson/Hemma/issues/68).
+- **Swedish is the first language.** The badge and filter names, the People
+  badge and Hemma's setup dialog are in Swedish, thanks to
+  [@DewGew](https://github.com/DewGew) in
+  [#77](https://github.com/willsanderson/Hemma/pull/77). The rest is still
+  English for now.
+- **Numbers and money follow your settings.** Decimals, thousands separators
+  and currency now use your Home Assistant profile and currency, so a Swedish
+  setup shows 0,4 kWh and 1 588 ppm. In English you'll only notice a thousands
+  separator: 1588 ppm is now 1,588 ppm.
+
+### Translating Hemma
+
+Copy `custom_components/hemma/translations/dashboard/en.json`, name it after
+your language (`de.json`, `fr.json`), and translate the text on the right of
+each line. You don't have to do it all at once. Anything you leave out stays in
+English. When you're happy with it, open a pull request.
+
+To try it on your own Home Assistant first, put the file in that folder and
+reload the Hemma integration. There's nothing to run. The
+[README](https://github.com/willsanderson/Hemma#translating-hemma) has the
+details, including the few things to leave as they are.
+
+### Also new
+
+- **Favorites can be renamed.** Hemma Studio has a new Name on phone field
+  under Home > Appearance, just below Room name, so you can call it anything,
+  in your own language too. Nothing changes until you use it.
+
+### Fixes
+
+- **Tiles that only show when needed no longer push the page down.** Tiles
+  like Plex Recently Added and Updates used to draw at full height on load and
+  then collapse, which moved everything below them. Closing a filter could
+  also leave extra gaps.
+- **Switching Home Assistant's language no longer breaks tiles.** For a moment
+  after switching, some tiles showed a ButtonCardJSTemplateError until you
+  refreshed.
+- **No more error toast when Home Assistant restarts.** A dashboard open
+  during a restart could show "Failed to perform the action
+  input_datetime/set_datetime". Reported in
+  [#78](https://github.com/willsanderson/Hemma/issues/78) by
+  [@SH1FT-W](https://github.com/SH1FT-W), who also tracked down the cause.
+- **The Lights badge counts rooms set up with only a light group.** It used to
+  say All Off no matter how many lights were on.
+- **The Air Quality badge agrees with its popup.** With high CO₂ the badge
+  could say Excellent while the popup said Poor. They now use the same reading.
+- **One notification per door.** A lock with a built-in door sensor plus a
+  separate contact sensor listed "Front Door is open" twice.
+- **The battery popup is the right width.** With no low batteries it could
+  open at double width, because a low battery somewhere else in the house
+  counted too.
+- **Now Playing shows up right away on a phone.** On a fresh load it could
+  stay hidden for a few seconds.
+- **Even spacing above Scenes on a phone.** With nothing playing, Scenes sat
+  about 8px lower than the other sections.
+- **The skip forward button is no longer cut off** on a phone, and play and
+  pause lost the faint ring it had at rest. A follow-up to
+  [#74](https://github.com/willsanderson/Hemma/issues/74).
+
 ## 2.1.2
 
 **If Hemma looks unchanged after updating, clear your browser's cache.** Hemma

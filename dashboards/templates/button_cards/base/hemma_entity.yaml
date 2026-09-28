@@ -675,9 +675,13 @@ hemma_entity:
 
   state_display: |
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       if (!entity?.state) return "";
-      if (entity.state === "ok") return "Healthy";
-      return hass.formatEntityState(entity) || entity.state;
+      if (entity.state === "ok") return T('state.healthy', 'Healthy');
+      // Switching HA's language swaps localize while the new strings are
+      // still loading, and formatEntityState throws for that window.
+      try { return hass.formatEntityState(entity) || entity.state; }
+      catch (e) { return entity.state; }
     ]]]
 
   state:
@@ -1006,7 +1010,7 @@ hemma_entity:
       - transition: color .18s ease, opacity .18s ease
 
     state:
-      - text-transform: capitalize
+      - text-transform: "[[[ return String(hass.language || 'en').startsWith('en') ? 'capitalize' : 'none'; ]]]"
       - color: var(--hemma-entity-state, var(--secondary-text-color)) !important
       - font-size: var(--hemma-entity-state-font-current, var(--hemma-entity-state-font-desktop, 15px))
       - text-shadow: var(--hemma-entity-text-shadow, 0 0 5px rgba(0,0,0,0.1))

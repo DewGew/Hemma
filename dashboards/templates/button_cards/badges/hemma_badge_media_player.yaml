@@ -179,6 +179,8 @@ hemma_badge_media_player:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
       const eid = variables.entity || entity?.entity_id;
       const a = eid ? (states[eid]?.attributes || {}) : {};
       const rawTitle = String(a.media_title || '').trim();
@@ -213,7 +215,7 @@ hemma_badge_media_player:
 
       return `
         <div class="badge-wrap">
-          <div class="badge-title">${esc(title || a.friendly_name || 'Media')}${countPill}</div>
+          <div class="badge-title">${esc(title || a.friendly_name || T('media.title', 'Media'))}${countPill}</div>
           <div class="badge-sub">${esc(artist || '')}</div>
         </div>
       `;

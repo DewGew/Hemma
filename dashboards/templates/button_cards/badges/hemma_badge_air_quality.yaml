@@ -25,15 +25,14 @@ hemma_badge_air_quality:
       const st      = stRaw.toLowerCase();
       const hide    = !enabled || !hasEnt || !stRaw || ['unknown','unavailable','none'].includes(st);
 
-      const svgUrl = ['poor', 'bad', 'very bad'].includes(st)
+      const aqLevel = (() => { const st0 = String(entity?.state ?? '').trim().toLowerCase(); const base = { excellent: 0, good: 0.5, moderate: 1, fair: 1, poor: 2, bad: 3, 'very bad': 3, 'very poor': 3 }[st0]; const sns = Array.isArray(variables?.sensors) ? variables.sensors.filter(Boolean) : []; let worst = -1; sns.forEach((eid) => { const n = parseFloat(states[eid]?.state); if (isNaN(n)) return; const id = eid.toLowerCase(); const a = states[eid]?.attributes || {}; const dc = String(a.device_class || '').toLowerCase(); const idx = id.endsWith('_index') || String(a.unit_of_measurement || '').toLowerCase() === 'index'; const t = (id.includes('pm25') || id.includes('pm2_5') || dc === 'pm25') ? [12, 35.4, 55.4] : (id.includes('pm10') || dc === 'pm10') ? [54, 154, 254] : (id.includes('voc') || id.includes('volatile_organic') || dc.includes('volatile_organic')) ? (idx ? [6, 8, 9] : [100, 200, 300]) : (id.includes('no2') || id.includes('nitrogen_dioxide') || dc === 'nitrogen_dioxide') ? (idx ? [6, 8, 9] : [53, 100, 360]) : (id.includes('co2') || id.includes('carbon') || dc === 'carbon_dioxide') ? [1000, 1500, 2000] : null; if (!t) { worst = Math.max(worst, 0); return; } worst = Math.max(worst, n <= t[0] ? 0 : n <= t[1] ? 1 : n <= t[2] ? 2 : 3); }); return worst >= 0 ? worst : base; })();
+      const svgUrl = aqLevel >= 2
         ? window.hemmaIconUrl('aqi-high')
         : window.hemmaIconUrl('aqi-medium');
 
       let gaugeCSS = '';
       if (variables?.gauge && !hide) {
-        const levels = { excellent: 1, good: 0.8, fair: 0.55, moderate: 0.55,
-                         poor: 0.3, bad: 0.15, 'very bad': 0.15, 'very poor': 0.15 };
-        const gf  = levels[st] ?? 0.5;
+        const gf  = { 0: 1, 0.5: 0.8, 1: 0.55, 2: 0.3, 3: 0.15 }[aqLevel] ?? 0.5;
         const arc = Math.round(gf * 270);
         const rr = 13.5, C = 16, W = 3;
         const pt = (deg) => {
@@ -114,12 +113,12 @@ hemma_badge_air_quality:
           ]]]
       - --hemma-icon-color: >
           [[[
-            const s = String(entity?.state || 'unknown').toLowerCase();
-            if (s === 'excellent') return 'var(--hemma-badge-air-quality-excellent-color)';
-            if (s === 'good')      return 'var(--hemma-badge-air-quality-good-color)';
-            if (s === 'moderate' || s === 'fair') return 'var(--hemma-badge-air-quality-moderate-color)';
-            if (s === 'poor')      return 'var(--hemma-badge-air-quality-poor-color)';
-            if (s === 'bad' || s === 'very bad' || s === 'very poor') return 'var(--hemma-badge-air-quality-bad-color)';
+            const aqLevel = (() => { const st0 = String(entity?.state ?? '').trim().toLowerCase(); const base = { excellent: 0, good: 0.5, moderate: 1, fair: 1, poor: 2, bad: 3, 'very bad': 3, 'very poor': 3 }[st0]; const sns = Array.isArray(variables?.sensors) ? variables.sensors.filter(Boolean) : []; let worst = -1; sns.forEach((eid) => { const n = parseFloat(states[eid]?.state); if (isNaN(n)) return; const id = eid.toLowerCase(); const a = states[eid]?.attributes || {}; const dc = String(a.device_class || '').toLowerCase(); const idx = id.endsWith('_index') || String(a.unit_of_measurement || '').toLowerCase() === 'index'; const t = (id.includes('pm25') || id.includes('pm2_5') || dc === 'pm25') ? [12, 35.4, 55.4] : (id.includes('pm10') || dc === 'pm10') ? [54, 154, 254] : (id.includes('voc') || id.includes('volatile_organic') || dc.includes('volatile_organic')) ? (idx ? [6, 8, 9] : [100, 200, 300]) : (id.includes('no2') || id.includes('nitrogen_dioxide') || dc === 'nitrogen_dioxide') ? (idx ? [6, 8, 9] : [53, 100, 360]) : (id.includes('co2') || id.includes('carbon') || dc === 'carbon_dioxide') ? [1000, 1500, 2000] : null; if (!t) { worst = Math.max(worst, 0); return; } worst = Math.max(worst, n <= t[0] ? 0 : n <= t[1] ? 1 : n <= t[2] ? 2 : 3); }); return worst >= 0 ? worst : base; })();
+            if (aqLevel === 0)   return 'var(--hemma-badge-air-quality-excellent-color)';
+            if (aqLevel === 0.5) return 'var(--hemma-badge-air-quality-good-color)';
+            if (aqLevel === 1)   return 'var(--hemma-badge-air-quality-moderate-color)';
+            if (aqLevel === 2)   return 'var(--hemma-badge-air-quality-poor-color)';
+            if (aqLevel === 3)   return 'var(--hemma-badge-air-quality-bad-color)';
             return 'var(--disabled-text-color)';
           ]]]
     icon:
@@ -127,13 +126,22 @@ hemma_badge_air_quality:
 
   name: >
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
+      const aqLevel = (() => { const st0 = String(entity?.state ?? '').trim().toLowerCase(); const base = { excellent: 0, good: 0.5, moderate: 1, fair: 1, poor: 2, bad: 3, 'very bad': 3, 'very poor': 3 }[st0]; const sns = Array.isArray(variables?.sensors) ? variables.sensors.filter(Boolean) : []; let worst = -1; sns.forEach((eid) => { const n = parseFloat(states[eid]?.state); if (isNaN(n)) return; const id = eid.toLowerCase(); const a = states[eid]?.attributes || {}; const dc = String(a.device_class || '').toLowerCase(); const idx = id.endsWith('_index') || String(a.unit_of_measurement || '').toLowerCase() === 'index'; const t = (id.includes('pm25') || id.includes('pm2_5') || dc === 'pm25') ? [12, 35.4, 55.4] : (id.includes('pm10') || dc === 'pm10') ? [54, 154, 254] : (id.includes('voc') || id.includes('volatile_organic') || dc.includes('volatile_organic')) ? (idx ? [6, 8, 9] : [100, 200, 300]) : (id.includes('no2') || id.includes('nitrogen_dioxide') || dc === 'nitrogen_dioxide') ? (idx ? [6, 8, 9] : [53, 100, 360]) : (id.includes('co2') || id.includes('carbon') || dc === 'carbon_dioxide') ? [1000, 1500, 2000] : null; if (!t) { worst = Math.max(worst, 0); return; } worst = Math.max(worst, n <= t[0] ? 0 : n <= t[1] ? 1 : n <= t[2] ? 2 : 3); }); return worst >= 0 ? worst : base; })();
+      const st = String(entity?.state ?? '').trim().toLowerCase();
+      const word = aqLevel === 0 ? T('air_quality.excellent', 'Excellent')
+        : aqLevel === 0.5 ? T('air_quality.good', 'Good')
+        : aqLevel === 1 ? (st === 'fair' ? T('air_quality.fair', 'Fair') : T('air_quality.moderate', 'Moderate'))
+        : aqLevel === 2 ? T('air_quality.poor', 'Poor')
+        : aqLevel === 3 ? T('air_quality.bad', 'Bad') : null;
       // entity is undefined during HA startup - formatEntityState(undefined) throws.
-      const raw = (entity ? hass.formatEntityState(entity) : '') || entity?.state || 'Unknown';
+      const raw = word || (entity ? hass.formatEntityState(entity) : '') || entity?.state || L('state.default.unknown', 'Unknown');
       const nice = raw.charAt(0).toUpperCase() + raw.slice(1);
       const esc = (t) => String(t || '').replaceAll('"','&quot;');
       return `
         <div class="badge-wrap">
-          <div class="badge-title">Air Quality</div>
+          <div class="badge-title">${T('air_quality.title', 'Air Quality')}</div>
           <div class="badge-sub">${esc(nice)}</div>
         </div>
       `;

@@ -78,9 +78,46 @@ function isRawCard(cfg) {
   return !!c && !c.template && !String(c.type || '').startsWith('custom:hemma-');
 }
 
+// button-card's templates, reached the way button-card reaches them.
+let _llTpl = null;
+function llTemplates() {
+  if (_llTpl) return _llTpl;
+  try {
+    let e = document.querySelector('home-assistant');
+    e = e && e.shadowRoot && e.shadowRoot.querySelector('home-assistant-main');
+    e = e && (e.shadowRoot || e);
+    e = e && e.querySelector('partial-panel-resolver, ha-drawer partial-panel-resolver');
+    e = e && (e.shadowRoot || e);
+    e = e && e.querySelector('ha-panel-lovelace');
+    e = e && e.shadowRoot && e.shadowRoot.querySelector('hui-root');
+    const t = e && e.lovelace && e.lovelace.config
+      && e.lovelace.config.button_card_templates;
+    if (t) _llTpl = t;
+    return t || {};
+  } catch (e) { return {}; }
+}
+
+// `show_when: active` is almost always declared in the template rather than on
+// the card, and reading only the card missed it: the row never held the tile,
+// so it entered the layout at full height and collapsed once button-card caught
+// up, dropping every section below it.
 function startsClosed(cfg) {
   const c = resolveCardConfig(cfg);
-  return String(c?.variables?.show_when || '') === 'active';
+  if (!c) return false;
+  if (String(c.variables?.show_when || '') === 'active') return true;
+  const names = Array.isArray(c.template) ? c.template : (c.template ? [c.template] : []);
+  const tpl = llTemplates();
+  const seen = new Set();
+  const walk = (name, depth) => {
+    if (!name || depth > 4 || seen.has(name)) return false;
+    seen.add(name);
+    const t = tpl[name];
+    if (!t) return false;
+    if (String(t.variables?.show_when || '') === 'active') return true;
+    const up = Array.isArray(t.template) ? t.template : (t.template ? [t.template] : []);
+    return up.some((x) => walk(x, depth + 1));
+  };
+  return names.some((name) => walk(name, 0));
 }
 
 // Returns the card's filter category, or null if it should always be shown.
@@ -312,6 +349,13 @@ class HemmaSmartRow extends HTMLElement {
     if (!wrapper || wrapper.style.display !== 'none') {
       return getComputedStyle(card).display === 'none';
     }
+    // Never un-hide a held show_when card to measure it: a tile re-entering the
+    // layout while a filter animates out is what left a gap under its section.
+    // button-card sets `hidden` on the host before it reports, so read that.
+    if (wrapper.dataset.showWhen === '1') {
+      if (!this._reported.has(Number(wrapper.dataset.idx))) return true;
+      return !!(card.hidden || card.style.display === 'none');
+    }
     wrapper.style.display = '';
     const hidden = getComputedStyle(card).display === 'none';
     wrapper.style.display = 'none';
@@ -420,6 +464,7 @@ class HemmaSmartRow extends HTMLElement {
     };
 
     const showWrapper = (wrapper, animate) => {
+      delete wrapper.dataset.showWhen;
       if (this._animShowing.has(wrapper)) return;
       if (this._animHiding.has(wrapper)) {
         this._animHiding.delete(wrapper);
@@ -520,6 +565,13 @@ class HemmaSmartRow extends HTMLElement {
           if (!this._animHiding.has(wrapper)) hideWrapper(wrapper, false);
         } else {
           this._hiddenState[i] = false;
+          // The sweep is what releases the show_when hold, so it has to reveal
+          // as well as hide: a card that is active from the start never fires
+          // card-visibility-changed, so nothing else would bring it back.
+          if (wrapper.dataset.showWhen === '1' && wrapper.style.display === 'none'
+              && !this._animShowing.has(wrapper)) {
+            showWrapper(wrapper, false);
+          }
           if (wrapper.style.display !== 'none' || this._animShowing.has(wrapper)) anyVisible = true;
         }
       });
@@ -634,6 +686,7 @@ class HemmaSmartRow extends HTMLElement {
           wrapper.style.display = 'none';
           this._hiddenState[i] = true;
         } else if (startsClosed(this._config.cards[i])) {
+          wrapper.dataset.showWhen = '1';
           wrapper.style.display = 'none';
           this._hiddenState[i] = true;
         }
@@ -647,6 +700,7 @@ class HemmaSmartRow extends HTMLElement {
       this._cardsCreated = true;
       this._initialized  = true;
       this._initializing = false;
+      this._updateWrapperVisibility();
       return;
     }
 
@@ -689,6 +743,7 @@ class HemmaSmartRow extends HTMLElement {
         wrapper.style.display = 'none';
         this._hiddenState[i] = true;
       } else if (startsClosed(cfg)) {
+        wrapper.dataset.showWhen = '1';
         wrapper.style.display = 'none';
         this._hiddenState[i] = true;
       }
@@ -751,6 +806,7 @@ class HemmaSmartRow extends HTMLElement {
       if (!!window._hemmaFromBg) {
         this._wrappers.forEach(w => w.style.removeProperty('--hemma-init-play'));
         this._initialized = true;
+        this._updateWrapperVisibility();
         return;
       }
 
@@ -758,6 +814,10 @@ class HemmaSmartRow extends HTMLElement {
         this._wrappers.forEach(w => w.style.removeProperty('--hemma-init-play'));
         setTimeout(() => {
           this._initialized = true;
+          // The build cleared _reported, and only a hass update drives a pass:
+          // a show_when tile that is active from the start never fires
+          // card-visibility-changed, so nothing else would release its hold.
+          this._updateWrapperVisibility();
           setTimeout(() => this._updateSort(), 2000);
           setTimeout(() => this._updateSort(), 5000);
         }, PAGE_ANIM_MS);
@@ -1038,9 +1098,12 @@ class HemmaSmartRow extends HTMLElement {
         #container > .card-wrapper > *[hidden] { display: none; }
         ` : ''}
         .card-wrapper[data-fullwidth="1"] { grid-column: 1 / -1 !important; width: 100% !important; flex: none !important; }
-        #container > .card-wrapper:has([data-hemma-np-empty]) {
-          margin-top: -8px;
+        /* A negative margin on the empty row itself only moves it inside its track, so the gap stays. */
+        #container > .card-wrapper:has([data-hemma-np]) + .card-wrapper {
           transition: margin-top 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        #container > .card-wrapper:has([data-hemma-np-empty]) + .card-wrapper {
+          margin-top: -8px;
         }
         #container > .card-wrapper[data-collapsed-spacer] {
           display: none;

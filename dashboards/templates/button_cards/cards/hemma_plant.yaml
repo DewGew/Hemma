@@ -15,9 +15,11 @@ hemma_plant:
 
   state_display: |
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       if (!entity?.state || entity.state === 'unavailable') return '— %';
 
-      if (entity.state === 'ok') return 'Healthy';
+      if (entity.state === 'ok') return T('state.healthy', 'Healthy');
 
       const sensors = Array.isArray(variables.sensors) ? variables.sensors.filter(Boolean) : [];
 
@@ -41,20 +43,20 @@ hemma_plant:
         const scorable = sensors.filter(id => { const t = getSensorType(id); return t && Object.prototype.hasOwnProperty.call(attrs, t + '_status'); });
         const scored   = scorable.filter(id => safeNum(id) != null);
 
-        if (scorable.length > 0 && scored.length === 0) return 'Unavailable';
+        if (scorable.length > 0 && scored.length === 0) return L('state.default.unavailable', 'Unavailable');
 
         if (scored.length > 0) {
           const bad   = scored.filter(id => { const v = attrs[getSensorType(id) + '_status']; return v && v !== 'ok' && v !== 'null'; }).length;
           const ratio = (scored.length - bad) / scored.length;
-          if (ratio >= 1)   return 'Healthy';
-          if (ratio >= 0.8) return 'Needs care';
-          if (ratio >= 0.6) return 'Struggling';
-          if (ratio >= 0.4) return 'Poor';
-          return 'Critical';
+          if (ratio >= 1)   return T('state.healthy', 'Healthy');
+          if (ratio >= 0.8) return T('plant.needs_care', 'Needs care');
+          if (ratio >= 0.6) return T('plant.struggling', 'Struggling');
+          if (ratio >= 0.4) return T('plant.poor', 'Poor');
+          return T('plant.critical', 'Critical');
         }
       }
 
-      if (entity.state === 'problem') return 'Needs Attention';
+      if (entity.state === 'problem') return T('state.needs_attention', 'Needs Attention');
 
       const val = parseFloat(entity.state);
       if (!Number.isNaN(val)) return `${Math.round(val)} %`;

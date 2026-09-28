@@ -101,6 +101,9 @@ hemma_badge_light:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
       const eid = entity?.entity_id;
       const _h  = typeof hass !== 'undefined' ? hass : null;
       const members = entity?.attributes?.entity_id;
@@ -116,14 +119,15 @@ hemma_badge_light:
 
       const friendly = (isGroup ? areaName() : null)
                     || entity?.attributes?.friendly_name
-                    || 'Light';
+                    || T('lights.single', 'Light');
       const isOn     = entity?.state === 'on';
       let sub;
       if (!isOn) {
-        sub = 'Off';
+        sub = L('component.light.entity_component._.state.off', 'Off');
       } else {
         const brightness = entity?.attributes?.brightness;
-        sub = brightness != null ? `${Math.round((brightness / 255) * 100)}%` : 'On';
+        sub = brightness != null ? `${Math.round((brightness / 255) * 100)}%`
+            : L('component.light.entity_component._.state.on', 'On');
       }
 
       const esc = (t) => String(t || '').replaceAll('"', '&quot;');

@@ -12,6 +12,7 @@ hemma_battery:
 
   state_display: |
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const list = variables.batteries || variables.entity_filter;
       const batteries = (list
         ? list.map(id => states[id]).filter(Boolean)
@@ -21,9 +22,9 @@ hemma_battery:
         if (isNaN(parseFloat(e.state))) return false;
         return e.attributes.device_class === 'battery';
       });
-      if (batteries.length === 0) return 'No Sensors';
+      if (batteries.length === 0) return T('battery.no_sensors', 'No Sensors');
       const anyLow = batteries.some(e => parseFloat(e.state) <= 20);
-      return anyLow ? 'Needs Attention' : 'Healthy';
+      return anyLow ? T('state.needs_attention', 'Needs Attention') : T('state.healthy', 'Healthy');
     ]]]
 
   state:

@@ -13,13 +13,14 @@ hemma_cameras:
 
   state_display: |
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const cams = Array.isArray(variables.cameras) ? variables.cameras.filter(Boolean) : [];
-      if (!cams.length) return 'No Cameras';
+      if (!cams.length) return T('cameras.none', 'No Cameras');
       const dead = cams.filter(id => ['unavailable','unknown',''].includes(String(states[id]?.state ?? '').toLowerCase())).length;
-      if (dead === cams.length) return cams.length === 1 ? 'Offline' : 'All Offline';
-      if (dead > 0) return dead + ' Offline';
+      if (dead === cams.length) return cams.length === 1 ? T('cameras.offline', 'Offline') : T('cameras.all_offline', 'All Offline');
+      if (dead > 0) return T('cameras.n_offline', '{n} Offline', { n: dead });
       const alert = window.hemmaCameraAlert ? window.hemmaCameraAlert(hass, states, cams, variables.alert_window_minutes) : '';
-      return alert || 'No Alerts';
+      return alert || T('cameras.no_alerts', 'No Alerts');
     ]]]
 
   styles:

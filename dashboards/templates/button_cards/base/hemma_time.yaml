@@ -9,6 +9,7 @@ hemma_time:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
       const id  = variables.time_entity || "sensor.time";
       const ent = states[id];
       if (!ent) return "";
@@ -22,7 +23,7 @@ hemma_time:
         if (!m) return timeStr;
         let h = parseInt(m[1], 10);
         const min = m[2];
-        const ampm = h >= 12 ? "PM" : "AM";
+        const ampm = h >= 12 ? T('time.pm', 'PM') : T('time.am', 'AM');
         h = h % 12;
         if (h === 0) h = 12;
         return `${h}:${min} ${ampm}`;
@@ -78,7 +79,7 @@ hemma_time:
       - letter-spacing: 1px
       - font-size: var(--hemma-chrome-font-size, 18px)
       - line-height: 1
-      - text-transform: uppercase
+      - text-transform: "[[[ return String(hass.language || 'en').startsWith('en') ? 'uppercase' : 'none'; ]]]"
       - font-weight: var(--hemma-chrome-font-weight, 700)
       - white-space: nowrap
       - justify-self: end

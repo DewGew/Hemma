@@ -137,6 +137,7 @@ hemma_badge_light_group:
         variables?.entity_1, variables?.entity_2, variables?.entity_3, variables?.entity_4,
         variables?.entity_5, variables?.entity_6, variables?.entity_7, variables?.entity_8
       ].filter(Boolean);
+      if (!cfgEids.length && variables?.light_group_entity) cfgEids.push(variables.light_group_entity);
 
       const memsOf = (eid) => {
         const m = hass.states[eid]?.attributes?.entity_id;
@@ -156,13 +157,15 @@ hemma_badge_light_group:
       const eids = [...new Set(cfgEids.flatMap(eid => units(eid, seen)))];
 
       const onCount = eids.filter(eid => hass.states[eid]?.state === 'on').length;
-      const sub = onCount === 0 ? 'All Off'
-                : onCount === eids.length ? 'All On'
-                : `${onCount} On`;
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
+      const sub = onCount === 0 ? T('lights.all_off', 'All Off')
+                : onCount === eids.length ? T('lights.all_on', 'All On')
+                : T('lights.n_on', '{n} On', { n: onCount });
 
       return `
         <div class="badge-wrap">
-          <div class="badge-title">Lights</div>
+          <div class="badge-title">${T('filter.lights', 'Lights')}</div>
           <div class="badge-sub">${sub}</div>
         </div>
       `;

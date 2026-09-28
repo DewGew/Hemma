@@ -1,5 +1,5 @@
 
-const PANEL_VERSION = "2.1.2";
+const PANEL_VERSION = "2.2.0";
 const TEMPLATES_URL = "/api/hemma/templates";
 const TEMPLATES_URL_STATIC = "/hemma_panel/hemma-templates.json";
 
@@ -15,6 +15,78 @@ const REQUIREMENTS = [
 
 
 const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
+
+// The dashboard's translation table, looked up per call: Studio loads it after
+// this module (see _loadI18n), and `T` below is the schema's text-field factory.
+function _studioT(k, en, v) {
+  if (typeof window !== "undefined" && typeof window._hemmaT === "function") return window._hemmaT(k, en, v);
+  let s = String(en);
+  if (v) for (const p in v) s = s.split("{" + p + "}").join(String(v[p]));
+  return s;
+}
+const _numFmt = (() => {
+  const hassNow = function () {
+    const h = document.querySelector("home-assistant");
+    return (h && h.hass) || null;
+  };
+  const LOCALES = {
+    comma_decimal: ["en-US", "en"], decimal_comma: ["de", "es", "it"],
+    space_comma: ["fr", "sv", "cs"], quote_decimal: ["de-CH"],
+  };
+  const cache = {};
+  const formatter = function (min, max, cur) {
+    const hass = hassNow();
+    const nf = (hass && hass.locale && hass.locale.number_format) || "language";
+    const lang = (hass && (hass.locale && hass.locale.language || hass.language)) || "en";
+    const key = nf + "|" + lang + "|" + min + "|" + max + "|" + (cur || "");
+    if (cache[key]) return cache[key];
+    const locale = nf === "language" ? lang : nf === "system" ? undefined
+      : nf === "none" ? "en-US" : (LOCALES[nf] || lang);
+    const opts = { minimumFractionDigits: min, maximumFractionDigits: max };
+    if (nf === "none") opts.useGrouping = false;
+    if (cur) { opts.style = "currency"; opts.currency = cur; }
+    let f;
+    try { f = new Intl.NumberFormat(locale, opts); } catch (e) { f = null; }
+    return (cache[key] = f);
+  };
+  return formatter;
+})();
+function _studioNum(v, min, max) {
+  const n = Number(v);
+  if (v === null || v === undefined || v === "" || !isFinite(n)) return "\u2014";
+  const lo = min == null ? 0 : min, hi = max == null ? Math.max(lo, 2) : max;
+  const f = typeof document !== "undefined" ? _numFmt(lo, hi, null) : null;
+  return f ? f.format(n) : n.toFixed(hi);
+}
+function _studioMoney(v, cur) {
+  const n = Number(v);
+  if (!isFinite(n)) return "\u2014";
+  const d = Math.abs(n) >= 100 ? 0 : 2;
+  const f = cur && typeof document !== "undefined" ? _numFmt(d, d, cur) : null;
+  return f ? f.format(n) : _studioNum(n, d, d);
+}
+let _sxTable = null;
+let _sxAll = null;
+function _sx(en, v) {
+  let s = en;
+  if (_sxTable && typeof en === "string" && en) {
+    const hit = _sxTable[en];
+    if (typeof hit === "string" && hit) s = hit;
+    else {
+      const m = /\d+/.exec(en);
+      const pat = m && _sxTable[en.replace(/\d+/, "%")];
+      if (typeof pat === "string" && pat) s = pat.replace("%", m[0]);
+    }
+  }
+  if (v) for (const p in v) s = s.split("{" + p + "}").join(String(v[p]));
+  return s;
+}
+function _studioL(k, en) {
+  const h = typeof document !== "undefined" && document.querySelector
+    ? document.querySelector("home-assistant") : null;
+  const v = h && h.hass && h.hass.localize && h.hass.localize(k);
+  return (v && v !== k) ? v : en;
+}
 
 const TILE_OWN_KEYS = new Set(["enabled", "surfaces", "size", "hemma_derived",
   "hemma_from_room", "hemma_ui_managed", "hemma_tile", "mobile_filter_category"]);
@@ -238,6 +310,10 @@ function extractMobileConfig(lovelace) {
 
   if (!rooms.length) warnings.push(`view "${first.path}" has no header + smart row pair - skipped`);
 
+  const fav = rooms.find((r) => r && r.variables && r.variables.favorites === true)
+    || rooms.find((r) => r && (r.name || "") === MOBILE_FAVORITES);
+  rooms.forEach((r) => { if (r) r.favorites = r === fav; });
+
   return {
     compact: { rooms },
     scaffold,
@@ -286,13 +362,29 @@ function expandMobileConfig(compact, scaffold, extras, templates, chrome) {
 const FILTER_OVERLAY = "custom:hemma-filter-overlay";
 const MOBILE_CHIPS = "hemma_mobile_sensor_chips";
 const MOBILE_FAVORITES = "Favorites";
+// The favorites section used to BE its name, so renaming it turned it into a
+// room. `variables.favorites` is the identity now, and it is written into the
+// saved header so it survives a reload; the name match only carries dashboards
+// saved before the marker existed.
+function isFav(sec) {
+  if (!sec) return false;
+  if (sec.favorites === true || (sec.variables && sec.variables.favorites === true)) return true;
+  return sec.favorites === undefined && (sec.name || "") === MOBILE_FAVORITES;
+}
 
 const PHONE_FILTERS = ["climate", "lights", "people", "media", "security", "energy"];
 
 const BADGE_ORDER_IDS = ["climate", "lights", "people", "media", "security", "energy"];
 const ROOM_SECTION_ORDER = ["climate", "lights", "media", "security", "energy", "presence"];
-const ROOM_SECTION_LABEL = { climate: "Climate", lights: "Lights", media: "Media",
-  security: "Security", energy: "Energy", presence: "People", other: "Other" };
+const ROOM_SECTION_LABEL = {
+  get climate() { return _studioT("filter.climate", "Climate"); },
+  get lights() { return _studioT("filter.lights", "Lights"); },
+  get media() { return _studioT("filter.media", "Media"); },
+  get security() { return _studioT("filter.security", "Security"); },
+  get energy() { return _studioT("filter.energy", "Energy"); },
+  get presence() { return _studioT("filter.presence", "People"); },
+  get other() { return _studioT("filter.other", "Other"); },
+};
 
 const BADGE_SWITCH_KEYS = BADGE_ORDER_IDS.map((id) => "show_" + id);
 
@@ -392,9 +484,13 @@ function blankMobileState(mobile, names) {
 
   const isRoom = (n) => n !== MOBILE_FAVORITES;
 
-  const rooms = names.map((n) => {
+  const rooms = names.map((n, i) => {
     const r = { tiles: [], _header: clone(hdrProto), _row: clone(rowProto) };
     put(r, "name", n);
+    // Stored on the section, never injected on expand: an injected key would
+    // change the round trip of every dashboard saved before it existed, and
+    // _importVerify refuses anything that does not rebuild byte for byte.
+    if (i === 0) { r.favorites = true; r.variables = { favorites: true, hide_caret: true }; }
     if (isRoom(n) && hdrVars) r.variables = clone(hdrVars);
     return r;
   });
@@ -574,7 +670,7 @@ function linkPair(dstate, mstate) {
     const overview = r.path === "home" || i === 0;
     let at = -1;
     if (overview) {
-      at = sections.findIndex((sc, n) => !usedSection.has(n) && sc.name === MOBILE_FAVORITES);
+      at = sections.findIndex((sc, n) => !usedSection.has(n) && isFav(sc));
     }
     if (at < 0) {
       at = sections.findIndex((sc, n) => !usedSection.has(n) && sameRoomName(sc.name, r.name));
@@ -1007,14 +1103,14 @@ function syncPairSections(pair) {
   const drop = new Set();
   (pair.link.orphanSections || []).forEach((o) => {
     const sec = sections[o.section];
-    if (!sec || sec.name === MOBILE_FAVORITES) return;
+    if (!sec || isFav(sec)) return;
     if (!(sec.tiles || []).every(hemmas)) return;
     drop.add(o.section);
   });
   const removed = drop.size;
   if (removed) mobile.rooms = sections.filter((_, n) => !drop.has(n));
 
-  const model = (mobile.rooms || []).find((sc) => sc.name !== MOBILE_FAVORITES)
+  const model = (mobile.rooms || []).find((sc) => !isFav(sc))
     || (mobile.rooms || [])[0];
   let added = 0;
   (pair.link.orphanRooms || []).forEach((o) => {
@@ -1119,6 +1215,8 @@ const SECTIONS = [
     label: "Appearance", icon: "home", iconColor: "var(--hemma-color-blue, #0088FF)", group: "rooms",
     fields: [
       { key: "__name", label: "Room name", type: "text", always: true },
+      { key: "__phone_name", label: "Name on phone", type: "text", always: true,
+        phoneName: true, placeholder: MOBILE_FAVORITES },
       { key: "image", label: "Background image", type: "image", always: true },
       { ...E("motion_entity", "Motion sensor", ["binary_sensor"]),
         hint: "Pulses a dot beside this room in the navigation, and shows a motion icon on the phone." },
@@ -1787,7 +1885,7 @@ const ROOM_ICON_LABEL = {
 const titleCase = (s) => String(s).replace(/-/g, " ")
   .replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
-const roomIconLabel = (g) => ROOM_ICON_LABEL[g] || titleCase(g);
+const roomIconLabel = (g) => (ROOM_ICON_LABEL[g] ? _sx(ROOM_ICON_LABEL[g]) : titleCase(g));
 
 const autoRoomGlyph = (name) =>
   ROOM_GLYPHS[String(name || "").toLowerCase().trim()] || "default";
@@ -2042,7 +2140,7 @@ const ICON_DATA = {
   "person": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2020.0742%2021.082%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2221.082%22%20opacity%3D%220%22%20width%3D%2220.0742%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.00391%2021.0703L17.7188%2021.0703C18.9727%2021.0703%2019.7227%2020.4844%2019.7227%2019.5117C19.7227%2016.4883%2015.9375%2012.3164%209.85547%2012.3164C3.78516%2012.3164%200%2016.4883%200%2019.5117C0%2020.4844%200.75%2021.0703%202.00391%2021.0703ZM9.86719%2010.2188C12.375%2010.2188%2014.5547%207.96875%2014.5547%205.03906C14.5547%202.14453%2012.375%200%209.86719%200C7.35938%200%205.17969%202.19141%205.17969%205.0625C5.17969%207.96875%207.34766%2010.2188%209.86719%2010.2188Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
   "plant": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2025.6523%2022.2305%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2222.2305%22%20opacity%3D%220%22%20width%3D%2225.6523%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M0.339844%201.41797C0.09375%202.61328%200%204.17188%200%205.21484C0%2013.9805%205.21484%2019.7695%2013.1836%2019.7695C18.3164%2019.7695%2020.7305%2016.7461%2021.2578%2015.7734L19.793%2015.7383C21.3164%2017.332%2021.9961%2019.043%2022.7695%2021.4688C22.9453%2022.0312%2023.332%2022.2305%2023.7422%2022.2305C24.6094%2022.2305%2025.3008%2021.4805%2025.3008%2020.4492C25.3008%2018.832%2022.9805%2016.0195%2021.7734%2014.8828C16.6406%2010.1484%208.82422%2012.9492%206.80859%207.72266C6.65625%207.32422%207.07812%206.97266%207.46484%207.37109C11.5078%2011.4141%2016.7109%208.00391%2021.7734%2012.668C22.1719%2013.0195%2022.6406%2012.832%2022.7109%2012.4102C22.7695%2012.0703%2022.8047%2011.5312%2022.8047%2011.0156C22.8047%205.29688%2018.8203%202.54297%2013.2188%202.54297C11.3438%202.54297%209.15234%203%207.42969%203C5.54297%203%203.42188%202.84766%201.73438%201.04297C1.25391%200.550781%200.527344%200.621094%200.339844%201.41797Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
   "play-next": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2034.5117%2017.918%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2217.918%22%20opacity%3D%220%22%20width%3D%2234.5117%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M0%2016.2773C0%2017.3789%200.632812%2017.9062%201.39453%2017.9062C1.72266%2017.9062%202.07422%2017.8008%202.41406%2017.6133L14.7188%2010.4414C15.6094%209.92578%2015.9492%209.53906%2015.9492%208.95312C15.9492%208.36719%2015.6094%207.98047%2014.7188%207.46484L2.41406%200.292969C2.07422%200.09375%201.72266%200%201.39453%200C0.632812%200%200%200.515625%200%201.61719ZM21.4219%2017.8359L24.082%2017.8359C25.1133%2017.8359%2025.6406%2017.2969%2025.6406%2016.2656L25.6406%201.62891C25.6406%200.550781%2025.1133%200.0585938%2024.082%200.0585938L21.4219%200.0585938C20.3906%200.0585938%2019.8516%200.597656%2019.8516%201.62891L19.8516%2016.2656C19.8516%2017.2969%2020.3906%2017.8359%2021.4219%2017.8359ZM29.9297%2017.8359L32.5898%2017.8359C33.6211%2017.8359%2034.1602%2017.2969%2034.1602%2016.2656L34.1602%201.62891C34.1602%200.550781%2033.6211%200.0585938%2032.5898%200.0585938L29.9297%200.0585938C28.8984%200.0585938%2028.3711%200.597656%2028.3711%201.62891L28.3711%2016.2656C28.3711%2017.2969%2028.8984%2017.8359%2029.9297%2017.8359Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
-  "play": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2019.6289%2019.6992%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.6992%22%20opacity%3D%220%22%20width%3D%2219.6289%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.13281%2017.9766C2.13281%2019.1367%202.80078%2019.6875%203.59766%2019.6875C3.94922%2019.6875%204.3125%2019.5703%204.67578%2019.3828L18.3281%2011.4023C19.3008%2010.8398%2019.6289%2010.4531%2019.6289%209.84375C19.6289%209.22266%2019.3008%208.84766%2018.3281%208.28516L4.67578%200.304688C4.3125%200.105469%203.94922%200%203.59766%200C2.80078%200%202.13281%200.550781%202.13281%201.71094Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
+  "play": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2020.2289%2019.6992%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2219.6992%22%20opacity%3D%220%22%20width%3D%2220.2289%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M2.13281%2017.9766C2.13281%2019.1367%202.80078%2019.6875%203.59766%2019.6875C3.94922%2019.6875%204.3125%2019.5703%204.67578%2019.3828L18.3281%2011.4023C19.3008%2010.8398%2019.6289%2010.4531%2019.6289%209.84375C19.6289%209.22266%2019.3008%208.84766%2018.3281%208.28516L4.67578%200.304688C4.3125%200.105469%203.94922%200%203.59766%200C2.80078%200%202.13281%200.550781%202.13281%201.71094Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
   "plex": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2220%22%20opacity%3D%220%22%20width%3D%2220%22%20x%3D%220%22%20y%3D%220%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M3.913%200L9.7101%200L16.087%2010L9.7101%2020L3.913%2020L10.2899%2010Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22%2F%3E%0A%20%3C%2Fg%3E%0A%3C%2Fsvg%3E",
   "plug": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20362--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%22-0.8%200%2015.6743%2022.2967%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2222.2967%22%20opacity%3D%220%22%20width%3D%2214.0743%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M5.87143%2022.2842L8.19257%2022.2842C9.43475%2022.2842%2010.1565%2021.581%2010.1565%2020.3222L10.1565%2016.4784C10.1565%2015.5242%2010.5985%2015.0583%2011.5251%2014.3789C13.1919%2013.1457%2014.0743%2011.2336%2014.0743%209.23416L14.0743%206.77354C14.0743%205.53558%2013.3651%204.99805%2012.1271%204.99805L11.2402%204.99805L11.2402%201.23836C11.2402%200.54768%2010.6967%200%2010.0122%200C9.32551%200%208.76959%200.54768%208.76959%201.23836L8.76959%204.99805L5.30666%204.99805L5.30666%201.23836C5.30666%200.54768%204.74039%200%204.07041%200C3.38375%200%202.82783%200.54768%202.82783%201.23836L2.82783%204.99805L1.91598%204.99805C0.663649%204.99805%200%205.53558%200%206.77354L0%209.23416C0%2011.2336%200.855584%2013.1457%202.54103%2014.3789C3.47178%2015.0583%203.91997%2015.5242%203.91997%2016.4784L3.91997%2020.3222C3.91997%2021.5707%204.59819%2022.2842%205.87143%2022.2842ZM5.87143%2020.7031C5.6404%2020.7031%205.49067%2020.5595%205.49067%2020.3222L5.49067%2016.4784C5.49067%2014.9938%204.79175%2014.0782%203.47973%2013.1149C2.14028%2012.1221%201.57069%2010.8648%201.57069%209.23416L1.57069%206.9495C1.57069%206.72059%201.70796%206.5791%201.91598%206.5791L12.1271%206.5791C12.3518%206.5791%2012.5036%206.72059%2012.5036%206.9495L12.5036%209.23416C12.5036%2010.8545%2011.9176%2012.1221%2010.5864%2013.1149C9.27858%2014.0761%208.57544%2014.9814%208.57544%2016.4784L8.57544%2020.3222C8.57544%2020.5595%208.42359%2020.7031%208.19257%2020.7031Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
   "power_off": "data:image/svg+xml,%3C%3Fxml%20version%3D%221.0%22%20encoding%3D%22UTF-8%22%3F%3E%0A%3C%21--Generator%3A%20Apple%20Native%20CoreSVG%20341--%3E%0A%3C%21DOCTYPE%20svg%0APUBLIC%20%22-//W3C//DTD%20SVG%201.1//EN%22%0A%20%20%20%20%20%20%20%22http%3A//www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd%22%3E%0A%3Csvg%20version%3D%221.1%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20xmlns%3Axlink%3D%22http%3A//www.w3.org/1999/xlink%22%20viewBox%3D%220%200%2024.2578%2023.918%22%3E%0A%20%3Cg%3E%0A%20%20%3Crect%20height%3D%2223.918%22%20opacity%3D%220%22%20width%3D%2224.2578%22%20x%3D%220%22%20y%3D%220%22/%3E%0A%20%20%3Cpath%20d%3D%22M11.9531%2023.9062C18.5508%2023.9062%2023.9062%2018.5508%2023.9062%2011.9531C23.9062%205.35547%2018.5508%200%2011.9531%200C5.35547%200%200%205.35547%200%2011.9531C0%2018.5508%205.35547%2023.9062%2011.9531%2023.9062ZM11.9531%2021.9141C6.44531%2021.9141%201.99219%2017.4609%201.99219%2011.9531C1.99219%206.44531%206.44531%201.99219%2011.9531%201.99219C17.4609%201.99219%2021.9141%206.44531%2021.9141%2011.9531C21.9141%2017.4609%2017.4609%2021.9141%2011.9531%2021.9141Z%22%20fill%3D%22white%22%20fill-opacity%3D%220.85%22/%3E%0A%20%3C/g%3E%0A%3C/svg%3E%0A",
@@ -2300,7 +2398,7 @@ const colorLabel = (v) => {
   const raw = String(v || "").trim();
   if (!raw) return "From the entity's domain";
   const known = HEMMA_ACCENTS.find((a) => a.id === raw);
-  return known ? known.label : raw;
+  return known ? _sx(known.label) : raw;
 };
 
 const ACTION_GLYPH = {
@@ -2555,7 +2653,7 @@ function syncUserTileTypes(templates, rooms, alsoInUse, prints) {
       template: name,
       user: true,
       domains: ACTION_DOMAINS,
-      entityPlaceholder: "The entity this tile shows",
+      entityPlaceholder: _sx("The entity this tile shows"),
       fields: userTypeFields(tpl),
     });
   });
@@ -2581,7 +2679,7 @@ const tileTypeAny = (tile) =>
   tileTypeOf(tile) || findType(USER_TILE_TYPES, tile.template);
 
 function newTile(type) {
-  return { type: "custom:button-card", template: type.template, entity: "", name: type.label };
+  return { type: "custom:button-card", template: type.template, entity: "", name: type.user ? type.label : _sx(type.label) };
 }
 
 // Candidate for hemma-panel.js: enough YAML to read a card config off the
@@ -2660,7 +2758,7 @@ function yamlScalar(t) {
   }
   if (q === "{" || q === "[") {
     try { return JSON.parse(t); } catch (e) {
-      throw new Error("Could not read this value: " + t);
+      throw new Error(_sx("Could not read this value: {value}", { value: t }));
     }
   }
   return t;
@@ -2674,9 +2772,9 @@ function yamlNode(lines, i, indent) {
 function yamlMap(lines, i, indent) {
   const out = {};
   while (i < lines.length && lines[i].indent >= indent) {
-    if (lines[i].indent > indent) throw new Error("Unexpected indent at: " + lines[i].text);
+    if (lines[i].indent > indent) throw new Error(_sx("Unexpected indent at: {line}", { line: lines[i].text }));
     const m = lines[i].text.match(/^([^:]+):(?:\s+(.*))?$/);
-    if (!m) throw new Error("Expected \"key: value\" at: " + lines[i].text);
+    if (!m) throw new Error(_sx("Expected \"key: value\" at: {line}", { line: lines[i].text }));
     const key = m[1].trim().replace(/^["']|["']$/g, "");
     const rest = (m[2] || "").trim();
     if (rest) { out[key] = yamlScalar(rest); i++; continue; }
@@ -2725,20 +2823,20 @@ function yamlList(lines, i, indent) {
 // config editor entirely.
 function parsePasted(text) {
   const src = String(text || "").trim();
-  if (!src) throw new Error("Paste a card or a template first.");
+  if (!src) throw new Error(_sx("Paste a card or a template first."));
   let doc;
   if (src[0] === "{" || src[0] === "[") {
     try { doc = JSON.parse(src); } catch (e) {
-      throw new Error("That looks like JSON but does not parse: " + e.message);
+      throw new Error(_sx("That looks like JSON but does not parse: {error}", { error: e.message }));
     }
   } else {
     const lines = yamlLines(foldBlockScalars(src));
-    if (!lines.length) throw new Error("Paste a card or a template first.");
-    if (lines[0].indent) throw new Error("The first line should not be indented.");
+    if (!lines.length) throw new Error(_sx("Paste a card or a template first."));
+    if (lines[0].indent) throw new Error(_sx("The first line should not be indented."));
     doc = yamlNode(lines, 0, 0)[0];
   }
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-    throw new Error("A card is a set of keys, starting with \"type:\".");
+    throw new Error(_sx("A card is a set of keys, starting with \"type:\"."));
   }
   if (doc.type) return { kind: "card", card: doc };
 
@@ -2746,17 +2844,17 @@ function parsePasted(text) {
   const body = keys.length === 1 ? doc[keys[0]] : null;
   if (body && typeof body === "object" && !Array.isArray(body)) {
     if (keys[0].indexOf("hemma_") === 0) {
-      throw new Error("Names beginning with \"hemma_\" belong to Hemma and are "
-        + "replaced when it updates. Give yours a different name.");
+      throw new Error(_sx("Names beginning with \"hemma_\" belong to Hemma and are "
+        + "replaced when it updates. Give yours a different name."));
     }
     return { kind: "template", name: keys[0], template: body };
   }
-  throw new Error("A card needs a \"type:\" line.");
+  throw new Error(_sx("A card needs a \"type:\" line."));
 }
 
 const parseCardText = (text) => {
   const got = parsePasted(text);
-  if (got.kind !== "card") throw new Error("That is a template, not a card.");
+  if (got.kind !== "card") throw new Error(_sx("That is a template, not a card."));
   return got.card;
 };
 
@@ -2846,7 +2944,7 @@ const lightUnits = (states, eid, seen) => {
 const lightWord = (states, eid) => {
   const all = [...new Set(lightUnits(states, eid, new Set()))];
   const lit = all.filter((e) => (states[e] || {}).state === "on").length;
-  return lit === 0 ? "All Off" : lit === all.length ? "All On" : lit + " On";
+  return lit === 0 ? _studioT("lights.all_off", "All Off") : lit === all.length ? _studioT("lights.all_on", "All On") : _studioT("lights.n_on", "{n} On", { n: lit });
 };
 
 const batteryPack = (V, states) => {
@@ -2881,21 +2979,21 @@ const networkWan = (V, ent, states) => {
 };
 const networkWord = (V, ent, states) => {
   const w = networkWan(V, ent, states);
-  if (w.max < Number(V.idle_threshold ?? 1)) return "Idle";
-  const tier = w.max < Number(V.light_threshold ?? 10) ? "Light"
-    : w.max < Number(V.heavy_threshold ?? 50) ? "Active" : "Heavy";
-  const dir = (w.dl == null || (w.ul != null && w.ul > w.dl)) ? "Upload" : "Download";
-  return tier + " " + dir;
+  if (w.max < Number(V.idle_threshold ?? 1)) return _studioT("network.idle", "Idle");
+  const tier = w.max < Number(V.light_threshold ?? 10) ? _studioT("network.light", "Light")
+    : w.max < Number(V.heavy_threshold ?? 50) ? _studioT("network.active", "Active") : _studioT("network.heavy", "Heavy");
+  const dir = (w.dl == null || (w.ul != null && w.ul > w.dl)) ? _studioT("network.upload", "Upload") : _studioT("network.download", "Download");
+  return _studioT("network.activity", "{tier} {dir}", { tier, dir });
 };
 
 // hemma_energy prints the same tier word its popup and sub-badges do.
 const energyWord = (V, ent, states) => {
   const w = numOf(states, V.entity_power || (ent && ent.entity_id));
-  if (w == null) return "Unavailable";
-  if (w >= Number(V.extreme_threshold ?? 3000)) return "Extreme Usage";
-  if (w >= Number(V.heavy_threshold ?? 1000)) return "Heavy Usage";
-  if (w >= Number(V.normal_threshold ?? 200)) return "Normal";
-  return "Idle";
+  if (w == null) return _studioL("state.default.unavailable", "Unavailable");
+  if (w >= Number(V.extreme_threshold ?? 3000)) return _studioT("energy.extreme_usage", "Extreme Usage");
+  if (w >= Number(V.heavy_threshold ?? 1000)) return _studioT("energy.heavy_usage", "Heavy Usage");
+  if (w >= Number(V.normal_threshold ?? 200)) return _studioT("energy.normal", "Normal");
+  return _studioT("energy.idle", "Idle");
 };
 
 const plantActive = (ent, V, states) => {
@@ -2923,7 +3021,7 @@ const plantActive = (ent, V, states) => {
 const plantWord = (ent, V, states) => {
   const state = String(ent.state || "");
   if (!state || state === "unavailable") return "— %";
-  if (state === "ok") return "Healthy";
+  if (state === "ok") return _studioT("state.healthy", "Healthy");
   const attrs = ent.attributes || {};
   const sensors = Array.isArray(V.sensors) ? V.sensors.filter(Boolean) : [];
   const graded = (id) => { const t = plantSlotOf(id); return t === "battery" ? null : t; };
@@ -2933,21 +3031,21 @@ const plantWord = (ent, V, states) => {
       return t && Object.prototype.hasOwnProperty.call(attrs, t + "_status");
     });
     const scored = scorable.filter((id) => numOf(states, id) != null);
-    if (scorable.length && !scored.length) return "Unavailable";
+    if (scorable.length && !scored.length) return _studioL("state.default.unavailable", "Unavailable");
     if (scored.length) {
       const bad = scored.filter((id) => {
         const v = attrs[graded(id) + "_status"];
         return v && v !== "ok" && v !== "null";
       }).length;
       const ratio = (scored.length - bad) / scored.length;
-      if (ratio >= 1) return "Healthy";
-      if (ratio >= 0.8) return "Needs care";
-      if (ratio >= 0.6) return "Struggling";
-      if (ratio >= 0.4) return "Poor";
-      return "Critical";
+      if (ratio >= 1) return _studioT("state.healthy", "Healthy");
+      if (ratio >= 0.8) return _studioT("plant.needs_care", "Needs care");
+      if (ratio >= 0.6) return _studioT("plant.struggling", "Struggling");
+      if (ratio >= 0.4) return _studioT("plant.poor", "Poor");
+      return _studioT("plant.critical", "Critical");
     }
   }
-  if (state === "problem") return "Needs Attention";
+  if (state === "problem") return _studioT("state.needs_attention", "Needs Attention");
   const val = parseFloat(state);
   if (!Number.isNaN(val)) return Math.round(val) + " %";
   const attr = parseFloat(attrs.moisture);
@@ -2958,7 +3056,7 @@ const plantWord = (ent, V, states) => {
 const mediaWord = (ent) => {
   const cap = (x) => (x ? x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g, " ") : "");
   const state = String(ent.state || "").toLowerCase();
-  if (state !== "playing") return state ? cap(state) : "Off";
+  if (state !== "playing") return state ? _studioL("component.media_player.entity_component._.state." + state, cap(state)) : _studioL("component.media_player.entity_component._.state.off", "Off");
   const a = ent.attributes || {};
   const id = ent.entity_id || "";
   const type = String(a.media_content_type || "").toLowerCase();
@@ -2969,7 +3067,7 @@ const mediaWord = (ent) => {
   const isMusic = type === "music" || id.includes("spotify")
     || (!!artist && !["movie", "video", "tvshow"].includes(type));
   if (isMusic) return (artist && title) ? artist + " - " + title : (title || artist || app || source || cap(state));
-  return title || app || source || cap(state);
+  return title || app || source || _studioL("component.media_player.entity_component._.state." + state, cap(state));
 };
 
 const cameraAlert = (hass, states, cams, windowMinutes) => {
@@ -2990,18 +3088,18 @@ const cameraAlert = (hass, states, cams, windowMinutes) => {
     if (/ding|doorbell|button/.test(id)) ding = true;
     else if (/motion/.test(id)) motion = true;
   });
-  return ding ? "Doorbell" : motion ? "Motion Detected" : "";
+  return ding ? _studioT("cameras.doorbell", "Doorbell") : motion ? _studioT("cameras.motion_detected", "Motion Detected") : "";
 };
 
 const cameraWord = (V, states, hass) => {
   const cams = (Array.isArray(V.cameras) ? V.cameras : []).filter(Boolean);
-  if (!cams.length) return "No Cameras";
+  if (!cams.length) return _studioT("cameras.none", "No Cameras");
   const DEAD = ["unavailable", "unknown", ""];
   const dead = cams.filter((id) =>
     DEAD.includes(String((states[id] || {}).state || "").toLowerCase())).length;
-  if (dead === cams.length) return cams.length === 1 ? "Offline" : "All Offline";
-  if (dead > 0) return dead + " Offline";
-  return cameraAlert(hass, states, cams, V.alert_window_minutes) || "No Alerts";
+  if (dead === cams.length) return cams.length === 1 ? _studioT("cameras.offline", "Offline") : _studioT("cameras.all_offline", "All Offline");
+  if (dead > 0) return _studioT("cameras.n_offline", "{n} Offline", { n: dead });
+  return cameraAlert(hass, states, cams, V.alert_window_minutes) || _studioT("cameras.no_alerts", "No Alerts");
 };
 
 const tileShowWhen = (type, V) =>
@@ -3151,7 +3249,7 @@ const npSource = (kind, id, states) => {
       art: npAbs(a.image_url || a.entity_picture_local || a.entity_picture
         || a.media_image_url),
       title: full, subtitle: "",
-      source: "Plex \u00b7 " + (norm(a.user) || "Unknown"),
+      source: _studioT("media.plex_user", "Plex · {user}", { user: norm(a.user) || _studioL("state.default.unknown", "Unknown") }),
       controls: { toggle: false, next: false, prev: false },
     };
   }
@@ -3213,7 +3311,7 @@ const npSource = (kind, id, states) => {
   return {
     kind: "player", playing: st === "playing" || st === "buffering",
     started: npStarted(s),
-    art: art, title: title || norm(a.friendly_name) || "Media",
+    art: art, title: title || norm(a.friendly_name) || _studioT("media.title", "Media"),
     subtitle: artist, source: norm(a.app_name || a.source || a.friendly_name),
     controls: controls,
     pos: Number(a.media_position), dur: Number(a.media_duration),
@@ -3428,15 +3526,15 @@ const NP_ACCENT = {
 
 const tileStateWord = (kind, tile, ent, states, hass) => {
   const V = (tile && tile.variables) || {};
-  if (!ent) return tile && tile.entity ? "—" : "Not set";
+  if (!ent) return tile && tile.entity ? "—" : _sx("Not set");
   const cap = (x) => (x ? x.charAt(0).toUpperCase() + x.slice(1).replace(/_/g, " ") : "");
   switch (kind) {
     case "thermostat": {
       const mode = String(ent.state).toLowerCase();
       const target = ent.attributes && ent.attributes.temperature;
-      if (mode !== "cool" && mode !== "heat") return "Off";
-      if (target == null) return mode === "cool" ? "Cooling" : "Heating";
-      return (mode === "cool" ? "Cooling to " : "Heating to ") + target + "°";
+      if (mode !== "cool" && mode !== "heat") return _studioL("component.climate.entity_component._.state.off", "Off");
+      if (target == null) return mode === "cool" ? _studioT("thermostat.cooling", "Cooling") : _studioT("thermostat.heating", "Heating");
+      return mode === "cool" ? _studioT("thermostat.cooling_to", "Cooling to {t}°", { t: target }) : _studioT("thermostat.heating_to", "Heating to {t}°", { t: target });
     }
     case "cameras": return cameraWord(V, states, hass);
     case "media": return mediaWord(ent);
@@ -3451,21 +3549,21 @@ const tileStateWord = (kind, tile, ent, states, hass) => {
     case "network": return networkWord(V, ent, states);
     case "battery": {
       const p = batteryPack(V, states);
-      return p.count === 0 ? "No Sensors" : p.low ? "Needs Attention" : "Healthy";
+      return p.count === 0 ? _studioT("battery.no_sensors", "No Sensors") : p.low ? _studioT("state.needs_attention", "Needs Attention") : _studioT("state.healthy", "Healthy");
     }
     case "updates": {
       const n = Number(ent.state);
-      if (!Number.isFinite(n) || n <= 0) return "Up to date";
-      return n === 1 ? "1 Update" : n + " Updates";
+      if (!Number.isFinite(n) || n <= 0) return _studioT("updates.up_to_date", "Up to date");
+      return n === 1 ? _studioT("updates.one", "1 Update") : _studioT("updates.n", "{n} Updates", { n });
     }
     case "plex": {
       const n = plexAdded(states);
-      if (n <= 0) return "Up to date";
-      return n === 1 ? "1 Added" : n + " Added";
+      if (n <= 0) return _studioT("plex.up_to_date", "Up to date");
+      return n === 1 ? _studioT("plex.one_added", "1 Added") : _studioT("plex.n_added", "{n} Added", { n });
     }
     default: break;
   }
-  if (ent.state === "ok") return "Healthy";
+  if (ent.state === "ok") return _studioT("state.healthy", "Healthy");
   const formatted = hass && typeof hass.formatEntityState === "function"
     ? hass.formatEntityState(ent) : null;
   return formatted || cap(String(ent.state || "")) || "—";
@@ -3683,8 +3781,103 @@ class HemmaPanel extends HTMLElement {
     const dark = !(hass.themes && hass.themes.darkMode === false);
     this._lightTheme = !dark;
     this.classList.toggle("is-light", false);
+    const lang = hass.language || "en";
+    this.classList.toggle("nocaps", !/^en/.test(lang));
+    if (this._sxLang !== lang) {
+      this._sxLang = lang;
+      const p = this._loadStudioText(lang);
+      if (lang.split("-")[0] !== "en") this._sxPending = p;
+    }
+    // Hold the first paint for the language table so a first-run screen is not stuck in English.
+    if (!this._built && this._sxPending && !this._sxHeld) {
+      this._sxHeld = true;
+      Promise.race([this._sxPending, new Promise((r) => setTimeout(r, 1500))])
+        .then(() => { if (!this._built && this._hass) this.hass = this._hass; });
+      return;
+    }
     if (!this._built) { this._built = true; this._build(); }
     else this._liveRefresh();
+    if (!this._i18nAsked) { this._i18nAsked = true; this._loadI18n(); }
+  }
+
+  async _loadStudioText(lang) {
+    if (!_sxAll && lang.split("-")[0] !== "en") {
+      _sxAll = fetch("/hemma_panel/hemma-studio-i18n.json", { cache: "no-cache" })
+        .then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+    }
+    const all = (await _sxAll) || {};
+    if (this._sxLang !== lang) return;
+    const next = all[lang] || all[lang.split("-")[0]] || null;
+    if (next === _sxTable) return;
+    _sxTable = next;
+    this._retranslate();
+  }
+
+  // The table is a dashboard resource, so a Studio opened straight from the
+  // sidebar would otherwise render its preview without it.
+  async _loadI18n() {
+    if (typeof window._hemmaT === "function") return;
+    let url = null;
+    try {
+      const res = await this._ws({ type: "lovelace/resources" });
+      const hit = (res || []).find((r) => String(r.url || "").indexOf("hemma-i18n.js") >= 0);
+      url = hit && hit.url;
+    } catch (e) { /* fall back to the plain path */ }
+    const tag = document.createElement("script");
+    tag.src = url || "/hemma_scripts/hemma-i18n.js";
+    tag.onload = () => this._retranslate();
+    document.head.appendChild(tag);
+  }
+
+  _shellText() {
+    const q = (sel) => this.shadowRoot.querySelector(sel);
+    [
+      [".rail", "aria-label", _sx("Rooms")],
+      ["#burger", "title", _sx("Menu")], ["#burger", "aria-label", _sx("Menu")],
+      ["#g-rooms .railhead2", "text", _sx("Rooms")],
+      ["#roomsedit", "text", this._editing("rooms") ? _sx("Done") : _sx("Edit")],
+      ["#g-dashes .railhead2", "text", _sx("Dashboards")],
+      ["#dashesedit", "text", this._editing("dashes") ? _sx("Done") : _sx("Edit")],
+      ["#sidelist", "aria-label", _sx("Sections")],
+      ["#sidegrip", "aria-label", _sx("Resize the sidebar")],
+      ["#railbtn", "title", _sx("Rooms")],
+      ["#railbtn", "aria-label", this.classList.contains("railopen") ? _sx("Hide rooms") : _sx("Show rooms")],
+      ["#undo", "aria-label", _sx("Undo")],
+      ["#undo", "title", _sx("Undo ({key})",
+        { key: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "") ? "\u2318Z" : "Ctrl+Z" })],
+      ["#save .s-long", "text", _sx("Save changes")], ["#save .s-short", "text", _sx("Save")],
+      ["#donebtn", "title", _sx("Save and open the dashboard")], ["#donebtn", "text", _sx("Done")],
+      ["#more", "title", _sx("More")], ["#more", "aria-label", _sx("More")],
+      ['[data-size="desktop"]', "text", _sx("Desktop")],
+      ['[data-size="tablet"]', "text", _sx("Tablet")],
+      ['[data-size="phone"]', "text", _sx("Phone")],
+      ['[data-mode="day"]', "aria-label", _sx("Preview the day photo")], ['[data-mode="day"]', "title", _sx("Day")],
+      ['[data-mode="night"]', "aria-label", _sx("Preview the night photo")], ['[data-mode="night"]', "title", _sx("Night")],
+      ["#mapmount", "aria-label", _sx("Dashboard preview")],
+    ].forEach(([sel, attr, text]) => {
+      const el = q(sel);
+      if (!el) return;
+      if (attr === "text") el.textContent = text;
+      else el.setAttribute(attr, text);
+    });
+  }
+
+  _retranslate() {
+    if (!this._built) return;
+    this._shellText();
+    if (this._segEl) {
+      this._segEl.setAttribute("aria-label", _sx("Which part of the room to edit"));
+      this._segEl.querySelectorAll(".segopt").forEach((b) => {
+        const g = GROUPS.find((x) => x.id === b.dataset.group);
+        if (g) b.textContent = _sx(g.label);
+      });
+    }
+    if (this._state) {
+      this._renderTabs();
+      this._renderForm();
+      this._paintDashes();
+    }
+    this._rebuildPreview();
   }
 
   _liveRefresh() {
@@ -6641,6 +6834,7 @@ class HemmaPanel extends HTMLElement {
           text-transform:capitalize;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         }
+        :host(.nocaps) .mstate, :host(.nocaps) .miniphone .mp-wcond { text-transform:none; }
         .mtile.on .mname { color:#1d1d1f; }
         .mtile.on .mstate { color:rgba(0,0,0,0.55); }
 
@@ -7986,6 +8180,7 @@ class HemmaPanel extends HTMLElement {
     // Never leave it hidden if a load fails.
     setTimeout(() => this._playEntrance(true), 2500);
     this.shadowRoot.querySelector(".ver").textContent = "v" + PANEL_VERSION;
+    this._shellText();
     const rm = this.$("roomsedit");
     if (rm) rm.onclick = () => this._toggleEdit("rooms");
     const dm = this.$("dashesedit");
@@ -8016,29 +8211,29 @@ class HemmaPanel extends HTMLElement {
       const homes = this._homes(this._dashList || []);
       const stemOf = (u) => String(u || "").replace(/[-_]mobile$/i, "");
       this._menuAt(this.$("more"), [
-        ...(isPhone(this) ? [{ id: "undo", label: "Undo", icon: "undo", group: "edit", quiet: true,
+        ...(isPhone(this) ? [{ id: "undo", label: _sx("Undo"), icon: "undo", group: "edit", quiet: true,
           shortcut: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "") ? "\u2318Z" : "Ctrl+Z",
           disabled: !(this._undoStack || []).length }] : []),
         // Phone only: Done also opens the dashboard but saves on the way.
         ...(isPhone(this)
-          ? [{ id: "open", label: "Open dashboard", icon: "open", group: "nav", quiet: true }] : []),
+          ? [{ id: "open", label: _sx("Open dashboard"), icon: "open", group: "nav", quiet: true }] : []),
         ...((panelW(this) < PANEL_COMPACT || this.classList.contains("split")) && homes.length > 1 ? homes.map((h) => ({
           id: "dash:" + h.wide.url_path,
           label: h.wide.title || h.wide.url_path, glyph: "home", plainGlyph: true,
           checked: stemOf(h.wide.url_path) === stemOf(this._dashUrl),
           group: "homes", quiet: true,
         })) : []),
-        { id: "create", label: "Create dashboard\u2026", icon: "plus", group: "Dashboard", quiet: true },
+        { id: "create", label: _sx("Create dashboard\u2026"), icon: "plus", group: _sx("Dashboard"), quiet: true },
         ...(this._yamlCandidates().length
-          ? [{ id: "import", label: "Import from YAML\u2026", icon: "import", group: "Dashboard", quiet: true }] : []),
+          ? [{ id: "import", label: _sx("Import from YAML\u2026"), icon: "import", group: _sx("Dashboard"), quiet: true }] : []),
         ...(this._dashUrl && !this._flowMode
-          ? [{ id: "renamedash", label: "Rename dashboard\u2026", icon: "pencil", group: "Dashboard", quiet: true },
-             { id: "icondash", label: "Dashboard icon\u2026", icon: "grid", group: "Dashboard", quiet: true },
-             { id: "delete", label: "Delete dashboard", icon: "trash", danger: true, group: "Dashboard", quiet: true }] : []),
+          ? [{ id: "renamedash", label: _sx("Rename dashboard\u2026"), icon: "pencil", group: _sx("Dashboard"), quiet: true },
+             { id: "icondash", label: _sx("Dashboard icon\u2026"), icon: "grid", group: _sx("Dashboard"), quiet: true },
+             { id: "delete", label: _sx("Delete dashboard"), icon: "trash", danger: true, group: _sx("Dashboard"), quiet: true }] : []),
         ...(this._canAddMobile()
-          ? [{ id: "addmobile", label: "Add phone layout", icon: "phone", group: "Dashboard", quiet: true }] : []),
-        { id: "hints", label: this._hints === false ? "Show hints" : "Hide hints", icon: "hints",
-          checked: this._hints !== false, group: "View", quiet: true },
+          ? [{ id: "addmobile", label: _sx("Add phone layout"), icon: "phone", group: _sx("Dashboard"), quiet: true }] : []),
+        { id: "hints", label: this._hints === false ? _sx("Show hints") : _sx("Hide hints"), icon: "hints",
+          checked: this._hints !== false, group: _sx("View"), quiet: true },
       ], (id) => {
         if (id === "undo") return this._undo();
         if (id === "create") return this._createForm();
@@ -8244,7 +8439,7 @@ class HemmaPanel extends HTMLElement {
       if (ev.key === "Escape" && this.classList.contains("railopen")) this._toggleRail(false);
     });
     this.$("undo").onclick = () => this._undo();
-    this.$("undo").title = "Undo (" + (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "") ? "\u2318Z" : "Ctrl+Z") + ")";
+    this.$("undo").title = _sx("Undo ({key})", { key: /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "") ? "\u2318Z" : "Ctrl+Z" });
     this.shadowRoot.addEventListener("focusin", (ev) => {
       const t = ev.composedPath ? ev.composedPath()[0] : ev.target;
       if (!t || t.tagName !== "INPUT" || !isPhone(this)) return;
@@ -8351,10 +8546,10 @@ class HemmaPanel extends HTMLElement {
     const on = !this.classList.contains(cls);
     this.classList.remove("editing-rooms", "editing-dashes");
     const btn = this.$(which + "edit");
-    if (btn) btn.textContent = on ? "Done" : "Edit";
+    if (btn) btn.textContent = on ? _sx("Done") : _sx("Edit");
     const other = which === "rooms" ? "dashes" : "rooms";
     const ob = this.$(other + "edit");
-    if (ob) ob.textContent = "Edit";
+    if (ob) ob.textContent = _sx("Edit");
     this._renderTabs();
     this._paintDashes();
     if (on) requestAnimationFrame(() => this.classList.add(cls));
@@ -8365,8 +8560,8 @@ class HemmaPanel extends HTMLElement {
   _minusFor(onTap) {
     const b = document.createElement("button");
     b.className = "railminus";
-    b.title = "Remove";
-    b.setAttribute("aria-label", "Remove");
+    b.title = _sx("Remove");
+    b.setAttribute("aria-label", _sx("Remove"));
     b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"><path d="M6 12h12"/></svg>';
     b.onpointerdown = (ev) => ev.stopPropagation();
     b.onclick = (ev) => { ev.stopPropagation(); onTap(); };
@@ -8416,7 +8611,7 @@ class HemmaPanel extends HTMLElement {
     pane.appendChild(scrim); pane.appendChild(stack);
 
     const h = document.createElement("h3");
-    h.textContent = "Dashboard icon";
+    h.textContent = _sx("Dashboard icon");
     box.appendChild(h);
 
     const list = document.createElement("div");
@@ -8425,7 +8620,7 @@ class HemmaPanel extends HTMLElement {
     row.className = "frow field";
     const input = document.createElement("input");
     input.className = "fin lead";
-    input.placeholder = "Search icons";
+    input.placeholder = _sx("Search icons");
     input.spellcheck = false;
     row.appendChild(input);
     list.appendChild(row);
@@ -8454,7 +8649,7 @@ class HemmaPanel extends HTMLElement {
       } else {
         const x = document.createElement("span");
         x.className = "iconnone";
-        x.textContent = "None";
+        x.textContent = _sx("None");
         b.appendChild(x);
       }
       b.onclick = () => { close(); this._setDashIcon(d, name); };
@@ -8465,7 +8660,7 @@ class HemmaPanel extends HTMLElement {
     const paint = () => {
       const q = input.value.trim().toLowerCase().replace(/^mdi:/, "");
       grid.replaceChildren();
-      if (!q) grid.appendChild(cell("", "No icon"));
+      if (!q) grid.appendChild(cell("", _sx("No icon")));
       let n = 0;
       for (let i = 0; i < names.length && n < CAP; i++) {
         const it = names[i];
@@ -8476,7 +8671,7 @@ class HemmaPanel extends HTMLElement {
       if (!n) {
         const none = document.createElement("div");
         none.className = "iconempty";
-        none.textContent = "No icon matches that.";
+        none.textContent = _sx("No icon matches that.");
         grid.appendChild(none);
       }
     };
@@ -8487,7 +8682,7 @@ class HemmaPanel extends HTMLElement {
     acts.className = "askacts";
     const cancel = document.createElement("button");
     cancel.className = "ghost";
-    cancel.textContent = "Cancel";
+    cancel.textContent = _sx("Cancel");
     cancel.onclick = close;
     acts.appendChild(cancel);
     box.appendChild(acts);
@@ -8502,9 +8697,9 @@ class HemmaPanel extends HTMLElement {
 
   async _dashIconAsk(d) {
     const name = await this._ask({
-      title: "Dashboard icon", value: d.icon || "", placeholder: "mdi:home",
-      message: "Any Material Design Icons name, the way Home Assistant writes it.",
-      confirmLabel: "Set",
+      title: _sx("Dashboard icon"), value: d.icon || "", placeholder: "mdi:home",
+      message: _sx("Any Material Design Icons name, the way Home Assistant writes it."),
+      confirmLabel: _sx("Set"),
     });
     if (name === null || name === undefined || name === false) return;
     this._setDashIcon(d, String(name).trim());
@@ -8518,16 +8713,16 @@ class HemmaPanel extends HTMLElement {
       });
       d.icon = icon || undefined;
       this._paintDashes();
-      this._status(icon ? "Icon set" : "Icon removed", "ok");
+      this._status(icon ? _sx("Icon set") : _sx("Icon removed"), "ok");
     } catch (e) {
-      this._status("could not set the icon: " + e.message, "err");
+      this._status(_sx("could not set the icon: {error}", { error: e.message }), "err");
       this._log("dashboard icon failed: " + e.message, "err");
     }
   }
 
   async _renameDashboard(d) {
     const name = await this._ask({
-      title: "Rename dashboard", value: d.title || d.url_path, confirmLabel: "Rename",
+      title: _sx("Rename dashboard"), value: d.title || d.url_path, confirmLabel: _sx("Rename"),
     });
     if (!name || name === d.title) return;
     try {
@@ -8538,7 +8733,7 @@ class HemmaPanel extends HTMLElement {
       const home = this._homes(this._dashList || []).find((h) => h.wide === d);
       const phone = home && home.phone;
       if (phone) {
-        const phoneName = name + " Mobile";
+        const phoneName = _sx("{name} Mobile", { name });
         await this._hass.callWS({
           type: "lovelace/dashboards/update", dashboard_id: phone.id, title: phoneName,
         });
@@ -8547,7 +8742,7 @@ class HemmaPanel extends HTMLElement {
       this._paintDashes();
       this._log(`renamed "${d.url_path}" to "${name}"` + (phone ? ` and its phone layout` : ""), "ok");
     } catch (e) {
-      this._status("rename failed: " + e.message, "err");
+      this._status(_sx("rename failed: {error}", { error: e.message }), "err");
       this._log("rename failed: " + e.message, "err");
     }
   }
@@ -8575,7 +8770,7 @@ class HemmaPanel extends HTMLElement {
     const out = new Map();
     list.forEach((d) => out.set(d.url_path, d.title || d.url_path));
     if (stems.size === 1 && paired.length === list.length) {
-      paired.forEach((d) => out.set(d.url_path, isMobile(d) ? "Mobile" : "Desktop"));
+      paired.forEach((d) => out.set(d.url_path, isMobile(d) ? _sx("Mobile") : _sx("Desktop")));
     }
     return out;
   }
@@ -8593,7 +8788,7 @@ class HemmaPanel extends HTMLElement {
     if (!many) {
       this.classList.remove("editing-dashes");
       const eb = this.$("dashesedit");
-      if (eb) eb.textContent = "Edit";
+      if (eb) eb.textContent = _sx("Edit");
       return;
     }
     const el = document.createElement("div");
@@ -8642,10 +8837,10 @@ class HemmaPanel extends HTMLElement {
 
   _dashMenu(anchor, d, home) {
     this._menuAt(anchor, [
-      { id: "rename", label: "Rename\u2026" },
-      { id: "icon", label: "Change icon\u2026" },
-      ...(home && !home.phone ? [{ id: "addmobile", label: "Add phone layout" }] : []),
-      { id: "delete", label: "Delete", destructive: true },
+      { id: "rename", label: _sx("Rename\u2026") },
+      { id: "icon", label: _sx("Change icon\u2026") },
+      ...(home && !home.phone ? [{ id: "addmobile", label: _sx("Add phone layout") }] : []),
+      { id: "delete", label: _sx("Delete"), destructive: true },
     ], (id) => {
       if (id === "rename") return this._renameDashboard(d);
       if (id === "icon") return this._dashIconMenu(anchor, d);
@@ -8680,16 +8875,16 @@ class HemmaPanel extends HTMLElement {
   async _deleteDashboard(which) {
     const url_path = which || this._dashUrl;
     const halves = this._homeHalves(url_path);
-    if (!halves.length) return this._status("pick a dashboard first", "err");
+    if (!halves.length) return this._status(_sx("pick a dashboard first"), "err");
     const home = halves.find((d) => !/[-_]mobile$/i.test(d.url_path)) || halves[0];
 
     const yes = await this._ask({
       title: `Delete \u201c${home.title || home.url_path}\u201d?`,
       message: (halves.length > 1
-        ? "This dashboard and its phone layout will be deleted, along with everything set up in them."
-        : "This dashboard will be deleted, along with everything set up in it.")
-        + " Your devices aren't affected. This can't be undone.",
-      confirmLabel: "Delete", destructive: true,
+        ? _sx("This dashboard and its phone layout will be deleted, along with everything set up in them.")
+        : _sx("This dashboard will be deleted, along with everything set up in it."))
+        + " " + _sx("Your devices aren't affected. This can't be undone."),
+      confirmLabel: _sx("Delete"), destructive: true,
     });
     if (!yes) return;
 
@@ -8707,7 +8902,7 @@ class HemmaPanel extends HTMLElement {
     }
     this._dashList = (this._dashList || []).filter((d) => !gone.includes(d.url_path));
     gone.forEach((u) => this._forget(u));
-    if (failure) this._status("Couldn't delete everything: " + this._plainError(failure), "err");
+    if (failure) this._status(_sx("Couldn't delete everything: {error}", { error: this._plainError(failure) }), "err");
 
     if (gone.includes(this._dashUrl) || gone.includes(mobilePathOf(this._dashUrl))) {
       return this._refreshDashboards();
@@ -8746,7 +8941,7 @@ class HemmaPanel extends HTMLElement {
       list = this._shownDashboards(all);
       this._dashList = list;
     } catch (e) {
-      this._status(this._plainError(e, "Hemma couldn't reach Home Assistant. Reopen it to try again."), "err");
+      this._status(this._plainError(e, _sx("Hemma couldn't reach Home Assistant. Reopen it to try again.")), "err");
       return;
     }
     if (!list.length) {
@@ -8952,9 +9147,9 @@ class HemmaPanel extends HTMLElement {
   async _flowLeave(go) {
     if (this._flowMode === "sheet" && this._state && this._isDirty()) {
       const ok = await this._ask({
-        title: "Discard unsaved changes?",
-        message: "Your edits to the dashboard you were working on have not been saved.",
-        confirmLabel: "Discard", destructive: true,
+        title: _sx("Discard unsaved changes?"),
+        message: _sx("Your edits to the dashboard you were working on have not been saved."),
+        confirmLabel: _sx("Discard"), destructive: true,
       });
       if (!ok) return;
     }
@@ -8986,8 +9181,8 @@ class HemmaPanel extends HTMLElement {
       b.onclick = onTap;
       fx.bar.appendChild(b);
     };
-    if (opts.back) nav(FLOW_NAV.back, "Back", () => { this._flowDir = -1; opts.back(); });
-    else if (this._flowClosable) nav(FLOW_NAV.close, "Close", () => this._flowBack());
+    if (opts.back) nav(FLOW_NAV.back, _sx("Back"), () => { this._flowDir = -1; opts.back(); });
+    else if (this._flowClosable) nav(FLOW_NAV.close, _sx("Close"), () => this._flowBack());
     fx.bar.classList.toggle("bare", !opts.back && !this._flowClosable);
 
     const box = document.createElement("div");
@@ -9061,7 +9256,7 @@ class HemmaPanel extends HTMLElement {
   // A sheet already has its close button and a step with Back has its way out.
   _flowCancel(acts, onTap) {
     if (this._flowMode === "sheet" || this._flowHasBack) return null;
-    return this._flowButton(acts, "Cancel", onTap || (() => this._flowBack()), true);
+    return this._flowButton(acts, _sx("Cancel"), onTap || (() => this._flowBack()), true);
   }
 
   _flowGroup(parent, opts) {
@@ -9183,7 +9378,7 @@ class HemmaPanel extends HTMLElement {
     const at = (n) => {
       const end = n >= names.length;
       fill.style.width = (end ? 100 : Math.round(((n + 0.5) / names.length) * 100)) + "%";
-      cap.textContent = end ? "Done" : names[n] + "…";
+      cap.textContent = end ? _sx("Done") : names[n] + "…";
     };
     at(0);
     return { at, label: (i, text) => { names[i] = text; } };
@@ -9200,11 +9395,11 @@ class HemmaPanel extends HTMLElement {
   async _firstRun() {
     const s = this._flowScreen({
       full: true, icon: "home",
-      title: "Welcome to Hemma",
-      lede: "Design your dashboard room by room, using the devices you already "
-        + "have in Home Assistant.",
+      title: _sx("Welcome to Hemma"),
+      lede: _sx("Design your dashboard room by room, using the devices you already "
+        + "have in Home Assistant."),
     });
-    const go = this._flowButton(s.acts, "Continue", () => {});
+    const go = this._flowButton(s.acts, _sx("Continue"), () => {});
     go.disabled = true;
     let wides = [];
     try {
@@ -9223,10 +9418,9 @@ class HemmaPanel extends HTMLElement {
     const one = wides.length === 1;
     const s = this._flowScreen({
       full: true, icon: "import",
-      title: "Set Up Your Dashboard",
-      lede: (one ? "Hemma found a dashboard you built in YAML. Import it "
-        : "Hemma found dashboards you built in YAML. Import one ")
-        + "to keep every room, tile and setting.",
+      title: _sx("Set Up Your Dashboard"),
+      lede: one ? _sx("Hemma found a dashboard you built in YAML. Import it to keep every room, tile and setting.")
+        : _sx("Hemma found dashboards you built in YAML. Import one to keep every room, tile and setting."),
       back: () => this._firstRun(),
     });
     const list = this._flowGroup(s.body);
@@ -9239,19 +9433,19 @@ class HemmaPanel extends HTMLElement {
         rows[x].row.setAttribute("aria-checked", x === k ? "true" : "false"));
     };
     rows.import = this._flowRow(list, {
-      icon: "import", tint: FLOW_TINT.teal, title: "Import from YAML",
+      icon: "import", tint: FLOW_TINT.teal, title: _sx("Import from YAML"),
       sub: one
         ? `${wides[0].title || wides[0].url_path}, ${c.rooms.length} room${c.rooms.length === 1 ? "" : "s"}`
         : `${wides.length} dashboards found`,
       check: true, radio: true, onTap: () => paint("import"),
     });
     rows.fresh = this._flowRow(list, {
-      icon: "plus", tint: FLOW_TINT.gray, title: "Start from Scratch",
-      sub: "Choose your rooms, then add devices",
+      icon: "plus", tint: FLOW_TINT.gray, title: _sx("Start from Scratch"),
+      sub: _sx("Choose your rooms, then add devices"),
       check: false, radio: true, onTap: () => paint("fresh"),
     });
     const back = () => this._setupChoice(wides);
-    this._flowButton(s.acts, "Continue", () => (pick === "import"
+    this._flowButton(s.acts, _sx("Continue"), () => (pick === "import"
       ? this._importForm({ back }) : this._createForm({ back })));
   }
 
@@ -9269,23 +9463,23 @@ class HemmaPanel extends HTMLElement {
 
     const s = this._flowScreen({
       icon: "rooms",
-      title: "Choose Your Rooms",
-      lede: "Each room gets its own page. Home is always included, and you can "
-        + "change rooms at any time.",
+      title: _sx("Choose Your Rooms"),
+      lede: _sx("Each room gets its own page. Home is always included, and you can "
+        + "change rooms at any time."),
       back: o.back,
     });
     if (failed) {
-      this._flowError("Couldn't read your areas (" + failed.message
-        + "). You can still add rooms by hand.");
+      this._flowError(_sx("Couldn't read your areas ({error}). You can still add rooms by hand.",
+        { error: failed.message }));
     }
 
     const list = this._flowGroup(s.body, {
-      header: "Rooms",
-      footer: areas.length ? "" : "You don't have any areas in Home Assistant yet, "
-        + "so here are a few to start with.",
+      header: _sx("Rooms"),
+      footer: areas.length ? "" : _sx("You don't have any areas in Home Assistant yet, "
+        + "so here are a few to start with."),
     });
     const adder = this._flowRow(list, {
-      icon: "plus", tint: FLOW_TINT.teal, input: "", placeholder: "Add Room",
+      icon: "plus", tint: FLOW_TINT.teal, input: "", placeholder: _sx("Add Room"),
     });
     adder.row.classList.add("adder");
     adder.input.classList.add("lead");
@@ -9300,7 +9494,7 @@ class HemmaPanel extends HTMLElement {
       return r;
     };
     areas.forEach((a) => addRoom(a.name, true));
-    if (!areas.length) ["Living Room", "Kitchen", "Bedroom"].forEach((n) => addRoom(n, false));
+    if (!areas.length) [_sx("Living Room"), _sx("Kitchen"), _sx("Bedroom")].forEach((n) => addRoom(n, false));
 
     const commit = () => {
       const name = adder.input.value.trim();
@@ -9311,11 +9505,11 @@ class HemmaPanel extends HTMLElement {
     adder.input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); commit(); } };
     adder.input.onblur = commit;
 
-    const dash = this._flowGroup(s.body, { header: "New Dashboard" });
-    const titleIn = this._flowRow(dash, { title: "Name", input: "Hemma" }).input;
+    const dash = this._flowGroup(s.body, { header: _sx("New Dashboard") });
+    const titleIn = this._flowRow(dash, { title: _sx("Name"), input: "Hemma" }).input;
 
     this._flowCancel(s.acts);
-    this._flowButton(s.acts, "Create Dashboard", () => {
+    this._flowButton(s.acts, _sx("Create Dashboard"), () => {
       const title = (titleIn.value || "").trim() || "Hemma";
       const url_path = this._flowPath(title, "hemma-dashboard", "dashboard");
       const picked = [...list.querySelectorAll('[aria-checked="true"]')]
@@ -9327,15 +9521,15 @@ class HemmaPanel extends HTMLElement {
   async _create(url_path, title, picked) {
     const s = this._flowScreen({
       icon: "rooms",
-      title: "Creating Your Dashboard",
-      lede: "This only takes a moment.",
+      title: _sx("Creating Your Dashboard"),
+      lede: _sx("This only takes a moment."),
       closable: false,
     });
     const prog = this._flowProgress(s.body, [
-      "Reading the card templates",
-      "Building your rooms",
-      "Saving " + title,
-      "Adding the phone layout",
+      _sx("Reading the card templates"),
+      _sx("Building your rooms"),
+      _sx("Saving {name}", { name: title }),
+      _sx("Adding the phone layout"),
     ]);
     this._clearLog();
 
@@ -9344,7 +9538,7 @@ class HemmaPanel extends HTMLElement {
       this._log(`templates bundle: ${Object.keys(bundle.templates).length} templates`);
       prog.at(1);
 
-      const rooms = [blankRoom("Home", "home", "home-demo")];
+      const rooms = [blankRoom(_sx("Home"), "home", "home-demo")];
       picked.forEach((name) => rooms.push(blankRoom(name, slug(name), "home-demo")));
 
       const images = rooms.map((r) => r.variables.image);
@@ -9384,12 +9578,12 @@ class HemmaPanel extends HTMLElement {
       this._log("create failed: " + e.message, "err");
       const fail = this._flowScreen({
         icon: "alert", tone: "warn",
-        title: "Dashboard Not Created",
-        lede: "Nothing was saved. Check the name and address, then try again.",
+        title: _sx("Dashboard Not Created"),
+        lede: _sx("Nothing was saved. Check the name and address, then try again."),
       });
       this._flowError(e.message);
       this._flowCancel(fail.acts);
-      this._flowButton(fail.acts, "Try Again", () => this._createForm());
+      this._flowButton(fail.acts, _sx("Try Again"), () => this._createForm());
     }
   }
 
@@ -9419,15 +9613,15 @@ class HemmaPanel extends HTMLElement {
     const rooms = s.compact.rooms || [];
 
     const yes = await this._ask({
-      title: "Add a phone layout?",
+      title: _sx("Add a phone layout?"),
       message: `A second dashboard at "${mpath}" laid out for a phone, with `
         + `${rooms.length} section(s) carried over from this one. Done then opens `
         + `whichever of the two suits the device you are on. Nothing here changes.`,
-      confirmLabel: "Add",
+      confirmLabel: _sx("Add"),
     });
     if (!yes) return;
 
-    this._status("adding phone layout...");
+    this._status(_sx("adding phone layout..."));
     try {
       const bundle = await this._bundleOnce(true);
       if (!bundle.mobile) throw new Error("this build's template bundle has no phone scaffold");
@@ -9441,17 +9635,17 @@ class HemmaPanel extends HTMLElement {
       await this._hass.callWS({
         type: "lovelace/dashboards/create",
         url_path: mpath,
-        title: title + " Mobile",
+        title: _sx("{name} Mobile", { name: title }),
         icon: "mdi:cellphone",
         show_in_sidebar: false,
         require_admin: false,
       });
       await this._hass.callWS({ type: "lovelace/config/save", url_path: mpath, config: cfg });
       this._log(`created phone layout "${mpath}" with ${st.compact.rooms.length} section(s)`, "ok");
-      this._status(`Added "${title} Mobile". Open it from Choose dashboard.`, "ok");
+      this._status(_sx("Added \"{name}\". Open it from Choose dashboard.", { name: _sx("{name} Mobile", { name: title }) }), "ok");
       await this._refreshDashboards(this._dashUrl);
     } catch (e) {
-      this._status("could not add the phone layout: " + e.message, "err");
+      this._status(_sx("could not add the phone layout: {error}", { error: e.message }), "err");
       this._log("add phone layout failed: " + e.message, "err");
     }
   }
@@ -9477,7 +9671,7 @@ class HemmaPanel extends HTMLElement {
       await this._hass.callWS({
         type: "lovelace/dashboards/create",
         url_path: mpath,
-        title: title + " Mobile",
+        title: _sx("{name} Mobile", { name: title }),
         icon: "mdi:cellphone",
         show_in_sidebar: false,
         require_admin: false,
@@ -9524,8 +9718,8 @@ class HemmaPanel extends HTMLElement {
         } else if (/"hemma_|"custom:hemma-/.test(JSON.stringify(cfg.views || []))) {
           found.push({ ...c, kind: "unreadable", cfg,
             why: (cfg.views || []).length
-              ? "It uses Hemma cards, but none of its pages start with a Hemma room card."
-              : "It has no pages." });
+              ? _sx("It uses Hemma cards, but none of its pages start with a Hemma room card.")
+              : _sx("It has no pages.") });
         }
       } catch (e) {
         // Unreadable means not importable. Nothing to say about it.
@@ -9550,8 +9744,8 @@ class HemmaPanel extends HTMLElement {
     const slow = typeof setTimeout === "function" ? setTimeout(() => {
       if (seq !== this._importSeq || this._flowTok !== expect) return;
       const s = this._flowScreen({
-        icon: "import", title: "Looking for Dashboards",
-        lede: "Checking your YAML dashboards for Hemma…", back: o.back,
+        icon: "import", title: _sx("Looking for Dashboards"),
+        lede: _sx("Checking your YAML dashboards for Hemma…"), back: o.back,
       });
       const spin = document.createElement("div");
       spin.className = "fspin";
@@ -9566,8 +9760,8 @@ class HemmaPanel extends HTMLElement {
       if (slow) clearTimeout(slow);
       if (seq !== this._importSeq || this._flowTok !== expect) return;
       return this._importFailed(e, () => this._importForm(o), {
-        title: "Couldn't Read Your Dashboards",
-        reason: "Home Assistant didn't return your YAML dashboards.",
+        title: _sx("Couldn't Read Your Dashboards"),
+        reason: _sx("Home Assistant didn't return your YAML dashboards."),
         nothingSaved: true, back: o.back,
       });
     }
@@ -9587,29 +9781,29 @@ class HemmaPanel extends HTMLElement {
       || (d.kind === "mobile" && !wides.some((w) => w.url_path + "-mobile" === d.url_path)));
     const s = this._flowScreen({
       icon: "import",
-      title: near.length ? "Your Dashboard Can't Be Imported" : "No Hemma Dashboards Found",
+      title: near.length ? _sx("Your Dashboard Can't Be Imported") : _sx("No Hemma Dashboards Found"),
       lede: near.length
-        ? "Hemma found YAML dashboards that use its rooms, but they aren't laid out in a way "
-          + "it can read. Nothing has been changed."
-        : "None of your YAML dashboards use Hemma's room layout. You can build a new "
-          + "one from your rooms instead.",
+        ? _sx("Hemma found YAML dashboards that use its rooms, but they aren't laid out in a way "
+          + "it can read. Nothing has been changed.")
+        : _sx("None of your YAML dashboards use Hemma's room layout. You can build a new "
+          + "one from your rooms instead."),
       back: o.back,
     });
     if (near.length) {
-      const list = this._flowGroup(s.body, { header: "Can't Be Imported" });
+      const list = this._flowGroup(s.body, { header: _sx("Can't Be Imported") });
       near.forEach((d) => {
         const r = this._flowRow(list, {
           icon: "doc", tint: FLOW_TINT.gray, title: d.title || d.url_path,
           sub: d.kind === "mobile"
-            ? "This is a phone layout. Hemma imports it together with the dashboard it belongs to, "
-              + "and that dashboard wasn't found at /" + d.url_path.replace(/-mobile$/, "") + "."
+            ? _sx("This is a phone layout. Hemma imports it together with the dashboard it belongs to, "
+              + "and that dashboard wasn't found at /{path}.", { path: d.url_path.replace(/-mobile$/, "") })
             : d.why,
         });
         r.row.classList.add("wrap2");
       });
     }
     this._flowCancel(s.acts);
-    this._flowButton(s.acts, "Create Dashboard",
+    this._flowButton(s.acts, _sx("Create Dashboard"),
       () => this._createForm({ back: () => this._importNone(o, all) }));
   }
 
@@ -9636,45 +9830,44 @@ class HemmaPanel extends HTMLElement {
       return (hero && hero.name) || (v && v.title && titleCase(v.title)) || titleCase(String(path || ""));
     };
     const firstRoom = nameOf((views[0] || {}).path);
-    const count = (n, one, many) => n + " " + (+n === 1 ? one : many);
     return ((ex && ex.warnings) || []).map((w) => {
       let m;
       if ((m = w.match(/^view "([^"]*)" has (\d+) cards, expected at least 3 - skipped$/))) {
         const cards = ((views.find((x) => x.path === m[1]) || {}).cards) || [];
         const has = (test) => cards.some((c) => c && test(c));
-        const short = !has((c) => c.type === "custom:hemma-smart-row") ? "Has no row of tiles"
-          : !has((c) => c.template === "hemma_room") ? "Has no room card" : "Has no navigation bar";
+        const short = !has((c) => c.type === "custom:hemma-smart-row") ? _sx("Has no row of tiles")
+          : !has((c) => c.template === "hemma_room") ? _sx("Has no room card") : _sx("Has no navigation bar");
         return { level: "skip", path: m[1], room: nameOf(m[1]), short };
       }
       if ((m = w.match(/^view "([^"]*)" has (\d+) extra card\(s\) after the smart row - preserved as-is$/))) {
         return { level: "info", path: m[1], room: nameOf(m[1]),
-          short: count(m[2], "extra card stays as it is", "extra cards stay as they are") };
+          short: +m[2] === 1 ? _sx("1 extra card stays as it is") : _sx("{n} extra cards stay as they are", { n: m[2] }) };
       }
       if ((m = w.match(/^view "([^"]*)" card\[0\] template is (.*)$/))) {
-        return { level: "change", path: m[1], room: nameOf(m[1]), short: "Doesn't start with a room card" };
+        return { level: "change", path: m[1], room: nameOf(m[1]), short: _sx("Doesn't start with a room card") };
       }
       if ((m = w.match(/^view "([^"]*)" nav stack differs from view\[0\]$/))) {
         return { level: "change", path: m[1], room: nameOf(m[1]),
-          short: `Will use ${firstRoom}'s navigation bar` };
+          short: _sx("Will use {name}'s navigation bar", { name: firstRoom }) };
       }
       if ((m = w.match(/^view "([^"]*)" card\[2\] is (.*)$/))) {
-        return { level: "info", path: m[1], room: nameOf(m[1]), short: "Tiles can't be edited in Hemma" };
+        return { level: "info", path: m[1], room: nameOf(m[1]), short: _sx("Tiles can't be edited in Hemma") };
       }
       if ((m = w.match(/^(\d+) view\(s\) after the first - preserved as-is$/))) {
-        return { level: "info", phone: true, short: count(m[1], "extra page stays as it is", "extra pages stay as they are") };
+        return { level: "info", phone: true, short: +m[1] === 1 ? _sx("1 extra page stays as it is") : _sx("{n} extra pages stay as they are", { n: m[1] }) };
       }
       if ((m = w.match(/^view "([^"]*)" has (\d+) card\(s\) after the smart row - preserved as-is$/))) {
-        return { level: "info", phone: true, short: count(m[2], "extra card stays as it is", "extra cards stay as they are") };
+        return { level: "info", phone: true, short: +m[2] === 1 ? _sx("1 extra card stays as it is") : _sx("{n} extra cards stay as they are", { n: m[2] }) };
       }
       if (/has no header \+ smart row pair - skipped$/.test(w)) {
-        return { level: "skip", phone: true, short: "No sections Hemma can read" };
+        return { level: "skip", phone: true, short: _sx("No sections Hemma can read") };
       }
       return { level: "change", phone: !!phone, short: w };
     });
   }
 
   _importRooms(body, src, c, issues, sib) {
-    const list = this._flowGroup(body, { header: "Rooms" });
+    const list = this._flowGroup(body, { header: _sx("Rooms") });
     (src.cfg.views || []).forEach((v) => {
       const mine = issues.filter((i) => i.path === v.path);
       const room = c.rooms.find((r) => r.path === v.path);
@@ -9685,7 +9878,7 @@ class HemmaPanel extends HTMLElement {
       const loud = mine.find((i) => i.level !== "info");
       this._flowRow(list, {
         mask: iconUrl(roomGlyph(name, room)), tint: FLOW_TINT.teal, title: name, dim: skipped,
-        detail: skipped ? "Not Imported" : !n ? "No tiles" : n + (n === 1 ? " tile" : " tiles"),
+        detail: skipped ? _sx("Not Imported") : !n ? _sx("No tiles") : n === 1 ? _sx("1 tile") : _sx("{n} tiles", { n }),
         detailTone: skipped ? "warn" : null,
         sub: mine.map((i) => i.short).join(" · ") || null,
         subTone: loud ? "warn" : null,
@@ -9695,7 +9888,7 @@ class HemmaPanel extends HTMLElement {
     // A warning nobody has taught Hemma to read still has to be seen.
     const other = issues.filter((i) => !i.path && !i.phone);
     if (other.length) {
-      const olist = this._flowGroup(body, { header: "Other Changes" });
+      const olist = this._flowGroup(body, { header: _sx("Other Changes") });
       other.forEach((i) => {
         const r = this._flowRow(olist, { icon: "info", tint: FLOW_TINT.gray, title: i.short });
         r.row.classList.add("wrap");
@@ -9706,9 +9899,9 @@ class HemmaPanel extends HTMLElement {
     const phoneSkip = phone.some((i) => i.level === "skip");
     const kept = sib && !phoneSkip;
     this._flowRow(this._flowGroup(body), {
-      icon: "phone", tint: FLOW_TINT.gray, title: "Phone Layout",
-      detail: kept ? "Included" : "New",
-      sub: phone.map((i) => i.short).join(" · ") || (kept ? null : "Made from your rooms"),
+      icon: "phone", tint: FLOW_TINT.gray, title: _sx("Phone Layout"),
+      detail: kept ? _sx("Included") : _sx("New"),
+      sub: phone.map((i) => i.short).join(" · ") || (kept ? null : _sx("Made from your rooms")),
       subTone: phone.some((i) => i.level !== "info") ? "warn" : null,
     });
   }
@@ -9717,9 +9910,9 @@ class HemmaPanel extends HTMLElement {
     o = o || {};
     const s = this._flowScreen({
       icon: "import",
-      title: "Choose a Dashboard",
-      lede: "More than one of your YAML dashboards uses Hemma. Import one now; "
-        + "you can bring the others across later.",
+      title: _sx("Choose a Dashboard"),
+      lede: _sx("More than one of your YAML dashboards uses Hemma. Import one now; "
+        + "you can bring the others across later."),
       back: o.back,
     });
     const list = this._flowGroup(s.body);
@@ -9731,7 +9924,7 @@ class HemmaPanel extends HTMLElement {
       const c = this._importCounts(d);
       const r = this._flowRow(list, {
         icon: "doc", tint: FLOW_TINT.teal, title: d.title || d.url_path,
-        sub: c.error ? "Can't be read"
+        sub: c.error ? _sx("Can't be read")
           : `${c.rooms.length} room${c.rooms.length === 1 ? "" : "s"}, `
             + `${c.tiles} tile${c.tiles === 1 ? "" : "s"}`,
         check: d === picked, radio: true,
@@ -9740,7 +9933,7 @@ class HemmaPanel extends HTMLElement {
       rows.push(r.row);
     });
     this._flowCancel(s.acts);
-    this._flowButton(s.acts, "Continue", () => this._importReview(picked, wides, all,
+    this._flowButton(s.acts, _sx("Continue"), () => this._importReview(picked, wides, all,
       { back: () => this._importPick(wides, all, o) }));
   }
 
@@ -9749,8 +9942,8 @@ class HemmaPanel extends HTMLElement {
     const c = this._importCounts(src);
     if (c.error) {
       return this._importFailed({ message: c.error }, null, {
-        title: "This Dashboard Can't Be Read",
-        reason: this._plainError({ message: c.error }, "Hemma couldn't read how this dashboard is laid out."),
+        title: _sx("This Dashboard Can't Be Read"),
+        reason: this._plainError({ message: c.error }, _sx("Hemma couldn't read how this dashboard is laid out.")),
         nothingSaved: true, back: o.back,
       });
     }
@@ -9761,15 +9954,15 @@ class HemmaPanel extends HTMLElement {
       try {
         issues.push(...this._importIssues(extractMobileConfig(sib.cfg), sib.cfg, true));
       } catch (e) {
-        issues.push({ level: "skip", phone: true, short: "Isn't arranged the way Hemma expects" });
+        issues.push({ level: "skip", phone: true, short: _sx("Isn't arranged the way Hemma expects") });
       }
     }
 
     if (!c.rooms.length) {
       const none = this._flowScreen({
         icon: "alert", tone: "warn",
-        title: "Nothing Here Can Be Imported",
-        lede: "None of this dashboard's pages are laid out as Hemma rooms. Nothing has been changed.",
+        title: _sx("Nothing Here Can Be Imported"),
+        lede: _sx("None of this dashboard's pages are laid out as Hemma rooms. Nothing has been changed."),
         back: o.back,
       });
       this._importRooms(none.body, src, c, issues, sib);
@@ -9780,9 +9973,9 @@ class HemmaPanel extends HTMLElement {
     const name = src.title || "Hemma";
     const s = this._flowScreen({
       icon: "import",
-      title: "Import Your Dashboard",
-      lede: "Your rooms and tiles will be copied to a new dashboard. "
-        + "The original won't be changed.",
+      title: _sx("Import Your Dashboard"),
+      lede: _sx("Your rooms and tiles will be copied to a new dashboard. "
+        + "The original won't be changed."),
       back: o.back,
     });
 
@@ -9790,13 +9983,13 @@ class HemmaPanel extends HTMLElement {
 
     const taken = new Set((this._dashList || []).map((d) => (d.title || "").trim())
       .concat(this._yamlCandidates().map((d) => (d.title || "").trim())));
-    const dash = this._flowGroup(s.body, { header: "New Dashboard" });
+    const dash = this._flowGroup(s.body, { header: _sx("New Dashboard") });
     const titleIn = this._flowRow(dash, {
-      title: "Name", input: taken.has(name.trim()) ? name + " (imported)" : name,
+      title: _sx("Name"), input: taken.has(name.trim()) ? _sx("{name} (imported)", { name }) : name,
     }).input;
 
     this._flowCancel(s.acts);
-    this._flowButton(s.acts, "Import", () => {
+    this._flowButton(s.acts, _sx("Import"), () => {
       const title = (titleIn.value || "").trim() || "Hemma";
       this._import(src, this._flowPath(title, "hemma-imported", "imported"), title, all, issues);
     });
@@ -9813,15 +10006,15 @@ class HemmaPanel extends HTMLElement {
   async _import(src, url_path, title, all, issues) {
     const s = this._flowScreen({
       icon: "import",
-      title: "Importing Your Dashboard",
-      lede: "This only takes a moment.",
+      title: _sx("Importing Your Dashboard"),
+      lede: _sx("This only takes a moment."),
       closable: false,
     });
     const prog = this._flowProgress(s.body, [
-      "Reading your dashboard",
-      "Checking it can be edited",
-      "Saving " + title,
-      "Adding the phone layout",
+      _sx("Reading your dashboard"),
+      _sx("Checking it can be edited"),
+      _sx("Saving {name}", { name: title }),
+      _sx("Adding the phone layout"),
     ]);
     this._clearLog();
     const created = [];
@@ -9855,10 +10048,11 @@ class HemmaPanel extends HTMLElement {
       this._log(`rewrote ${fixed.rewritten} navigation route list(s)`);
       const drift = this._importVerify(fixed.config);
       if (drift) {
-        const named = drift.length ? drift.map((d) => "“" + d + "”").join(", ") : "This dashboard";
+        const named = drift.length ? drift.map((d) => "“" + d + "”").join(", ") : _sx("This dashboard");
         throw Object.assign(new Error("round trip differs: " + (drift.join(", ") || "top level")), {
-          reason: `${named} ${drift.length === 1 || !drift.length ? "has" : "have"} changes Hemma `
-            + "can't rebuild exactly, so editing here could alter them. Nothing was imported.",
+          reason: (drift.length === 1 || !drift.length
+            ? _sx("{name} has changes Hemma can't rebuild exactly, so editing here could alter them. Nothing was imported.", { name: named })
+            : _sx("{name} have changes Hemma can't rebuild exactly, so editing here could alter them. Nothing was imported.", { name: named })),
         });
       }
       prog.at(2);
@@ -9887,7 +10081,7 @@ class HemmaPanel extends HTMLElement {
           if (this._importVerify(mcfg)) throw new Error("phone layout round trip differs");
           const mmade = await this._hass.callWS({
             type: "lovelace/dashboards/create",
-            url_path: url_path + "-mobile", title: title + " Mobile",
+            url_path: url_path + "-mobile", title: _sx("{name} Mobile", { name: title }),
             icon: "mdi:cellphone", show_in_sidebar: false, require_admin: false,
           });
           created.push({ url_path: url_path + "-mobile", id: mmade && mmade.id });
@@ -9898,8 +10092,8 @@ class HemmaPanel extends HTMLElement {
           paired = true;
         } catch (e) {
           this._log("phone layout not imported: " + e.message, "warn");
-          phoneNote = "Your phone layout couldn't be copied exactly, so a new one was made "
-            + "from your rooms. Your phone YAML dashboard hasn't changed.";
+          phoneNote = _sx("Your phone layout couldn't be copied exactly, so a new one was made "
+            + "from your rooms. Your phone YAML dashboard hasn't changed.");
         }
       }
       if (!paired) {
@@ -9936,12 +10130,12 @@ class HemmaPanel extends HTMLElement {
   _importFailed(e, retry, opts) {
     opts = opts || {};
     const tail = opts.leftover && opts.leftover.length
-      ? ` A partly created dashboard may be left in your sidebar at /${opts.leftover[0]}; `
-        + "you can delete it from the ••• menu."
-      : opts.nothingSaved === false ? "" : " Nothing was saved, and your YAML dashboard wasn't touched.";
+      ? " " + _sx("A partly created dashboard may be left in your sidebar at /{path}; "
+        + "you can delete it from the ••• menu.", { path: opts.leftover[0] })
+      : opts.nothingSaved === false ? "" : " " + _sx("Nothing was saved, and your YAML dashboard wasn't touched.");
     const s = this._flowScreen({
       icon: "alert", tone: "warn",
-      title: opts.title || "Import Didn't Finish",
+      title: opts.title || _sx("Import Didn't Finish"),
       lede: (opts.reason || this._plainError(e)) + tail,
       back: opts.back,
     });
@@ -9953,7 +10147,7 @@ class HemmaPanel extends HTMLElement {
       detail.hidden = true;
       detail.textContent = raw;
       const r = this._flowRow(list, {
-        icon: "doc", tint: FLOW_TINT.gray, title: "Details", chevron: true,
+        icon: "doc", tint: FLOW_TINT.gray, title: _sx("Details"), chevron: true,
         onTap: () => {
           detail.hidden = !detail.hidden;
           r.row.classList.toggle("open", !detail.hidden);
@@ -9962,20 +10156,20 @@ class HemmaPanel extends HTMLElement {
       list.appendChild(detail);
     }
     this._flowCancel(s.acts);
-    if (retry) this._flowButton(s.acts, "Try Again", retry);
+    if (retry) this._flowButton(s.acts, _sx("Try Again"), retry);
   }
 
   _plainError(e, fallback) {
     const m = String((e && e.message) || e || "");
-    if (/no views/i.test(m)) return "This dashboard has no pages.";
-    if (/card\[1\] is/i.test(m)) return "Its pages aren't laid out the way Hemma arranges them.";
-    if (/already exists|url_path/i.test(m)) return "A dashboard with that address already exists.";
-    if (/unauthori[sz]ed|admin|permission/i.test(m)) return "Only an administrator can create dashboards.";
+    if (/no views/i.test(m)) return _sx("This dashboard has no pages.");
+    if (/card\[1\] is/i.test(m)) return _sx("Its pages aren't laid out the way Hemma arranges them.");
+    if (/already exists|url_path/i.test(m)) return _sx("A dashboard with that address already exists.");
+    if (/unauthori[sz]ed|admin|permission/i.test(m)) return _sx("Only an administrator can create dashboards.");
     if (/^templates /i.test(m)) {
-      return "Hemma couldn't load its card templates. Reload the Hemma integration, then try again.";
+      return _sx("Hemma couldn't load its card templates. Reload the Hemma integration, then try again.");
     }
-    if (/connection|timeout|socket|lost/i.test(m)) return "Hemma lost its connection to Home Assistant.";
-    return fallback || "Something went wrong while building your dashboard.";
+    if (/connection|timeout|socket|lost/i.test(m)) return _sx("Hemma lost its connection to Home Assistant.");
+    return fallback || _sx("Something went wrong while building your dashboard.");
   }
 
   // Shared by Create and Import: the same arrival and the same two ways on.
@@ -9983,24 +10177,25 @@ class HemmaPanel extends HTMLElement {
     const rooms = opts.rooms || [];
     const s = this._flowScreen({
       icon: "check", tone: "ok",
-      title: "Your Dashboard Is Ready",
-      lede: `“${opts.title}” is in the sidebar with `
-        + `${rooms.length} room${rooms.length === 1 ? "" : "s"}.`
-        + (opts.fromYaml ? " Your original dashboard hasn't changed." : ""),
+      title: _sx("Your Dashboard Is Ready"),
+      lede: (rooms.length === 1
+        ? _sx("“{name}” is in the sidebar with 1 room.", { name: opts.title })
+        : _sx("“{name}” is in the sidebar with {n} rooms.", { name: opts.title, n: rooms.length }))
+        + (opts.fromYaml ? " " + _sx("Your original dashboard hasn't changed.") : ""),
     });
     const list = this._flowGroup(s.body);
     this._flowRow(list, {
-      icon: "dashboard", tint: FLOW_TINT.gray, title: "Dashboard", detail: "/" + opts.url_path,
+      icon: "dashboard", tint: FLOW_TINT.gray, title: _sx("Dashboard"), detail: "/" + opts.url_path,
     });
     this._flowRow(list, {
-      icon: "phone", tint: FLOW_TINT.gray, title: "Phone Layout",
-      detail: !opts.paired ? "Not Added" : opts.phoneKept ? "Included" : "New",
-      sub: opts.paired && !opts.phoneKept ? "Made from your rooms" : null,
+      icon: "phone", tint: FLOW_TINT.gray, title: _sx("Phone Layout"),
+      detail: !opts.paired ? _sx("Not Added") : opts.phoneKept ? _sx("Included") : _sx("New"),
+      sub: opts.paired && !opts.phoneKept ? _sx("Made from your rooms") : null,
     });
     (opts.warnings || []).filter((i) => i.level === "skip" && i.path).forEach((i) => {
       this._flowRow(list, {
         mask: iconUrl(roomGlyph(i.room)), tint: FLOW_TINT.teal, title: i.room, dim: true,
-        detail: "Not Imported", detailTone: "warn", sub: i.short, subTone: "warn",
+        detail: _sx("Not Imported"), detailTone: "warn", sub: i.short, subTone: "warn",
       });
     });
     if (opts.phoneNote) {
@@ -10010,11 +10205,11 @@ class HemmaPanel extends HTMLElement {
       s.body.appendChild(note);
     }
 
-    this._flowButton(s.acts, "Open Dashboard", () => this._flowLeave(() => {
+    this._flowButton(s.acts, _sx("Open Dashboard"), () => this._flowLeave(() => {
       this._remember(opts.url_path);
       window.location.assign("/" + opts.url_path);
     }), true);
-    this._flowButton(s.acts, "Start Editing", () => this._flowLeave(() => {
+    this._flowButton(s.acts, _sx("Start Editing"), () => this._flowLeave(() => {
       this._remember(opts.url_path);
       this._refreshDashboards(opts.url_path);
     }));
@@ -10030,7 +10225,7 @@ class HemmaPanel extends HTMLElement {
     } catch (e) {
       urls = null;
       console.warn("Hemma: could not read the resource list;",
-        "card requirements were not checked", e);
+        _sx("card requirements were not checked"), e);
     }
     const components = (this._hass && this._hass.config
       && this._hass.config.components) || [];
@@ -10065,8 +10260,8 @@ class HemmaPanel extends HTMLElement {
     });
     if (!blockers.length) {
       const names = missing.map((r) => r.label).join(", ");
-      this._status(`Missing from HACS: ${names}. Hemma works, but parts of it `
-        + `will not render.`, "err");
+      this._status(_sx("Missing from HACS: {names}. Hemma works, but parts of it will not render.",
+        { names }), "err");
       return false;
     }
 
@@ -10076,24 +10271,24 @@ class HemmaPanel extends HTMLElement {
 
     const s = this._flowScreen({
       full: true, icon: "get",
-      title: one ? "One More Thing to Install" : "A Few More Things to Install",
-      lede: `Hemma needs ${one ? "this" : "these"} from HACS before your dashboard `
-        + "can render. " + (restart ? "Restart Home Assistant once installed."
-          : "Come back here once installed."),
+      title: one ? _sx("One More Thing to Install") : _sx("A Few More Things to Install"),
+      lede: (one ? _sx("Hemma needs this from HACS before your dashboard can render.")
+        : _sx("Hemma needs these from HACS before your dashboard can render.")) + " " + (restart ? _sx("Restart Home Assistant once installed.")
+          : _sx("Come back here once installed.")),
     });
     const list = this._flowGroup(s.body);
     blockers.forEach((r) => {
       // my.home-assistant.io deep-links straight into the reader's own HACS.
       const [owner, repository] = r.repo.split("/");
       const row = this._flowRow(list, {
-        tag: "a", icon: "get", tint: FLOW_TINT.teal, title: r.label, sub: r.why, get: "Get",
+        tag: "a", icon: "get", tint: FLOW_TINT.teal, title: r.label, sub: r.why, get: _sx("Get"),
       }).row;
       row.target = "_blank";
       row.rel = "noreferrer";
       row.href = "https://my.home-assistant.io/redirect/hacs_repository/?owner="
         + encodeURIComponent(owner) + "&repository=" + encodeURIComponent(repository);
     });
-    this._flowButton(s.acts, "Check Again", () => {
+    this._flowButton(s.acts, _sx("Check Again"), () => {
       this._saveBlocked = false;
       this._load();
     });
@@ -10152,19 +10347,19 @@ class HemmaPanel extends HTMLElement {
         const shown = skipped.slice(0, 6).join(", ") + (skipped.length > 6 ? "…" : "");
         const f = this._flowScreen({
           full: true, icon: "alert", tone: "warn",
-          title: damaged ? "No Rooms Could Be Read" : "Not a Hemma Dashboard",
+          title: damaged ? _sx("No Rooms Could Be Read") : _sx("Not a Hemma Dashboard"),
           lede: damaged
-            ? "This dashboard has views, but none of them look like a Hemma room ("
-              + shown + "). " + (isMobileConfig(cfg)
-                ? "A section is a header card followed by a smart row."
-                : "A room is a hero card, the nav, and a smart row, in that order.")
-            : "Hemma can only edit dashboards it made. Open one of yours, "
-              + "or set up a new one.",
+            ? _sx("This dashboard has views, but none of them look like a Hemma room ({names}).", { names: shown })
+              + " " + (isMobileConfig(cfg)
+                ? _sx("A section is a header card followed by a smart row.")
+                : _sx("A room is a hero card, the nav, and a smart row, in that order."))
+            : _sx("Hemma can only edit dashboards it made. Open one of yours, "
+              + "or set up a new one."),
         });
         const others = (this._dashList || []).filter((d) => d.url_path !== url_path
           && !/[-_]mobile$/i.test(d.url_path || ""));
         if (others.length) {
-          const list = this._flowGroup(f.body, { header: "Your Dashboards" });
+          const list = this._flowGroup(f.body, { header: _sx("Your Dashboards") });
           others.forEach((d) => this._flowRow(list, {
             icon: "dashboard", tint: FLOW_TINT.gray, title: d.title || d.url_path,
             sub: "/" + d.url_path, chevron: true,
@@ -10177,9 +10372,9 @@ class HemmaPanel extends HTMLElement {
         }
         const back = () => this._load();
         if (this._yamlCandidates().length) {
-          this._flowButton(f.acts, "Import from YAML", () => this._importForm({ back }), true);
+          this._flowButton(f.acts, _sx("Import from YAML"), () => this._importForm({ back }), true);
         }
-        this._flowButton(f.acts, "Create Dashboard", () => this._createForm({ back }));
+        this._flowButton(f.acts, _sx("Create Dashboard"), () => this._createForm({ back }));
         return;
       }
 
@@ -10191,13 +10386,13 @@ class HemmaPanel extends HTMLElement {
       if (this._pair && this._pair.safe === false) {
         this._saveBlocked = true;
         this._markDirty();
-        this._status("The phone layout has content the editor would not preserve. Saving is disabled.", "err");
+        this._status(_sx("The phone layout has content the editor would not preserve. Saving is disabled."), "err");
         this._log("the phone half did not round trip - saving is off for both", "err");
       }
       if (!safe) {
         this._saveBlocked = true;
         this._markDirty();
-        this._status("This dashboard has content the editor would not preserve. Saving is disabled.", "err");
+        this._status(_sx("This dashboard has content the editor would not preserve. Saving is disabled."), "err");
         (cfg.views || []).forEach((v, i) => {
           if (stable(v) !== stable((rebuilt.views || [])[i])) this._log(`  view[${i}] "${v.path}" differs`, "err");
         });
@@ -10228,7 +10423,7 @@ class HemmaPanel extends HTMLElement {
       if (e && e.message && e.code !== 3) this._forget(url_path);
       this._saveBlocked = true;
       this._markDirty();
-      this._status(this._plainError(e, "This dashboard couldn't be opened."), "err");
+      this._status(this._plainError(e, _sx("This dashboard couldn't be opened.")), "err");
       this._log("load failed: " + e.message, "err");
       try { this._paintDashes(); this._renderReconcile(); } catch (e2) {  }
       requestAnimationFrame(() => this._playEntrance(true));
@@ -10312,9 +10507,9 @@ class HemmaPanel extends HTMLElement {
     const n = pair && pair.safe !== false ? (pair.conflicts || []).length : 0;
     pill.hidden = !n;
     if (n) {
-      pill.querySelector(".s-long").textContent = n + (n === 1 ? " Difference" : " Differences");
+      pill.querySelector(".s-long").textContent = n === 1 ? _sx("1 Difference") : _sx("{n} Differences", { n });
       pill.querySelector(".s-short").textContent = String(n);
-      pill.title = "Your desktop and phone layouts don't match";
+      pill.title = _sx("Your desktop and phone layouts don't match");
       pill.onclick = () => this._reviewDifferences();
     }
     this._placeCanvasHead();
@@ -10327,20 +10522,20 @@ class HemmaPanel extends HTMLElement {
     if (!list.length) {
       const done = this._flowScreen({
         icon: "check", tone: "ok", quiet,
-        title: "Everything Matches",
-        lede: "Your desktop and phone layouts agree. Save to keep the changes.",
+        title: _sx("Everything Matches"),
+        lede: _sx("Your desktop and phone layouts agree. Save to keep the changes."),
       });
-      this._flowButton(done.acts, "Done", () => this._flowBack());
+      this._flowButton(done.acts, _sx("Done"), () => this._flowBack());
       return;
     }
 
     const s = this._flowScreen({
       icon: "alert", tone: "warn", quiet,
-      title: "Desktop and Phone Don't Match",
-      lede: "These settings are shared by your desktop and phone layouts, but "
-        + "they're set differently. Choose what to keep.",
+      title: _sx("Desktop and Phone Don't Match"),
+      lede: _sx("These settings are shared by your desktop and phone layouts, but "
+        + "they're set differently. Choose what to keep."),
     });
-    const shown = (v) => (v === undefined || v === null || v === "" ? "Not set"
+    const shown = (v) => (v === undefined || v === null || v === "" ? _sx("Not set")
       : typeof v === "string" ? this._prettyEntity(v) : JSON.stringify(v));
     const apply = (c, value, why) => {
       pairWrite(pair, c.room, c.key, value);
@@ -10356,7 +10551,7 @@ class HemmaPanel extends HTMLElement {
 
     const rooms = new Map();
     list.forEach((c) => {
-      const room = c.roomName || "Home";
+      const room = c.roomName || _sx("Home");
       if (!rooms.has(room)) rooms.set(room, []);
       rooms.get(room).push(c);
     });
@@ -10364,17 +10559,17 @@ class HemmaPanel extends HTMLElement {
       const group = this._flowGroup(s.body, { header: room });
       items.forEach((c) => {
         const choices = c.kind === "differs"
-          ? [{ id: "desktop", label: "Use Desktop Value" }, { id: "mobile", label: "Use Phone Value" },
-             { id: "clear", label: "Remove From Both" }]
-          : [{ id: c.kind === "onlyDesktop" ? "desktop" : "mobile", label: "Use on Both" },
-             { id: "clear", label: c.kind === "onlyDesktop" ? "Remove From Desktop" : "Remove From Phone" }];
+          ? [{ id: "desktop", label: _sx("Use Desktop Value") }, { id: "mobile", label: _sx("Use Phone Value") },
+             { id: "clear", label: _sx("Remove From Both") }]
+          : [{ id: c.kind === "onlyDesktop" ? "desktop" : "mobile", label: _sx("Use on Both") },
+             { id: "clear", label: c.kind === "onlyDesktop" ? _sx("Remove From Desktop") : _sx("Remove From Phone") }];
         const r = this._flowRow(group, {
-          title: this._fieldLabelFor(c.key) || c.key,
-          sub: "Desktop: " + shown(c.desktop) + "   ·   Phone: " + shown(c.mobile),
+          title: _sx(this._fieldLabelFor(c.key)) || c.key,
+          sub: _sx("Desktop: {desktop}   ·   Phone: {phone}", { desktop: shown(c.desktop), phone: shown(c.mobile) }),
           chevron: true,
           onTap: () => this._menuAt(r.row, choices, (id) => {
-            if (id === "desktop") apply(c, c.desktop, "from Desktop");
-            else if (id === "mobile") apply(c, c.mobile, "from Phone");
+            if (id === "desktop") apply(c, c.desktop, _sx("from Desktop"));
+            else if (id === "mobile") apply(c, c.mobile, _sx("from Phone"));
             else apply(c, undefined, "removed");
             settled();
           }),
@@ -10383,13 +10578,13 @@ class HemmaPanel extends HTMLElement {
     });
     const note = document.createElement("p");
     note.className = "ffoot";
-    note.textContent = "Use Desktop Settings keeps the desktop value wherever both are set, "
-      + "and fills in whichever layout is missing one.";
+    note.textContent = _sx("Use Desktop Settings keeps the desktop value wherever both are set, "
+      + "and fills in whichever layout is missing one.");
     s.body.appendChild(note);
 
-    this._flowButton(s.acts, "Not Now", () => this._flowBack(), true);
-    this._flowButton(s.acts, "Use Desktop Settings", () => {
-      list.forEach((c) => apply(c, c.kind === "onlyMobile" ? c.mobile : c.desktop, "Use Desktop Settings"));
+    this._flowButton(s.acts, _sx("Not Now"), () => this._flowBack(), true);
+    this._flowButton(s.acts, _sx("Use Desktop Settings"), () => {
+      list.forEach((c) => apply(c, c.kind === "onlyMobile" ? c.mobile : c.desktop, _sx("Use Desktop Settings")));
       settled();
     });
   }
@@ -10408,6 +10603,18 @@ class HemmaPanel extends HTMLElement {
       if (f) return f.label;
     }
     return null;
+  }
+
+  // The phone section paired with this desktop room, when that section is
+  // Favorites. Only the Home room has one.
+  _favSection(room) {
+    const pair = this._pair;
+    if (!pair || pair.safe === false || !room) return null;
+    const idx = ((pair.desktop.compact || {}).rooms || []).indexOf(room);
+    const link = idx < 0 ? null : (pair.link.links || [])[idx];
+    if (!link || link.section === null || link.section === undefined) return null;
+    const sec = ((pair.mobile.compact || {}).rooms || [])[link.section];
+    return isFav(sec) ? sec : null;
   }
 
   _mirrorToPair(key, value, rooms) {
@@ -10582,7 +10789,7 @@ class HemmaPanel extends HTMLElement {
         applyMotion(mcfg, s.compact.rooms);
         applyKiosk(mcfg, s.compact.rooms);
       } catch (e) {
-        this._status("phone layout could not be rebuilt: " + e.message, "err");
+        this._status(_sx("phone layout could not be rebuilt: {error}", { error: e.message }), "err");
         this._log("phone layout not saved: " + e.message, "err");
         return false;
       }
@@ -10608,7 +10815,7 @@ class HemmaPanel extends HTMLElement {
       this._saveFlash();
       ok = true;
     } catch (e) {
-      this._status("save failed: " + e.message, "err");
+      this._status(_sx("save failed: {error}", { error: e.message }), "err");
       this._log("save failed: " + e.message, "err");
     }
     this._saving = false;
@@ -10624,8 +10831,8 @@ class HemmaPanel extends HTMLElement {
     if (!cur) return;
     const have = (cur.attributes || {}).options || [];
     const keys = (((this._state || {}).compact || {}).rooms || [])
-      .map((r) => r && r.name).filter(Boolean)
-      .filter((n) => n !== MOBILE_FAVORITES)
+      .filter((r) => r && r.name && !isFav(r))
+      .map((r) => r.name)
       .map(roomKeyOf);
     // room_scenes is a category that happens to share the prefix, never a room.
     const kept = have.filter((o) => o === "room_scenes" || !/^room_/.test(o));
@@ -10904,10 +11111,10 @@ class HemmaPanel extends HTMLElement {
 
     const add = document.createElement("button");
     add.className = "tabadd";
-    add.title = "Add room";
-    add.setAttribute("aria-label", "Add room");
+    add.title = _sx("Add room");
+    add.setAttribute("aria-label", _sx("Add room"));
     add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
-      + '<span class="addlabel">Add room</span>';
+      + '<span class="addlabel">' + _sx("Add room") + "</span>";
     add.onclick = () => this._addRoom();
 
     const host = this.$("rooms");
@@ -10974,14 +11181,14 @@ class HemmaPanel extends HTMLElement {
   async _addRoom() {
     const rooms = this._state.compact.rooms;
     const picked = await this._ask({
-      title: "New room", value: "", placeholder: "Kitchen", confirmLabel: "Add", icons: true,
-      message: "A room is its own page on desktop and tablet, and a section further down the page on the phone.",
+      title: _sx("New room"), value: "", placeholder: _sx("Kitchen"), confirmLabel: _sx("Add"), icons: true,
+      message: _sx("A room is its own page on desktop and tablet, and a section further down the page on the phone."),
     });
     if (!picked) return;
     const name = picked.value;
     const path = slug(name);
     if (rooms.some((r) => r.path === path)) {
-      return this._status('a room with path "' + path + '" already exists', "err");
+      return this._status(_sx("a room with path \"{path}\" already exists", { path }), "err");
     }
     rooms.push(blankRoom(name.trim(), path, "home-demo"));
     const fresh = rooms[rooms.length - 1];
@@ -11007,7 +11214,7 @@ class HemmaPanel extends HTMLElement {
     const rooms = this._state.compact.rooms;
       const r = rooms[i];
       if (id === "rename") {
-        const name = await this._ask({ title: "Rename room", value: r.name || r.path, confirmLabel: "Rename" });
+        const name = await this._ask({ title: _sx("Rename room"), value: r.name || r.path, confirmLabel: _sx("Rename") });
         if (!name) return;
         r.name = name;
         this._renderTabs();
@@ -11017,9 +11224,9 @@ class HemmaPanel extends HTMLElement {
       if (id === "delete") {
         if (rooms.length < 2) return;
         const yes = await this._ask({
-          title: 'Delete "' + (r.name || r.path) + '"?',
-          message: "Its badges and tiles are removed with it. This cannot be undone.",
-          confirmLabel: "Delete", destructive: true,
+          title: _sx("Delete \"{name}\"?", { name: r.name || r.path }),
+          message: _sx("Its badges and tiles are removed with it. This cannot be undone."),
+          confirmLabel: _sx("Delete"), destructive: true,
         });
         if (!yes) return;
 
@@ -11054,10 +11261,10 @@ class HemmaPanel extends HTMLElement {
     const chosen = (r.variables || {}).room_icon || "";
     const auto = autoRoomGlyph(r.name);
     this._menuAt(anchor, [
-      { id: "", label: "Automatic", glyph: auto, checked: !chosen, group: null },
+      { id: "", label: _sx("Automatic"), glyph: auto, checked: !chosen, group: null },
       ...ROOM_ICON_CHOICES.map((g) => ({
         id: g, label: roomIconLabel(g), glyph: g, checked: chosen === g,
-        group: "Icons", quiet: true,
+        group: _sx("Icons"), quiet: true,
       })),
     ], (id) => {
       if (!id) {
@@ -11097,7 +11304,7 @@ class HemmaPanel extends HTMLElement {
     if (pill && pill.hidden) {
       const long = pill.querySelector(".s-long"), short = pill.querySelector(".s-short");
       const lt = long ? long.textContent : "", st = short ? short.textContent : "";
-      if (long && !lt) long.textContent = "88 Differences";
+      if (long && !lt) long.textContent = _sx("{n} Differences", { n: 88 });
       if (short && !st) short.textContent = "88";
       pill.hidden = false;
       reserve = pill.getBoundingClientRect().width + 14;
@@ -11239,7 +11446,7 @@ class HemmaPanel extends HTMLElement {
     const btn = this.$("railbtn");
     if (btn) {
       btn.setAttribute("aria-expanded", open ? "true" : "false");
-      btn.setAttribute("aria-label", open ? "Hide rooms" : "Show rooms");
+      btn.setAttribute("aria-label", open ? _sx("Hide rooms") : _sx("Show rooms"));
     }
   }
 
@@ -11255,15 +11462,15 @@ class HemmaPanel extends HTMLElement {
       const dash = (this._dashList || []).find((d) => d.url_path === this._dashUrl);
       const label = sideRooms ? ((dash && dash.title) || this._dashUrl || name) : name;
       bar.querySelector(".rt-label").textContent = label;
-      bar.setAttribute("aria-label", sideRooms ? label : label + ", change room");
+      bar.setAttribute("aria-label", sideRooms ? label : _sx("{name}, change room", { name: label }));
     }
     if (big) {
       big.querySelector(".bt-label").textContent = name;
-      big.setAttribute("aria-label", name + ", change room");
+      big.setAttribute("aria-label", _sx("{name}, change room", { name }));
     }
     if (nav) {
       nav.querySelector(".nt-label").textContent = name;
-      nav.setAttribute("aria-label", name + ", change room");
+      nav.setAttribute("aria-label", _sx("{name}, change room", { name }));
     }
   }
 
@@ -11272,14 +11479,14 @@ class HemmaPanel extends HTMLElement {
     this._menuAt(anchor, [
       ...rooms.map((r, i) => ({
         id: "go:" + i, label: r.name || r.path, glyph: roomGlyph(r.name, r), plainGlyph: true,
-        checked: i === this._room, group: "Rooms", quiet: true,
+        checked: i === this._room, group: _sx("Rooms"), quiet: true,
       })),
-      { id: "add", label: "Add Room\u2026", icon: "plus", group: "Rooms", quiet: true },
-      { id: "rename", label: "Rename\u2026", icon: "pencil", group: "This Room", quiet: true },
-      { id: "icon", label: "Change Icon\u2026", icon: "grid", group: "This Room", quiet: true },
-      { id: "delete", label: "Delete Room", icon: "trash", danger: true, group: "This Room", quiet: true,
+      { id: "add", label: _sx("Add Room\u2026"), icon: "plus", group: _sx("Rooms"), quiet: true },
+      { id: "rename", label: _sx("Rename\u2026"), icon: "pencil", group: _sx("This Room"), quiet: true },
+      { id: "icon", label: _sx("Change Icon\u2026"), icon: "grid", group: _sx("This Room"), quiet: true },
+      { id: "delete", label: _sx("Delete Room"), icon: "trash", danger: true, group: _sx("This Room"), quiet: true,
         disabled: rooms.length < 2,
-        why: "A dashboard needs at least one room." },
+        why: _sx("A dashboard needs at least one room.") },
     ], (id) => {
       if (id.indexOf("go:") === 0) {
         const i = +id.slice(3);
@@ -11309,11 +11516,11 @@ class HemmaPanel extends HTMLElement {
   _roomMenu(anchor, i) {
     const rooms = this._state.compact.rooms;
     this._menuAt(anchor, [
-      { id: "rename", label: "Rename\u2026" },
-      { id: "icon", label: "Change Icon\u2026" },
-      { id: "delete", label: "Delete room", group: null,
+      { id: "rename", label: _sx("Rename\u2026") },
+      { id: "icon", label: _sx("Change Icon\u2026") },
+      { id: "delete", label: _sx("Delete room"), group: null,
         disabled: rooms.length < 2,
-        why: "A dashboard needs at least one room." },
+        why: _sx("A dashboard needs at least one room.") },
     ], async (id) => {
       if (id === "icon") return requestAnimationFrame(() => this._roomIconMenu(anchor, i));
       return this._roomMenuAction(id, i);
@@ -11473,7 +11680,9 @@ class HemmaPanel extends HTMLElement {
     const ids = Object.keys(this._hass.states);
 
     const isSet = (f) => {
-      const v = f.key === "__name" ? room.name : room.variables[f.key];
+      const v = f.key === "__name" ? room.name
+        : f.key === "__phone_name" ? (this._favSection(room) || {}).name
+        : room.variables[f.key];
       return v !== undefined && v !== "" && !(Array.isArray(v) && !v.length);
     };
     const unitLive = (u) => u.fields.some((f) => f.always || isSet(f))
@@ -11499,7 +11708,7 @@ class HemmaPanel extends HTMLElement {
         const dom = String(room.variables[f.key] || "").split(".")[0];
         kind = dom && f.repeatKinds.find((k) => k.domains.includes(dom));
       }
-      return kind ? kind.label : null;
+      return kind ? _sx(kind.label) : null;
     };
     const shownFields = (sec) => {
       const on = sectionLive(sec);
@@ -11508,6 +11717,7 @@ class HemmaPanel extends HTMLElement {
         .map((u) => u.id));
       return sectionFields(sec)
         .filter((f) => live.has(unitOf(f)) && modAvail(f))
+        .filter((f) => !f.phoneName || this._favSection(room))
         .map((f, i) => [f, i])
         .sort((a, b) => (ordOf(a[0]) - ordOf(b[0])) || (a[1] - b[1]))
         .map(([f]) => f);
@@ -11519,6 +11729,7 @@ class HemmaPanel extends HTMLElement {
       room.path, room.name, room.variables, room.tiles,
       this._phoneFilter || null,
       this._scenesOn(), this._miniSize, (this._imgs || []).length,
+      this._hass && this._hass.language, typeof window._hemmaT === "function", !!_sxTable,
     ]);
     if (mount && !isPhone(this) && !(this.classList.contains("split") && this.classList.contains("narrow"))
       && this._mapSig !== sig) {
@@ -11534,14 +11745,14 @@ class HemmaPanel extends HTMLElement {
       const seg0 = document.createElement("div");
       seg0.className = "seg groupseg";
       seg0.setAttribute("role", "group");
-      seg0.setAttribute("aria-label", "Which part of the room to edit");
+      seg0.setAttribute("aria-label", _sx("Which part of the room to edit"));
       seg0.appendChild(document.createElement("span")).className = "segthumb";
       GROUPS.forEach((g) => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "segopt";
         b.dataset.group = g.id;
-        b.textContent = g.label;
+        b.textContent = _sx(g.label);
         seg0.appendChild(b);
       });
       const nav0 = document.createElement("div");
@@ -11591,11 +11802,11 @@ class HemmaPanel extends HTMLElement {
           gh.appendChild(gi);
         }
         const gt = document.createElement("h3");
-        gt.textContent = H.label;
+        gt.textContent = _sx(H.label);
         gh.appendChild(gt);
         if (H.blurb) {
           const gp = document.createElement("p");
-          gp.textContent = H.blurb;
+          gp.textContent = _sx(H.blurb);
           gh.appendChild(gp);
         }
         bandFor_head[g.id] = gh;
@@ -11612,21 +11823,21 @@ class HemmaPanel extends HTMLElement {
         sw.type = "button";
         sw.setAttribute("role", "switch");
         sw.setAttribute("aria-checked", on ? "true" : "false");
-        sw.setAttribute("aria-label", "Sort active tiles to the front");
+        sw.setAttribute("aria-label", _sx("Sort active tiles to the front"));
         sw.title = on
-          ? "Active tiles move to the front"
-          : "Tiles stay in the order you set";
+          ? _sx("Active tiles move to the front")
+          : _sx("Tiles stay in the order you set");
         const lab = document.createElement("span");
         lab.className = "bandtog";
-        lab.textContent = "Smart Sort";
+        lab.textContent = _sx("Smart Sort");
         sw.onclick = () => {
           room._row = room._row || { type: "custom:hemma-smart-row" };
           const next = room._row.sort === false;
           if (next) delete room._row.sort; else room._row.sort = false;
           sw.setAttribute("aria-checked", next ? "true" : "false");
           sw.title = next
-            ? "Active tiles move to the front"
-            : "Tiles stay in the order you set";
+            ? _sx("Active tiles move to the front")
+            : _sx("Tiles stay in the order you set");
           this._applyMiniSort(true);
           this._markDirty();
         };
@@ -11635,7 +11846,7 @@ class HemmaPanel extends HTMLElement {
         strip.appendChild(lab);
         const note = document.createElement("p");
         note.className = "sortnote";
-        note.textContent = "Active tiles move to the front";
+        note.textContent = _sx("Active tiles move to the front");
         strip.appendChild(note);
         strip.appendChild(sw);
         this._tileOptions = strip;
@@ -11691,28 +11902,28 @@ class HemmaPanel extends HTMLElement {
         head.appendChild(g);
       }
       const h2 = document.createElement("h2");
-      h2.textContent = sec.label;
+      h2.textContent = _sx(sec.label);
       head.appendChild(h2);
       if (sec.blurb) {
         const p = document.createElement("p");
         p.className = "blurb";
-        p.textContent = sec.blurb;
+        p.textContent = _sx(sec.blurb);
         head.appendChild(p);
       }
 
       const foldKey = sec.label;
-      head.appendChild(this._foldButton(foldKey, head, fs, sec.label));
+      head.appendChild(this._foldButton(foldKey, head, fs, _sx(sec.label)));
       const setCount = units.filter(unitLive).length;
       const showCount = setCount && sec.repeats && sec.repeats.length;
       if (showCount || sec.toggle) {
         const c = document.createElement("span");
         c.className = "count";
         // "Nothing set. Use + to add." is already the empty note's wording.
-        c.textContent = showCount ? setCount + " set" : "";
+        c.textContent = showCount ? _sx("{n} set", { n: setCount }) : "";
         head.appendChild(c);
         // Filled in below, once the switch has told us which way it is set.
         this._countFor = this._countFor || new Map();
-        this._countFor.set(sec.label, { el: c, set: showCount ? setCount + " set" : "" });
+        this._countFor.set(sec.label, { el: c, set: showCount ? _sx("{n} set", { n: setCount }) : "" });
       }
       const offersFrom = (from) => {
         const out = [];
@@ -11724,18 +11935,18 @@ class HemmaPanel extends HTMLElement {
             seenRepeat.add(f0.repeatOf);
             if (f0.repeatKinds) {
               f0.repeatKinds.forEach((k) => out.push({
-                id: u.id + "@" + k.id, label: k.label, group: u.group,
+                id: u.id + "@" + k.id, label: _sx(k.label), group: _sx(u.group),
                 ord: ordOf(f0), seq: out.length,
               }));
             } else {
               out.push({
-                id: u.id, label: f0.repeatLabel, group: u.group,
+                id: u.id, label: _sx(f0.repeatLabel), group: _sx(u.group),
                 ord: ordOf(f0), seq: out.length,
               });
             }
           } else {
             out.push({
-              id: u.id, label: u.label, group: u.group,
+              id: u.id, label: _sx(u.label), group: _sx(u.group),
               ord: ordOf(u.fields[0]), seq: out.length,
             });
           }
@@ -11779,13 +11990,13 @@ class HemmaPanel extends HTMLElement {
         sw.type = "button";
         sw.setAttribute("role", "switch");
         sw.setAttribute("aria-checked", on ? "true" : "false");
-        sw.setAttribute("aria-label", "Show " + sec.label + " on the dashboard");
-        sw.title = on ? "Shown on the dashboard" : "Hidden on the dashboard";
+        sw.setAttribute("aria-label", _sx("Show {name} on the dashboard", { name: _sx(sec.label) }));
+        sw.title = on ? _sx("Shown on the dashboard") : _sx("Hidden on the dashboard");
         sw.onclick = () => { toggle.set(); this._syncSwitches(); };
         head.appendChild(sw);
         fs.classList.toggle("off", !on);
         const cnt = (this._countFor || new Map()).get(sec.label);
-        if (cnt) cnt.el.textContent = on ? cnt.set : "Off";
+        if (cnt) cnt.el.textContent = on ? cnt.set : _sx("Off");
         if (this._folded.has(foldKey)) fs.classList.add("shut");
         this._switches.push({ fs, sw, get: toggle.get, foldKey });
       }
@@ -11807,8 +12018,8 @@ class HemmaPanel extends HTMLElement {
       if (offered.length) {
         const add = document.createElement("button");
         add.className = "plus";
-        add.title = "Add a field";
-        add.setAttribute("aria-label", "Add a field");
+        add.title = _sx("Add a field");
+        add.setAttribute("aria-label", _sx("Add a field"));
         add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
         const rec = this._switches[this._switches.length - 1];
         if (rec && rec.fs === fs) { rec.add = add; add.disabled = !rec.get(); }
@@ -11830,8 +12041,8 @@ class HemmaPanel extends HTMLElement {
         if (drifted.length) {
           const w = document.createElement("div");
           w.className = "cdesc drift";
-          w.textContent = "Rooms disagree on " + drifted.map((f) => f.label.toLowerCase()).join(", ")
-            + ". Changing it here sets every room.";
+          w.textContent = _sx("Rooms disagree on {names}. Changing it here sets every room.",
+            { names: drifted.map((f) => _sx(f.label).toLowerCase()).join(", ") });
           fs.appendChild(w);
         }
       }
@@ -11839,7 +12050,7 @@ class HemmaPanel extends HTMLElement {
       if (!visible.length && units.length) {
         const n = document.createElement("div");
         n.className = "empty-note";
-        n.textContent = "Nothing set. Use + to add.";
+        n.textContent = _sx("Nothing set. Use + to add.");
         fs.appendChild(n);
       }
 
@@ -11874,12 +12085,12 @@ class HemmaPanel extends HTMLElement {
         const u = unitOf(f);
         if (f.always || f.auto || unitSeen.has(u)) { cell.className = "drop blank"; row.appendChild(cell); return; }
         unitSeen.add(u);
-        cell.title = "Remove";
-        cell.setAttribute("aria-label", "Remove");
+        cell.title = _sx("Remove");
+        cell.setAttribute("aria-label", _sx("Remove"));
         cell.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg>';
         cell.onclick = (ev) => {
           if (ev && ev.stopPropagation) ev.stopPropagation();
-          this._armRow(row, kindLabel(f) || f.label, () => {
+          this._armRow(row, kindLabel(f) || _sx(f.label), () => {
             sectionFields(sec).filter((x) => unitOf(x) === u).forEach((x) => setVar(x.key, undefined, x));
             this._revealed.delete(room.path + "|" + u);
             this._renderForm();
@@ -11908,7 +12119,7 @@ class HemmaPanel extends HTMLElement {
         const row = document.createElement("div");
         row.className = "row";
         const lab = document.createElement("label");
-        lab.textContent = kindLabel(f) || f.label;
+        lab.textContent = kindLabel(f) || _sx(f.label);
         if (f.glyph) {
           const gi = document.createElement("span");
           gi.className = "sicon rowicon";
@@ -11920,6 +12131,7 @@ class HemmaPanel extends HTMLElement {
         row.appendChild(lab);
 
         const cur = f.key === "__name" ? (room.name ?? "")
+          : f.key === "__phone_name" ? ((this._favSection(room) || {}).name ?? "")
           : (room.variables[f.key] ?? anyRoom(f) ?? "");
         let input;
         // Every branch has to call this.
@@ -11928,7 +12140,7 @@ class HemmaPanel extends HTMLElement {
         const addHint = () => {
           if (!f.hint) return;
           const h = document.createElement("div");
-          h.className = "hint"; h.textContent = f.hint;
+          h.className = "hint"; h.textContent = _sx(f.hint);
           hintEl = h;
           fs.appendChild(h);
         };
@@ -11975,13 +12187,13 @@ class HemmaPanel extends HTMLElement {
           if (many) {
             const head = document.createElement("div");
             head.className = "subhead";
-            head.textContent = f.label;
+            head.textContent = _sx(f.label);
             fs.appendChild(head);
           }
           if (!over.length) {
             const h = document.createElement("div");
             h.className = "hint";
-            h.textContent = f.emptyHint || "Add the entities above first.";
+            h.textContent = _sx(f.emptyHint) || _sx("Add the entities above first.");
             fs.appendChild(h);
             return;
           }
@@ -11992,7 +12204,7 @@ class HemmaPanel extends HTMLElement {
             const st = this._hass.states[id];
             l.textContent = many
               ? ((st && st.attributes.friendly_name) || id)
-              : f.label;
+              : _sx(f.label);
             r.appendChild(l);
             const write = (v) => {
               const next = {};
@@ -12030,7 +12242,7 @@ class HemmaPanel extends HTMLElement {
         if (f.type === "select") {
           const c = this._combo(String(cur), f.options, "",
             (v) => { setVar(f.key, v, f); this._syncPreview(); },
-            { fixed: true, labels: { "": "Default", ...(f.optionLabels || {}) } });
+            { fixed: true, labels: { "": _sx("Default"), ...(f.optionLabels || {}) } });
           row.appendChild(c.wrap);
           addDrop(row, f);
           fs.appendChild(row);
@@ -12058,11 +12270,22 @@ class HemmaPanel extends HTMLElement {
         } else {
           input = document.createElement("input");
           input.value = String(cur);
-          if (f.placeholder) input.placeholder = f.placeholder;
+          if (f.placeholder) input.placeholder = _sx(f.placeholder);
         }
 
         input.onchange = () => {
           const v = input.value.trim();
+          if (f.key === "__phone_name") {
+            const sec = this._favSection(room);
+            if (sec) {
+              sec.name = v || MOBILE_FAVORITES;
+              sec.favorites = true;
+              sec.variables = { ...(sec.variables || {}), favorites: true, hide_caret: true };
+              input.value = sec.name;
+            }
+            this._syncPreview();
+            return;
+          }
           if (f.key === "__name") {
             room.name = v;
             setVar("room_name", v);
@@ -12089,7 +12312,7 @@ class HemmaPanel extends HTMLElement {
           if (sub.label) {
             const t = document.createElement("div");
             t.className = "subtitle";
-            t.textContent = sub.label;
+            t.textContent = _sx(sub.label);
             fs.appendChild(t);
           }
           const box = document.createElement("div");
@@ -12120,14 +12343,14 @@ class HemmaPanel extends HTMLElement {
         sum.className = "advsum";
         sum.type = "button";
         sum.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
-          + ' stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg><span>Advanced</span>';
+          + ' stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg><span>' + _sx("Advanced") + "</span>";
         const key = room.path + "|adv|" + sec.label;
         if (advOffer.length) {
           const ap = document.createElement("button");
           ap.className = "plus advplus";
           ap.type = "button";
-          ap.title = "Add an option";
-          ap.setAttribute("aria-label", "Add an option");
+          ap.title = _sx("Add an option");
+          ap.setAttribute("aria-label", _sx("Add an option"));
           ap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
           ap.onclick = (ev) => {
             ev.stopPropagation();
@@ -12143,7 +12366,7 @@ class HemmaPanel extends HTMLElement {
         if (!advanced.length) {
           const n = document.createElement("div");
           n.className = "empty-note";
-          n.textContent = "Nothing set. Use + to add.";
+          n.textContent = _sx("Nothing set. Use + to add.");
           body.appendChild(n);
         }
         const open = this._advOpen.has(key);
@@ -12198,16 +12421,16 @@ class HemmaPanel extends HTMLElement {
         back.className = "back";
         back.type = "button";
         const home = (GROUPS.find((x) => x.id === this._sel.group) || {}).label
-          || "the list";
-        back.title = "Back to " + home;
-        back.setAttribute("aria-label", "Back to " + home);
+          || _sx("the list");
+        back.title = _sx("Back to {name}", { name: home });
+        back.setAttribute("aria-label", _sx("Back to {name}", { name: home }));
         back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
           + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'
           + '<path d="m15 5-7 7 7 7"/></svg>';
         back.onclick = () => this._popRow();
         const grp = GROUPS.find((x) => x.id === this._sel.group);
         const h3 = document.createElement("h3");
-        h3.textContent = (grp && this._headFor(grp, room).label) || this._sel.label || home;
+        h3.textContent = _sx((grp && this._headFor(grp, room).label) || this._sel.label) || home;
         bar.appendChild(back);
         bar.appendChild(h3);
         const ownHead = hit.querySelector(".chead, .thead");
@@ -12230,9 +12453,9 @@ class HemmaPanel extends HTMLElement {
       const back = document.createElement("button");
       back.className = "back";
       back.type = "button";
-      const home = (this._headFor(GROUPS[0], room) || {}).label || "the list";
-      back.title = "Back to " + home;
-      back.setAttribute("aria-label", "Back to " + home);
+      const home = (this._headFor(GROUPS[0], room) || {}).label || _sx("the list");
+      back.title = _sx("Back to {name}", { name: home });
+      back.setAttribute("aria-label", _sx("Back to {name}", { name: home }));
       back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
         + ' stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'
         + '<path d="m15 5-7 7 7 7"/></svg>';
@@ -12244,7 +12467,7 @@ class HemmaPanel extends HTMLElement {
         this._renderForm();
       };
       const h3 = document.createElement("h3");
-      h3.textContent = (grp && grp.label) || "";
+      h3.textContent = _sx((grp && grp.label) || "");
       bar.appendChild(back);
       bar.appendChild(h3);
       seg.remove();
@@ -12256,7 +12479,7 @@ class HemmaPanel extends HTMLElement {
       const bar = document.createElement("div");
       bar.className = "detailbar rootlevel listbar";
       const h3 = document.createElement("h3");
-      h3.textContent = (grp && grp.label) || "";
+      h3.textContent = _sx((grp && grp.label) || "");
       bar.appendChild(h3);
       nav.appendChild(bar);
     }
@@ -12306,7 +12529,7 @@ class HemmaPanel extends HTMLElement {
       if (glyph) b.appendChild(glyph);
       const l = document.createElement("span");
       l.className = "sidelabel";
-      l.textContent = label;
+      l.textContent = _sx(label);
       b.appendChild(l);
       b.onclick = () => { if (!on) onPick(); };
       host.appendChild(b);
@@ -12366,11 +12589,11 @@ class HemmaPanel extends HTMLElement {
     });
     const room = this._state && this._state.compact.rooms[this._room];
     if (roomRows.length) {
-      head((room && (room.name || room.path)) || "Room");
+      head((room && (room.name || room.path)) || _sx("Room"));
       roomRows.forEach((f) => f());
     }
     if (dashRows.length) {
-      head("Dashboard");
+      head(_sx("Dashboard"));
       dashRows.forEach((f) => f());
     }
     nav.scrollTop = keep;
@@ -12404,7 +12627,7 @@ class HemmaPanel extends HTMLElement {
       if (g.iconColor) gi.style.setProperty("--sc", g.iconColor);
       ch.appendChild(gi);
       const h2 = document.createElement("h2");
-      h2.textContent = g.label;
+      h2.textContent = _sx(g.label);
       ch.appendChild(h2);
       const chev = document.createElement("span");
       chev.className = "fold";
@@ -12431,7 +12654,7 @@ class HemmaPanel extends HTMLElement {
     slot.classList.add("phonepanel");
     const gh = slot.querySelector(":scope > .grouphead");
     if (gh) gh.remove();
-    cols.insertBefore(head((room && (room.name || room.path)) || "Room"), slot);
+    cols.insertBefore(head((room && (room.name || room.path)) || _sx("Room")), slot);
     mine.forEach((c) => slot.appendChild(c));
     GROUPS.forEach((g) => {
       if (g.id === "badges" || g.id === "tiles") slot.appendChild(groupRow(g));
@@ -12440,7 +12663,7 @@ class HemmaPanel extends HTMLElement {
     const col = document.createElement("div");
     col.className = "col phonepanel";
     dash.forEach((c) => col.appendChild(c));
-    cols.appendChild(head("Dashboard"));
+    cols.appendChild(head(_sx("Dashboard")));
     cols.appendChild(col);
   }
 
@@ -12488,7 +12711,7 @@ class HemmaPanel extends HTMLElement {
     };
     const title = document.createElement("div");
     title.className = "subtitle";
-    title.textContent = "Options";
+    title.textContent = _sx("Options");
     const first = card(main);
     const second = card(opts);
     body.replaceChildren(first, title, second, ...adv);
@@ -12516,7 +12739,7 @@ class HemmaPanel extends HTMLElement {
       this._markDirty();
       this._renderTabs();
       this._renderForm();
-      this._status("Moved to " + (to.name || to.path), "ok");
+      this._status(_sx("Moved to {name}", { name: to.name || to.path }), "ok");
     });
   }
 
@@ -12537,7 +12760,7 @@ class HemmaPanel extends HTMLElement {
       to.tiles.push(clone(tile));
       this._markDirty();
       this._renderForm();
-      this._status("Copied to " + (to.name || to.path), "ok");
+      this._status(_sx("Copied to {name}", { name: to.name || to.path }), "ok");
     });
   }
 
@@ -12702,7 +12925,7 @@ class HemmaPanel extends HTMLElement {
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "psheet-cancel";
-    cancel.textContent = "Cancel";
+    cancel.textContent = _sx("Cancel");
     head.appendChild(h);
     head.appendChild(cancel);
     const search = document.createElement("label");
@@ -12711,7 +12934,7 @@ class HemmaPanel extends HTMLElement {
       + ' stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>';
     const q = document.createElement("input");
     q.type = "text";
-    q.placeholder = "Search";
+    q.placeholder = _sx("Search");
     q.setAttribute("autocomplete", "off");
     q.setAttribute("autocapitalize", "off");
     q.setAttribute("autocorrect", "off");
@@ -12773,12 +12996,12 @@ class HemmaPanel extends HTMLElement {
         listEl.appendChild(row(o, nm, nm !== o && !label ? o : null, o === current));
       });
       if (free !== false && typed && !(list || []).includes(typed) && (!hits.length || typed.includes("."))) {
-        listEl.appendChild(row(typed, "Use \u201c" + typed + "\u201d", null, false));
+        listEl.appendChild(row(typed, _sx("Use \u201c{value}\u201d", { value: typed }), null, false));
       }
       if (!hits.length && !typed) {
         const e = document.createElement("div");
         e.className = "psheet-empty";
-        e.textContent = "Nothing to choose";
+        e.textContent = _sx("Nothing to choose");
         listEl.appendChild(e);
       }
     };
@@ -12942,7 +13165,7 @@ class HemmaPanel extends HTMLElement {
       const on = s.get();
       if (s.sw.getAttribute("aria-checked") === (on ? "true" : "false")) return;
       s.sw.setAttribute("aria-checked", on ? "true" : "false");
-      s.sw.title = on ? "Shown on the dashboard" : "Hidden on the dashboard";
+      s.sw.title = on ? _sx("Shown on the dashboard") : _sx("Hidden on the dashboard");
       s.fs.classList.toggle("off", !on);
       if (s.add) s.add.disabled = !on;
       if (!s.fs.classList.contains("sel")) {
@@ -13053,8 +13276,8 @@ class HemmaPanel extends HTMLElement {
     const del = document.createElement("button");
     del.type = "button";
     del.className = "delbtn";
-    del.textContent = "Delete";
-    del.setAttribute("aria-label", "Delete " + (label || "setting"));
+    del.textContent = _sx("Delete");
+    del.setAttribute("aria-label", label ? _sx("Delete {name}", { name: label }) : _sx("Delete setting"));
     del.onpointerdown = (ev) => ev.stopPropagation();
     del.onclick = (ev) => {
       ev.stopPropagation();
@@ -13223,8 +13446,8 @@ class HemmaPanel extends HTMLElement {
     const paint = () => {
       const open = !this._folded.has(key);
       fold.setAttribute("aria-expanded", open ? "true" : "false");
-      fold.setAttribute("aria-label", (open ? "Collapse " : "Expand ") + label);
-      fold.title = open ? "Collapse" : "Expand";
+      fold.setAttribute("aria-label", open ? _sx("Collapse {name}", { name: label }) : _sx("Expand {name}", { name: label }));
+      fold.title = open ? _sx("Collapse") : _sx("Expand");
     };
     paint();
     if (this._foldables) this._foldables.set(key, { body, paint });
@@ -13273,7 +13496,7 @@ class HemmaPanel extends HTMLElement {
     sw.type = "button";
     sw.setAttribute("role", "switch");
     sw.setAttribute("aria-checked", on ? "true" : "false");
-    if (label) sw.setAttribute("aria-label", label);
+    if (label) sw.setAttribute("aria-label", _sx(label));
     let state = on;
     sw.onclick = () => {
       state = !state;
@@ -13358,7 +13581,7 @@ class HemmaPanel extends HTMLElement {
     const tile = ((room && room.tiles) || []).find((t) => this._tileKey(t) === key);
     if (!tile) return key;
     const type = tileTypeAny(tile);
-    return tile.name || (type && type.label) || "Tile";
+    return tile.name || (type && _sx(type.label)) || _sx("Tile");
   }
 
   // Light the same object on both sides. Called with null to clear.
@@ -13454,7 +13677,7 @@ class HemmaPanel extends HTMLElement {
         if (emptyText) {
           none = document.createElement("div");
           none.className = "none";
-          none.textContent = emptyText;
+          none.textContent = _sx(emptyText);
         }
       } else {
         const chips = document.createElement("div");
@@ -13469,7 +13692,7 @@ class HemmaPanel extends HTMLElement {
           const x = document.createElement("button");
           x.type = "button";
           x.textContent = "\u00d7";
-          x.title = "Remove";
+          x.title = _sx("Remove");
           x.onclick = () => { list.splice(i, 1); onChange(list.slice()); draw(); };
           c.appendChild(t); c.appendChild(x);
           chips.appendChild(c);
@@ -13480,7 +13703,7 @@ class HemmaPanel extends HTMLElement {
       const options = this._entityList(domains, opts && opts.classes)
         .filter((e) => !list.includes(e));
       const ph = (opts && opts.placeholder)
-        || ("add " + domains.map((d) => d + ".").join(" / "));
+        || _sx("add {domains}", { domains: domains.map((d) => d + ".").join(" / ") });
       const combo = this._combo("", options, ph, (v) => {
         if (!v || list.includes(v)) return;
         list.push(v);
@@ -13548,7 +13771,7 @@ class HemmaPanel extends HTMLElement {
           irow.className = "frow field askicon";
           const lab = document.createElement("span");
           lab.className = "asklabel";
-          lab.textContent = "Icon";
+          lab.textContent = _sx("Icon");
           const val = document.createElement("span");
           val.className = "askvalue";
           const g = document.createElement("span");
@@ -13559,16 +13782,16 @@ class HemmaPanel extends HTMLElement {
           const paintIcon = () => {
             const shown = icon || autoRoomGlyph(input.value);
             g.style.setProperty("--i", "url('" + iconUrl(shown) + "')");
-            t.textContent = icon ? roomIconLabel(icon) : "Automatic";
+            t.textContent = icon ? roomIconLabel(icon) : _sx("Automatic");
           };
           paintIcon();
           input.addEventListener("input", () => { if (!icon) paintIcon(); });
           irow.onclick = () => {
             this._menuAt(irow, [
-              { id: "", label: "Automatic", glyph: autoRoomGlyph(input.value),
+              { id: "", label: _sx("Automatic"), glyph: autoRoomGlyph(input.value),
                 checked: !icon, group: null },
               ...ROOM_ICON_CHOICES.map((x) => ({ id: x, label: roomIconLabel(x), glyph: x,
-                checked: icon === x, group: "Icons", quiet: true })),
+                checked: icon === x, group: _sx("Icons"), quiet: true })),
             ], (id) => { icon = id; paintIcon(); });
           };
           list.appendChild(irow);
@@ -13578,7 +13801,7 @@ class HemmaPanel extends HTMLElement {
           crow.className = "frow field askchoice";
           const clab = document.createElement("span");
           clab.className = "asklabel";
-          clab.textContent = opts.choiceLabel || "Place";
+          clab.textContent = opts.choiceLabel || _sx("Place");
           crow.appendChild(clab);
           const labels = {};
           opts.choices.forEach((c) => { labels[c.id] = c.label; });
@@ -13594,7 +13817,7 @@ class HemmaPanel extends HTMLElement {
       acts.className = "askacts";
       const cancel = document.createElement("button");
       cancel.className = "ghost";
-      cancel.textContent = "Cancel";
+      cancel.textContent = _sx("Cancel");
       const ok = document.createElement("button");
       if (opts.destructive) ok.className = "danger";
       ok.textContent = opts.confirmLabel || "OK";
@@ -13663,7 +13886,7 @@ class HemmaPanel extends HTMLElement {
     // A fixed list is a chooser, not a text field: no typing, no filtering.
     const fixed = !!(opts && opts.fixed);
     const labels = (opts && opts.labels) || null;
-    const show = (v) => (labels && labels[v] !== undefined ? labels[v] : v);
+    const show = (v) => (labels && labels[v] !== undefined ? _sx(labels[v]) : v);
     const nameSeen = new Map();
     (list || []).forEach((o) => {
       const nm = this._prettyEntity(o);
@@ -13678,7 +13901,7 @@ class HemmaPanel extends HTMLElement {
     const raw = value == null ? "" : String(value);
     const input = document.createElement("input");
     input.value = raw;
-    if (placeholder) input.placeholder = placeholder;
+    if (placeholder) input.placeholder = _sx(placeholder);
     const menu = document.createElement("div");
     menu.className = "combo-menu";
     // Inside a dialog the overlay sits below the ask pane, so a menu mounted
@@ -13761,7 +13984,7 @@ class HemmaPanel extends HTMLElement {
       if (!shown.length) {
         const e = document.createElement("div");
         e.className = "combo-empty";
-        e.textContent = "No match";
+        e.textContent = _sx("No match");
         menu.appendChild(e);
         if (this._openCombo && this._openCombo !== close) this._openCombo();
         this._openCombo = close;
@@ -13878,7 +14101,7 @@ class HemmaPanel extends HTMLElement {
       input.oninput = () => { open(); active = -1; paint(); };
       input.onblur = () => {
         setTimeout(close, 120);
-        input.placeholder = placeholder || "";
+        input.placeholder = _sx(placeholder || "");
         const typed = input.value.trim();
         if (!typed && current && isPhone(this)) { input.value = pretty(current); return; }
         if (typed !== current && typed !== pretty(current)) commit(typed);
@@ -14007,12 +14230,12 @@ class HemmaPanel extends HTMLElement {
     // "custom:mushroom-title-card" reads as "Mushroom title card".
     const label = (c) => {
       const raw = String((c && c.type) || "card").replace(/^custom:/, "").replace(/[-_]+/g, " ").trim();
-      return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : "Card";
+      return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : _sx("Card");
     };
     const summary = (c) => {
       const o = c || {};
       const v = o.content || o.title || o.name || o.entity || o.camera_image
-        || (Array.isArray(o.entities) && o.entities.length ? o.entities.length + " entities" : "");
+        || (Array.isArray(o.entities) && o.entities.length ? _sx("{n} entities", { n: o.entities.length }) : "");
       // A markdown body is the whole card, so the first line is the summary.
       const first = String(v || "").split("\n").filter((l) => l.trim())[0] || "";
       const t = first.replace(/^#{1,6}\s*/, "").replace(/[*_`]/g, "")
@@ -14021,7 +14244,7 @@ class HemmaPanel extends HTMLElement {
     };
     const title = document.createElement("div");
     title.className = "subtitle";
-    title.textContent = (f && f.label) || "Other cards";
+    title.textContent = _sx((f && f.label) || "Other cards");
     fs.appendChild(title);
     cards.forEach((card, i) => {
       const row = document.createElement("div");
@@ -14045,14 +14268,14 @@ class HemmaPanel extends HTMLElement {
       // the chevron the rows above it use.
       const dots = document.createElement("button");
       dots.className = "mini icon rowmenu";
-      dots.title = "More";
-      dots.setAttribute("aria-label", "More");
+      dots.title = _sx("More");
+      dots.setAttribute("aria-label", _sx("More"));
       dots.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
       dots.onpointerdown = (ev) => ev.stopPropagation();
       dots.onclick = () => this._menuAt(dots, [
-        { id: "edit", label: "Edit card\u2026" },
-        { id: "up", label: "Move into the tile row" },
-        { id: "remove", label: "Remove card", destructive: true },
+        { id: "edit", label: _sx("Edit card\u2026") },
+        { id: "up", label: _sx("Move into the tile row") },
+        { id: "remove", label: _sx("Remove card"), destructive: true },
       ], async (id) => {
         if (id === "edit") return this._editExtraCard(room, i);
         if (id === "up") {
@@ -14060,19 +14283,19 @@ class HemmaPanel extends HTMLElement {
           room.tiles = (room.tiles || []).concat([wrapCustomCard(moved)]);
           this._markDirty();
           this._renderForm();
-          return this._status("Moved into the tile row", "ok");
+          return this._status(_sx("Moved into the tile row"), "ok");
         }
         if (id !== "remove") return;
         const yes = await this._ask({
-          title: "Remove this card?",
-          message: "Hemma does not manage this card, so it cannot put it back. This cannot be undone.",
-          confirmLabel: "Remove", destructive: true,
+          title: _sx("Remove this card?"),
+          message: _sx("Hemma does not manage this card, so it cannot put it back. This cannot be undone."),
+          confirmLabel: _sx("Remove"), destructive: true,
         });
         if (!yes) return;
         room._extraCards.splice(i, 1);
         this._markDirty();
         this._renderForm();
-        this._status("Card removed", "ok");
+        this._status(_sx("Card removed"), "ok");
       });
       row.appendChild(dots);
       fs.appendChild(row);
@@ -14080,7 +14303,7 @@ class HemmaPanel extends HTMLElement {
     if (f && f.hint) {
       const h = document.createElement("div");
       h.className = "hint";
-      h.textContent = f.hint;
+      h.textContent = _sx(f.hint);
       fs.appendChild(h);
     }
   }
@@ -14089,20 +14312,20 @@ class HemmaPanel extends HTMLElement {
     // A phone layout has no slot below the row, so it is not offered one.
     const canPlace = (this._state || {}).surface !== "mobile";
     const got = await this._ask({
-      title: "Custom card",
-      message: "Paste a card, or a button_card_templates entry to add a tile type "
+      title: _sx("Custom card"),
+      message: _sx("Paste a card, or a button_card_templates entry to add a tile type "
         + "of your own that every room can use. Same YAML or JSON you would use "
-        + "in Home Assistant's raw editor, kept exactly as you write it.",
+        + "in Home Assistant's raw editor, kept exactly as you write it."),
       value: "",
       multiline: true,
       wide: true,
       rows: 12,
       placeholder: "type: custom:my-card\nentity: sensor.example",
-      confirmLabel: "Add",
-      choiceLabel: "Place",
+      confirmLabel: _sx("Add"),
+      choiceLabel: _sx("Place"),
       choices: canPlace ? [
-        { id: CUSTOM_IN_ROW, label: "In the tile row" },
-        { id: CUSTOM_BELOW, label: "Below the tiles" },
+        { id: CUSTOM_IN_ROW, label: _sx("In the tile row") },
+        { id: CUSTOM_BELOW, label: _sx("Below the tiles") },
       ] : null,
       validate: (v) => { try { parseCardText(v); return ""; } catch (e) { return e.message; } },
     });
@@ -14119,13 +14342,13 @@ class HemmaPanel extends HTMLElement {
       room._extraCards = (room._extraCards || []).concat([card]);
       this._markDirty();
       this._renderForm();
-      this._status("Card added below the tiles", "ok");
+      this._status(_sx("Card added below the tiles"), "ok");
       return;
     }
     room.tiles.push(wrapCustomCard(card));
     this._markDirty();
     this._renderForm();
-    this._status("Card added", "ok");
+    this._status(_sx("Card added"), "ok");
     requestAnimationFrame(() => {
       const tiles = this.shadowRoot.querySelectorAll(".tilegrid .tile");
       const el = tiles[tiles.length - 1];
@@ -14140,14 +14363,14 @@ class HemmaPanel extends HTMLElement {
     const card = (room._extraCards || [])[i];
     if (!card) return;
     const got = await this._ask({
-      title: "Edit card",
-      message: "The card exactly as Hemma stores it. Hemma does not manage this "
-        + "one, so what you write here is what it draws.",
+      title: _sx("Edit card"),
+      message: _sx("The card exactly as Hemma stores it. Hemma does not manage this "
+        + "one, so what you write here is what it draws."),
       value: cardToText(card),
       multiline: true,
       wide: true,
       rows: 12,
-      confirmLabel: "Save",
+      confirmLabel: _sx("Save"),
       validate: (v) => { try { parseCardText(v); return ""; } catch (e) { return e.message; } },
     });
     if (!got) return;
@@ -14157,7 +14380,7 @@ class HemmaPanel extends HTMLElement {
     room._extraCards[i] = next;
     this._markDirty();
     this._renderForm();
-    this._status("Card updated", "ok");
+    this._status(_sx("Card updated"), "ok");
   }
 
   async _editRawCard(room, tile) {
@@ -14180,14 +14403,14 @@ class HemmaPanel extends HTMLElement {
       }
     }
     const got = await this._ask({
-      title: "Edit card",
-      message: "The card as Hemma stores it. What you set in Hemma, the size and "
-        + "where it shows, is kept for you and is not written here.",
+      title: _sx("Edit card"),
+      message: _sx("The card as Hemma stores it. What you set in Hemma, the size and "
+        + "where it shows, is kept for you and is not written here."),
       value: cardToText(shown),
       multiline: true,
       wide: true,
       rows: 12,
-      confirmLabel: "Save",
+      confirmLabel: _sx("Save"),
       validate: (v) => { try { parseCardText(v); return ""; } catch (e) { return e.message; } },
     });
     if (!got) return;
@@ -14203,7 +14426,7 @@ class HemmaPanel extends HTMLElement {
     }
     this._markDirty();
     this._renderForm();
-    this._status("Card updated", "ok");
+    this._status(_sx("Card updated"), "ok");
   }
 
   // A pasted template is stored on the dashboard, not in Hemma's own folder, so
@@ -14217,11 +14440,11 @@ class HemmaPanel extends HTMLElement {
     syncUserTileTypes(s.templates, (s.compact || {}).rooms, [read.name],
       (s.extras || {})[FINGERPRINT_KEY]);
     const type = USER_TILE_TYPES.find((t) => t.template === read.name);
-    if (!type) return this._status("Could not read \u201c" + read.name + "\u201d.", "err");
+    if (!type) return this._status(_sx("Could not read \u201c{name}\u201d.", { name: read.name }), "err");
     room.tiles.push(newTile(type));
     this._markDirty();
     this._renderForm();
-    this._status("Added \u201c" + type.label + "\u201d to the tile picker", "ok");
+    this._status(_sx("Added \u201c{name}\u201d to the tile picker", { name: type.label }), "ok");
     requestAnimationFrame(() => {
       const tiles = this.shadowRoot.querySelectorAll(".tilegrid .tile");
       const el = tiles[tiles.length - 1];
@@ -14240,20 +14463,20 @@ class HemmaPanel extends HTMLElement {
 
     const hint = document.createElement("div");
     hint.className = "shothint";
-    hint.textContent = "Choose a photo, or drop one onto a slot.";
+    hint.textContent = _sx("Choose a photo, or drop one onto a slot.");
     fs.appendChild(hint);
 
     const preview = () => {
       const chosen = (this._imgs || []).find((i) => i.name === room.variables.image);
       shots.innerHTML = "";
-      [["Day", "day", chosen && chosen.day], ["Night", "night", chosen && chosen.night]]
+      [[_sx("Day"), "day", chosen && chosen.day], [_sx("Night"), "night", chosen && chosen.night]]
         .forEach(([label, variant, url]) => {
           const w = document.createElement("button");
           w.type = "button";
           w.className = "shot" + (url ? "" : " empty");
           w.innerHTML = (url ? `<img src="${url}" alt="">` : "")
             + '<span class="shotover"><span class="shotglyph"></span>'
-            + (url ? "Replace" : "Add " + label.toLowerCase()) + "</span>"
+            + (url ? _sx("Replace") : _sx("Add {name}", { name: label.toLowerCase() })) + "</span>"
             + `<span class="cap">${label}</span>`;
           w.onclick = () => this._pickFor(variant);
           w.ondragover = (ev) => { ev.preventDefault(); w.classList.add("over"); };
@@ -14278,13 +14501,13 @@ class HemmaPanel extends HTMLElement {
       const list = this._imgs || [];
       const names = list.map((i) => i.name);
       const labels = {};
-      list.forEach((i) => { labels[i.name] = i.name + (i.night ? "" : "   no night image"); });
+      list.forEach((i) => { labels[i.name] = i.name + (i.night ? "" : "   " + _sx("no night image")); });
 
       const cur = room.variables.image || "";
       if (cur && !names.includes(cur)) {
         names.unshift(cur);
         // Only call it missing once what is on disk is known.
-        labels[cur] = cur + (this._imgsLoaded ? "   not on disk" : "");
+        labels[cur] = cur + (this._imgsLoaded ? "   " + _sx("not on disk") : "");
       }
 
       sel.innerHTML = "";
@@ -14304,10 +14527,10 @@ class HemmaPanel extends HTMLElement {
 
     const send = async (blob, variantValue) => {
       const name = await this._ask({
-        title: "Image name",
-        message: "Lowercase letters, digits and hyphens. Uploading the same name replaces it.",
+        title: _sx("Image name"),
+        message: _sx("Lowercase letters, digits and hyphens. Uploading the same name replaces it."),
         value: room.variables.image || slug(room.name),
-        confirmLabel: "Upload",
+        confirmLabel: _sx("Upload"),
       });
       if (!name) return;
       const body = new FormData();
@@ -14315,7 +14538,7 @@ class HemmaPanel extends HTMLElement {
       body.append("variant", variantValue);
       body.append("file", blob);
       shots.classList.add("busy");
-      this._status("uploading\u2026");
+      this._status(_sx("uploading\u2026"));
       try {
         const res = this._hass.fetchWithAuth
           ? await this._hass.fetchWithAuth("/api/hemma/images", { method: "POST", body })
@@ -14324,12 +14547,12 @@ class HemmaPanel extends HTMLElement {
         if (!res.ok) throw new Error(data.message || res.status);
         this._imgs = data.images || [];
         room.variables.image = name;
-        this._status(`uploaded ${name} (${variantValue})`, "ok");
+        this._status(_sx("uploaded {name} ({variant})", { name, variant: variantValue }), "ok");
         this._log(`uploaded ${name} ${variantValue}`, "ok");
         fill();
         this._setBackdrop();
       } catch (e) {
-        this._status("upload failed: " + e.message, "err");
+        this._status(_sx("upload failed: {error}", { error: e.message }), "err");
         this._log("upload failed: " + e.message, "err");
       }
       shots.classList.remove("busy");
@@ -14347,7 +14570,7 @@ class HemmaPanel extends HTMLElement {
       .then(() => { fill(); this._setBackdrop(); })
       .catch((e) => {
         this._log("could not list images: " + e.message, "warn");
-        this._status("Image list unavailable. Restart Home Assistant to load the Hemma image endpoint.", "warn");
+        this._status(_sx("Image list unavailable. Restart Home Assistant to load the Hemma image endpoint."), "warn");
       });
   }
 
@@ -14521,7 +14744,7 @@ class HemmaPanel extends HTMLElement {
     if (!items.length) {
       const e = document.createElement("div");
       e.className = "mini-sceneempty";
-      e.textContent = "No scenes";
+      e.textContent = _sx("No scenes");
       menu.appendChild(e);
     }
     items.forEach((it) => {
@@ -14562,7 +14785,7 @@ class HemmaPanel extends HTMLElement {
       EUR: "\u20AC", GBP: "\u00A3", JPY: "\u00A5", CNY: "\u00A5",
       SEK: "kr", NOK: "kr", DKK: "kr", CHF: "Fr", INR: "\u20B9",
       BRL: "R$", PLN: "z\u0142", KRW: "\u20A9" }[CUR] || "$";
-    const money = (n) => SYM + (n >= 100 ? Math.round(n) : n.toFixed(2));
+    const money = (n) => _studioMoney(n, CUR);
     const resolveUnit = (u, e) => {
       u = String(u || "auto").toLowerCase();
       if (u === "energy") return "kwh";
@@ -14613,10 +14836,10 @@ class HemmaPanel extends HTMLElement {
       const tempWord = (v) => {
         const c = V.temp_unit === "C";
         const k = c ? [18, 21, 24, 27, 29] : [65, 70, 76, 81, 85];
-        return v <= k[0] ? "Very Cold" : v <= k[1] ? "Cool" : v <= k[2] ? "Comfortable"
-          : v <= k[3] ? "Warm" : v <= k[4] ? "Hot" : "Very Hot";
+        return v <= k[0] ? _studioT("temp.very_cold", "Very Cold") : v <= k[1] ? _studioT("temp.cool", "Cool") : v <= k[2] ? _studioT("temp.comfortable", "Comfortable")
+          : v <= k[3] ? _studioT("temp.warm", "Warm") : v <= k[4] ? _studioT("temp.hot", "Hot") : _studioT("temp.very_hot", "Very Hot");
       };
-      const humWord = (v) => (v <= 29.99 ? "Very Dry" : v >= 61 ? "High" : "Good");
+      const humWord = (v) => (v <= 29.99 ? _studioT("humidity.very_dry", "Very Dry") : v >= 61 ? _studioT("humidity.high", "High") : _studioT("humidity.good", "Good"));
       const tempKeys = () => (V.temp_unit === "C" ? [18, 21, 24, 27, 29] : [65, 70, 76, 81, 85]);
       const tempColor = (v) => {
         const k = tempKeys();
@@ -14648,15 +14871,15 @@ class HemmaPanel extends HTMLElement {
         subs.push({
           icon: n != null ? tempIcon(n) : "temp-medium",
           color: n != null ? tempColor(n) : CLIMATE,
-          label: "Temperature",
+          label: _studioT("temp.title", "Temperature"),
           gauge: n != null ? clamp(unit === "F" ? (n - 45) / 50 : (n - 7) / 28) : null,
-          text: n != null ? tempWord(n) + " \u00b7 " + Math.round(n) + unit : "Unknown" });
+          text: n != null ? tempWord(n) + " \u00b7 " + Math.round(n) + unit : _studioL("state.default.unknown", "Unknown") });
       }
       if (V.humidity_sensor) {
         subs.push({ icon: "humidity", color: h != null ? humColor(h) : CLIMATE,
-          label: "Humidity",
+          label: _studioT("humidity.title", "Humidity"),
           gauge: h != null ? clamp(h / 100) : null,
-          text: h != null ? humWord(h) + " \u00b7 " + Math.round(h) + "%" : "Unknown" });
+          text: h != null ? humWord(h) + " \u00b7 " + Math.round(h) + "%" : _studioL("state.default.unknown", "Unknown") });
       }
       if (V.quality_sensor) {
         const raw = String((st(V.quality_sensor) || {}).state || "Unknown");
@@ -14665,9 +14888,11 @@ class HemmaPanel extends HTMLElement {
           poor: 0.3, bad: 0.15, "very bad": 0.15, "very poor": 0.15 };
         subs.push({
           icon: ["poor", "bad", "very bad"].includes(low) ? "aqi-high" : "aqi-medium",
-          color: aqiColor(raw), label: "Air Quality",
+          color: aqiColor(raw), label: _studioT("air_quality.title", "Air Quality"),
           gauge: AQI_GAUGE[low] != null ? AQI_GAUGE[low] : 0.5,
-          text: raw.charAt(0).toUpperCase() + raw.slice(1) });
+          text: (this._hass && typeof this._hass.formatEntityState === "function" && st(V.quality_sensor)
+            ? this._hass.formatEntityState(st(V.quality_sensor)) : "")
+            || (st(V.quality_sensor) ? raw.charAt(0).toUpperCase() + raw.slice(1) : _studioL("state.default.unknown", "Unknown")) });
       }
       // An en dash, and a single reading still prints as a plain temperature.
       const readings = temps.map(num).filter((n) => n != null).map(Math.round);
@@ -14689,7 +14914,7 @@ class HemmaPanel extends HTMLElement {
           return !["off", "unavailable", "unknown"].includes(s.state);
         });
         out.push({
-          id: "climate", label: "Climate", icon: "mdi-fan", color: CLIMATE, subs,
+          id: "climate", label: _studioT("filter.climate", "Climate"), icon: "mdi-fan", color: CLIMATE, subs,
           spin: hvacOn,
           text: span || (t != null ? Math.round(t) + unit : null)
             || (h != null ? Math.round(h) + "%" : null) || "\u2014",
@@ -14703,17 +14928,19 @@ class HemmaPanel extends HTMLElement {
     const lights = listed.length ? listed
       : (Array.isArray(members) && members.length ? members.filter(Boolean) : (grp ? [grp] : []));
     if (on("show_lights") && (grp || listed.length)) {
-      const lit = lights.filter((e) => (st(e) || {}).state === "on").length;
+      const seenL = new Set();
+      const units = [...new Set((listed.length ? listed : [grp]).flatMap((e) => lightUnits(this._hass.states, e, seenL)))];
+      const lit = units.filter((e) => (st(e) || {}).state === "on").length;
       out.push({
-        id: "lights", label: "Lights", icon: "light", color: LIGHT, dim: !lit,
-        text: lit ? lit + " On" : "All Off",
+        id: "lights", label: _studioT("filter.lights", "Lights"), icon: "light", color: LIGHT, dim: !lit,
+        text: lit === 0 ? _studioT("lights.all_off", "All Off") : lit === units.length ? _studioT("lights.all_on", "All On") : _studioT("lights.n_on", "{n} On", { n: lit }),
         subs: lights.map((e) => {
           const l = st(e) || {};
           const br = l.attributes && l.attributes.brightness;
           return {
             icon: "light", color: LIGHT, dim: l.state !== "on", label: groupAwareName(e),
-            text: l.state !== "on" ? "Off"
-              : (br != null ? Math.round((br / 255) * 100) + "%" : "On"),
+            text: l.state !== "on" ? _studioL("component.light.entity_component._.state.off", "Off")
+              : (br != null ? Math.round((br / 255) * 100) + "%" : _studioL("component.light.entity_component._.state.on", "On")),
           };
         }),
       });
@@ -14723,16 +14950,16 @@ class HemmaPanel extends HTMLElement {
     if (on("show_people") && people.length) {
       const home = people.filter((e) => /^(home|on)$/i.test((st(e) || {}).state || "")).length;
       out.push({
-        id: "people", label: "People", icon: "person",
+        id: "people", label: _studioT("presence.group.title", "People"), icon: "person",
         color: home === people.length ? GREEN : (home === 0 ? "rgba(255,255,255,0.55)" : YELLOW),
-        text: home === people.length ? "All Home"
-          : (people.length - home) + " Away",
+        text: home === people.length ? _studioT("presence.all_home", "All Home")
+          : _studioT("presence.n_away", "{n} Away", { n: people.length - home }),
         subs: people.map((e) => {
           const p = st(e) || {};
           const away = !/^(home|on)$/i.test(p.state || "");
           return {
             icon: "person", color: away ? YELLOW : GREEN, dim: away, label: nameOf(e),
-            text: away ? "Away" : "Home",
+            text: away ? _studioL("component.person.entity_component._.state.not_home", "Away") : _studioL("component.person.entity_component._.state.home", "Home"),
             pic: (p.attributes && p.attributes.entity_picture) || null,
           };
         }),
@@ -14744,19 +14971,18 @@ class HemmaPanel extends HTMLElement {
       .concat([V.security_lock_entity, V.security_lock_entity_2]).filter(Boolean);
     const cams = (Array.isArray(V.security_cameras) ? V.security_cameras : []).filter(Boolean);
     if (on("show_security") && (secEntities.length || locks.length || cams.length)) {
-      const all = locks.concat(secEntities);
-      const open = all.filter((e) => /^(unlocked|on|open)$/i.test((st(e) || {}).state || "")).length;
+      const open = locks.filter((e) => String((st(e) || {}).state || "").toLowerCase() !== "locked").length;
       out.push({
-        id: "security", label: "Security", icon: open ? "lock-open-fill" : "lock-fill", color: TEAL,
-        text: open ? open + " Open" : "No Alerts",
+        id: "security", label: _studioT("filter.security", "Security"), icon: open ? "lock-open-fill" : "lock-fill", color: TEAL,
+        text: open ? _studioT("locks.n_unlocked", "{n} Unlocked", { n: open }) : _studioT("security.no_alerts", "No Alerts"),
         subs: [].concat(
           locks.length ? [(() => {
             const unl = locks.filter((e) =>
               String((st(e) || {}).state || "").toLowerCase() !== "locked").length;
             return {
               icon: unl ? "lock-open-fill" : "lock-fill", color: TEAL,
-              label: V.security_locks_label || "Doors",
-              text: unl ? unl + " Unlocked" : (locks.length === 1 ? "Locked" : "All Locked"),
+              label: V.security_locks_label || _studioT("locks.title", "Doors"),
+              text: unl ? _studioT("locks.n_unlocked", "{n} Unlocked", { n: unl }) : (locks.length === 1 ? _studioT("locks.locked", "Locked") : _studioT("locks.all_locked", "All Locked")),
             };
           })()] : [],
           cams.length ? [(() => {
@@ -14764,9 +14990,9 @@ class HemmaPanel extends HTMLElement {
               /^(unavailable|unknown|)$/i.test((st(e) || {}).state || "")).length;
             return {
               icon: "doorbell", color: TEAL,
-              label: V.security_cameras_label || "Cameras",
-              text: dead === cams.length ? (cams.length === 1 ? "Offline" : "All Offline")
-                : dead ? dead + " Offline" : "No Alerts",
+              label: V.security_cameras_label || _studioT("cameras.title", "Cameras"),
+              text: dead === cams.length ? (cams.length === 1 ? _studioT("cameras.offline", "Offline") : _studioT("cameras.all_offline", "All Offline"))
+                : dead ? _studioT("cameras.n_offline", "{n} Offline", { n: dead }) : _studioT("cameras.no_alerts", "No Alerts"),
             };
           })()] : [],
           secEntities.map((e, i) => {
@@ -14774,7 +15000,7 @@ class HemmaPanel extends HTMLElement {
             return {
               icon: isOpen ? "lock-open-fill" : "lock-fill", color: TEAL, dim: !isOpen,
               label: V["security_label_" + (i + 1)] || nameOf(e),
-              text: isOpen ? "Unlocked" : "Locked",
+              text: isOpen ? _studioL("component.lock.entity_component._.state.unlocked", "Unlocked") : _studioL("component.lock.entity_component._.state.locked", "Locked"),
             };
           })
         ),
@@ -14789,12 +15015,12 @@ class HemmaPanel extends HTMLElement {
     if (energyOn) {
       const items = list("energy_entity_", 6);
       const headline = watts == null ? ""
-        : watts >= Number(V.extreme_threshold ?? 3000) ? "Extreme Usage"
-        : watts >= Number(V.heavy_threshold ?? 1000) ? "Heavy Usage"
-        : watts >= Number(V.normal_threshold ?? 200) ? "Normal"
-        : "Idle";
+        : watts >= Number(V.extreme_threshold ?? 3000) ? _studioT("energy.extreme_usage", "Extreme Usage")
+        : watts >= Number(V.heavy_threshold ?? 1000) ? _studioT("energy.heavy_usage", "Heavy Usage")
+        : watts >= Number(V.normal_threshold ?? 200) ? _studioT("energy.normal", "Normal")
+        : _studioT("energy.idle", "Idle");
       out.push({
-        id: "energy", label: "Energy", icon: "energy", color: ENERGY,
+        id: "energy", label: _studioT("filter.energy", "Energy"), icon: "energy", color: ENERGY,
         text: headline,
         subs: items.map((e, i) => {
           const ent = st(e);
@@ -14802,9 +15028,9 @@ class HemmaPanel extends HTMLElement {
           const unit = resolveUnit(V["energy_unit_" + (i + 1)], ent);
           let text = "";
           if (Number.isFinite(raw)) {
-            if (unit === "kwh") text = (raw >= 10 ? Math.round(raw) : raw.toFixed(1)) + " kWh";
+            if (unit === "kwh") text = (raw >= 10 ? _studioNum(Math.round(raw), 0, 0) : _studioNum(raw, 1, 1)) + " kWh";
             else if (unit === "cost") text = money(raw);
-            else text = raw >= 1000 ? (raw / 1000).toFixed(1) + " kW" : Math.round(raw) + " W";
+            else text = raw >= 1000 ? _studioNum(raw / 1000, 1, 1) + " kW" : _studioNum(Math.round(raw), 0, 0) + " W";
           }
           const cid = V["energy_cost_" + (i + 1)];
           const c = cid ? parseFloat((st(cid) || {}).state) : NaN;
@@ -14845,15 +15071,15 @@ class HemmaPanel extends HTMLElement {
         return x && x.state === "playing";
       }).length;
       out.push({
-        id: "media", label: "Media", icon: "media", color: "var(--ink)", dim: !live, clip: true,
-        text: playing === 0 ? "None Playing"
-          : playing === 1 ? "1 Playing" : playing + " Playing",
+        id: "media", label: _studioT("media.title", "Media"), icon: "media", color: "var(--ink)", dim: !live, clip: true,
+        text: playing === 0 ? _studioT("media.none_playing", "None Playing")
+          : playing === 1 ? _studioT("media.one_playing", "1 Playing") : _studioT("media.n_playing", "{n} Playing", { n: playing }),
         subs: players.filter((e) => mediaLive(st(e))).map((e) => {
           const s = st(e);
           const playing = s && s.state === "playing";
           return {
             icon: "media", color: "var(--ink)", dim: !playing, clip: true, label: nameOf(e),
-            text: playing ? (s.attributes.media_title || "Playing") : "Idle",
+            text: playing ? (s.attributes.media_title || _studioL("component.media_player.entity_component._.state.playing", "Playing")) : _studioL("component.media_player.entity_component._.state.idle", "Idle"),
             pic: playing ? artOf(s) : null, art: true,
           };
         }),
@@ -15279,7 +15505,7 @@ class HemmaPanel extends HTMLElement {
     }
 
     if (String(this._phoneFilter || "").indexOf("room:") === 0
-      && !(st.compact.rooms || []).some((sc) => sc.name && sc.name !== MOBILE_FAVORITES
+      && !(st.compact.rooms || []).some((sc) => sc.name && !isFav(sc)
         && "room:" + sc.name === this._phoneFilter)) {
       this._phoneFilter = null;
     }
@@ -15314,7 +15540,7 @@ class HemmaPanel extends HTMLElement {
     if (this._phoneFilter) {
       const back = document.createElement("div");
       back.className = "mp-back";
-      back.title = "Back";
+      back.title = _sx("Back");
       back.innerHTML = '<svg width="14" height="24" viewBox="0 0 14 24" fill="none">'
         + '<path d="M12 2.5 L2.8 12 L12 21.5" stroke="#fff" stroke-width="3"'
         + ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -15389,7 +15615,7 @@ class HemmaPanel extends HTMLElement {
     const h1 = document.createElement("span");
     h1.className = "mp-name";
     h1.textContent = (this._pair && ((this._pair.desktop.compact.rooms
-      .find((r) => r.path === "home") || {}).name)) || "Home";
+      .find((r) => r.path === "home") || {}).name)) || _sx("Home");
     trow.appendChild(h1);
 
     const wtemp = went && this._hass.states[wv.weather_temp_sensor];
@@ -15439,7 +15665,7 @@ class HemmaPanel extends HTMLElement {
     model.forEach((b) => {
       const el = this._paintBadge(b, false);
       el.classList.toggle("open", this._phoneFilter === b.id);
-      el.title = "Filter the dashboard to " + (b.label || b.id);
+      el.title = _sx("Filter the dashboard to {name}", { name: b.label || b.id });
       el.onclick = (ev) => {
         ev.stopPropagation();
         this._phoneFilter = this._phoneFilter === b.id ? null : b.id;
@@ -15456,7 +15682,7 @@ class HemmaPanel extends HTMLElement {
     if (this._phoneFilter) {
       // Scenes is not one of the badges, so it names itself.
       if (roomPop) h1.textContent = roomPop;
-      else if (this._phoneFilter === "scenes") h1.textContent = "Scenes";
+      else if (this._phoneFilter === "scenes") h1.textContent = _studioT("nav.scenes", "Scenes");
       else {
         const on = model.find((b) => b.id === this._phoneFilter);
         if (on && on.label) h1.textContent = on.label;
@@ -15522,7 +15748,7 @@ class HemmaPanel extends HTMLElement {
         nphead.className = "mp-head";
         nphead.dataset.jump = "Now Playing";
         const nt = document.createElement("span");
-        nt.textContent = "Now Playing";
+        nt.textContent = _studioT("now_playing.title", "Now Playing");
         nphead.appendChild(nt);
         body.appendChild(nphead);
 
@@ -15595,7 +15821,7 @@ class HemmaPanel extends HTMLElement {
         const shead = document.createElement("div");
         shead.className = "mp-head tappable";
         shead.dataset.jump = "Scenes";
-        shead.title = "Open the Scenes page";
+        shead.title = _sx("Open the Scenes page");
         shead.onclick = (ev) => {
           ev.stopPropagation();
           this._phoneFilter = "scenes";
@@ -15603,7 +15829,7 @@ class HemmaPanel extends HTMLElement {
           this._rebuildPreview();
         };
         const st2 = document.createElement("span");
-        st2.textContent = "Scenes";
+        st2.textContent = _studioT("nav.scenes", "Scenes");
         shead.appendChild(st2);
         const chev = document.createElement("span");
         chev.className = "mp-chev";
@@ -15663,7 +15889,7 @@ class HemmaPanel extends HTMLElement {
         } else {
           // Phone-only, so there is nothing in the form to open.
           delete el.dataset.mk;
-          el.title = "This tile is on the phone layout only";
+          el.title = _sx("This tile is on the phone layout only");
         }
         return el;
       });
@@ -15717,14 +15943,16 @@ class HemmaPanel extends HTMLElement {
         const mems = ((S[e.lights_entity] || {}).attributes || {}).entity_id;
         const eids = Array.isArray(mems) && mems.length ? mems : [e.lights_entity];
         const n = eids.filter((id) => (S[id] || {}).state === "on").length;
-        bareChip({ icon: "light", label: "Lights", glyphHeight: "90%",
+        bareChip({ icon: "light", label: _studioT("filter.lights", "Lights"), glyphHeight: "90%",
           color: n ? lit.color : "var(--badge-title-inactive, rgba(255,255,255,0.55))",
-          text: n === 0 ? "All Off" : n === eids.length ? "All On" : n + " On" }, "b:lights");
+          text: n === 0 ? _studioT("lights.all_off", "All Off") : n === eids.length ? _studioT("lights.all_on", "All On") : _studioT("lights.n_on", "{n} On", { n }) }, "b:lights");
       }
       if (e.motion_entity) {
         const ms = (this._hass.states[e.motion_entity] || {}).state;
-        bareChip({ icon: "motion", label: "Motion", glyphHeight: "70%", color: "#fff",
-          text: ms === "on" ? "Detected" : ms === "off" ? "Not Detected" : "Unavailable" }, null);
+        bareChip({ icon: "motion", label: _studioT("motion.title", "Motion"), glyphHeight: "70%", color: "#fff",
+          text: ms === "on" ? _studioL("component.binary_sensor.entity_component._.state.on", "Detected")
+            : ms === "off" ? _studioL("component.binary_sensor.entity_component._.state.off", "Not Detected")
+            : _studioL("state.default.unavailable", "Unavailable") }, null);
       }
       if (crow.children.length) body.appendChild(crow);
 
@@ -15736,7 +15964,7 @@ class HemmaPanel extends HTMLElement {
         const shead = document.createElement("div");
         shead.className = "mp-head";
         shead.dataset.jump = "Scenes";
-        shead.appendChild(Object.assign(document.createElement("span"), { textContent: "Scenes" }));
+        shead.appendChild(Object.assign(document.createElement("span"), { textContent: _studioT("nav.scenes", "Scenes") }));
         sgroup.appendChild(shead);
         const srow = document.createElement("div");
         srow.className = "mp-scenes";
@@ -15783,7 +16011,7 @@ class HemmaPanel extends HTMLElement {
       const ht = document.createElement("span");
       ht.textContent = sec.name || "";
       head.appendChild(ht);
-      if ((sec.name || "") !== MOBILE_FAVORITES) {
+      if (!isFav(sec)) {
         if (!this._phoneFilter) {
           const chev = document.createElement("span");
           chev.className = "mp-chev";
@@ -15791,7 +16019,7 @@ class HemmaPanel extends HTMLElement {
           head.appendChild(chev);
         }
         head.classList.add("tappable");
-        head.title = "Open the " + sec.name + " popup";
+        head.title = _sx("Open the {name} popup", { name: sec.name });
         head.onclick = (ev) => {
           ev.stopPropagation();
           this._phoneFilter = "room:" + sec.name;
@@ -16243,7 +16471,7 @@ class HemmaPanel extends HTMLElement {
           el.querySelector(".mtop").appendChild(more);
         }
       }
-      el.querySelector(".mname").textContent = tile.name || (type && type.label) || "Tile";
+      el.querySelector(".mname").textContent = tile.name || (type && _sx(type.label)) || _sx("Tile");
       el.querySelector(".mstate").textContent =
         tileStateWord(kind, tile, ent, this._hass.states, this._hass);
       const ring = tileProgressOn(tile, ent);
@@ -16288,8 +16516,8 @@ class HemmaPanel extends HTMLElement {
         el.querySelector(".mtop").appendChild(sw);
       }
       el.title = this._smartSortOn()
-        ? "Smart Sort is on - reorder in the Tiles list"
-        : "Drag to reorder";
+        ? _sx("Smart Sort is on - reorder in the Tiles list")
+        : _sx("Drag to reorder");
       el.onpointerdown = (ev) => {
         if (ev.button) return;
         if (ev.pointerType === "touch" && isPhone(this)) return;
@@ -16435,8 +16663,8 @@ class HemmaPanel extends HTMLElement {
             <div class="mini-nptile noctl" data-mk="npt">
               <span class="mini-npart"></span>
               <span class="mini-nptext">
-                <span class="mini-nptitle">Nothing playing</span>
-                <span class="mini-npsub">Media shows here</span>
+                <span class="mini-nptitle">${_sx("Nothing playing")}</span>
+                <span class="mini-npsub">${_sx("Media shows here")}</span>
               </span>
             </div>
           </div>
@@ -16457,7 +16685,7 @@ class HemmaPanel extends HTMLElement {
     const d = new Date();
     let hh = d.getHours();
     const use12 = V.use_12h !== false;
-    const suffix = use12 ? (hh < 12 ? " AM" : " PM") : "";
+    const suffix = use12 ? " " + (hh < 12 ? _studioT("time.am", "AM") : _studioT("time.pm", "PM")) : "";
     if (use12) hh = hh % 12 || 12;
     const extra = String(V.time_suffix || "").trim();
     q(".mini-time").textContent = hh + ":" + String(d.getMinutes()).padStart(2, "0")
@@ -16467,7 +16695,7 @@ class HemmaPanel extends HTMLElement {
       const t = document.createElement("span");
       t.className = "mini-tab" + (r === room ? " on" : "");
       t.textContent = r.name || r.path;
-      t.title = r === room ? "" : "Go to " + (r.name || r.path);
+      t.title = r === room ? "" : _sx("Go to {name}", { name: r.name || r.path });
       if (r !== room) {
         t.onclick = (ev) => {
           ev.stopPropagation();
@@ -16482,8 +16710,8 @@ class HemmaPanel extends HTMLElement {
       const t = document.createElement("span");
       t.className = "mini-tab scenes";
       t.dataset.mk = "sc";
-      t.textContent = "Scenes";
-      t.title = "The scenes this dashboard will list";
+      t.textContent = _studioT("nav.scenes", "Scenes");
+      t.title = _sx("The scenes this dashboard will list");
       t.onclick = (ev) => {
         ev.stopPropagation();
         const open = this.shadowRoot.querySelector(".mini-scenemenu");
@@ -16515,7 +16743,7 @@ class HemmaPanel extends HTMLElement {
       if (min) q(".mini-nptile").remove();
       else this._paintNpStack(q(".mz-np"), V);
       q(".mini-wave").classList.toggle("on", !min);
-      head.title = "Show or hide the players, as the waveform does on the dashboard";
+      head.title = _sx("Show or hide the players, as the waveform does on the dashboard");
       head.onclick = (ev) => {
         ev.stopPropagation();
         this._npMin = !this._npMin;
@@ -16544,7 +16772,7 @@ class HemmaPanel extends HTMLElement {
       g.src = file ? "/local/hemma/weather/" + file + ".svg" : iconUrl("weather");
       wx.appendChild(g);
     }
-    q(".mini-name").textContent = room.name || room.path || "Room";
+    q(".mini-name").textContent = room.name || room.path || _sx("Room");
 
     // Badges, and the sub-badge row a tap reveals.
     const model = this._miniModel(room);
@@ -16582,7 +16810,7 @@ class HemmaPanel extends HTMLElement {
           icon: sec.icon, color: sec.iconColor || "var(--ink)", subs: [] }, false);
         el.classList.add("ghost");
         delete el.dataset.mk;
-        el.title = "Add " + sec.label + " to this room";
+        el.title = _sx("Add {name} to this room", { name: _sx(sec.label) });
         el.onclick = (ev) => {
           ev.stopPropagation();
           this._select({ group: "badges", key: sec.label, label: sec.label });
@@ -16600,7 +16828,7 @@ class HemmaPanel extends HTMLElement {
     model.forEach((b) => {
       const el = pill(b, false);
       el.classList.toggle("open", this._miniOpen === b.id);
-      el.title = b.subs.length ? "Show what this pill expands to" : "No sub-badges yet";
+      el.title = b.subs.length ? _sx("Show what this pill expands to") : _sx("No sub-badges yet");
       el.onclick = (ev) => {
         ev.stopPropagation();
         this._miniOpen = this._miniOpen === b.id ? null : b.id;
@@ -16622,8 +16850,8 @@ class HemmaPanel extends HTMLElement {
         const slot = document.createElement("div");
         slot.className = "mtile ghost" + (i ? " faint" : "");
         if (!i) {
-          slot.innerHTML = '<span class="gplus">+</span><span class="gcap">Add a tile</span>';
-          slot.title = "Add a tile to this room";
+          slot.innerHTML = '<span class="gplus">+</span><span class="gcap">' + _sx("Add a tile") + "</span>";
+          slot.title = _sx("Add a tile to this room");
         }
         slot.onclick = (ev) => {
           ev.stopPropagation();
@@ -16826,7 +17054,7 @@ class HemmaPanel extends HTMLElement {
     const head = document.createElement("div");
     head.className = "schead";
     const lab = document.createElement("label");
-    lab.textContent = "Scene Order";
+    lab.textContent = _sx("Scene Order");
     head.appendChild(lab);
     if (hidden.length) {
       const cnt = document.createElement("span");
@@ -16847,10 +17075,10 @@ class HemmaPanel extends HTMLElement {
     add.className = "scadd";
     add.innerHTML = '<span class="scadddot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
       + ' stroke-width="2.4" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></svg></span>'
-      + '<span class="scaddname">Add Scene</span>';
+      + '<span class="scaddname">' + _sx("Add Scene") + "</span>";
     add.onclick = () => {
-      const items = hidden.map((sc) => ({ id: sc.id, label: sc.label, haIcon: sc.icon, group: "Hidden" }));
-      items.push({ id: "\u0000new", label: "New Scene in Home Assistant", icon: "open", group: "new", quiet: true });
+      const items = hidden.map((sc) => ({ id: sc.id, label: sc.label, haIcon: sc.icon, group: _sx("Hidden") }));
+      items.push({ id: "\u0000new", label: _sx("New Scene in Home Assistant"), icon: "open", group: "new", quiet: true });
       this._menuAt(add, items, (id) => {
         if (id === "\u0000new") { this._newScene(); return; }
         settle(custom ? visibleIds().concat([id]) : undefined, hiddenIds().filter((h) => h !== id));
@@ -16859,7 +17087,7 @@ class HemmaPanel extends HTMLElement {
     wrap.appendChild(add);
     const paintEdit = () => {
       const on = !!this._editScenes;
-      edit.textContent = on ? "Done" : "Edit";
+      edit.textContent = on ? _sx("Done") : _sx("Edit");
       edit.setAttribute("aria-pressed", on ? "true" : "false");
       wrap.classList.toggle("editing", on);
     };
@@ -16925,12 +17153,12 @@ class HemmaPanel extends HTMLElement {
       row.className = "scenecolor" + (shown ? "" : " hid");
       row.dataset.id = sc.id;
       if (shown) {
-        const minus = glyphBtn("scminus", "Hide " + sc.label, '<path d="M7 12h10"/>');
+        const minus = glyphBtn("scminus", _sx("Hide {name}", { name: sc.label }), '<path d="M7 12h10"/>');
         minus.onclick = () => settle(custom ? visibleIds().filter((id) => id !== sc.id) : undefined,
           hiddenIds().concat([sc.id]));
         row.appendChild(minus);
       } else {
-        const plus = glyphBtn("scplus", "Show " + sc.label, '<path d="M12 7v10M7 12h10"/>');
+        const plus = glyphBtn("scplus", _sx("Show {name}", { name: sc.label }), '<path d="M12 7v10M7 12h10"/>');
         plus.onclick = () => settle(custom ? visibleIds().concat([sc.id]) : undefined,
           hiddenIds().filter((id) => id !== sc.id));
         row.appendChild(plus);
@@ -16959,19 +17187,19 @@ class HemmaPanel extends HTMLElement {
         dot.style.background = swatchOf(cv || ACCENT) || "";
         ic.style.color = "#fff";
         sw.style.background = swatchOf(cv || ACCENT) || "transparent";
-        val.textContent = cv ? colorLabel(cv) : "Yellow";
+        val.textContent = cv ? colorLabel(cv) : _sx("Yellow");
         val.classList.toggle("dim", !cv);
       };
       paint();
       const pick = document.createElement("button");
       pick.type = "button";
       pick.className = "scpick";
-      pick.setAttribute("aria-label", sc.label + " color");
+      pick.setAttribute("aria-label", _sx("{name} color", { name: sc.label }));
       pick.appendChild(val);
       pick.appendChild(sw);
       pick.onclick = () => {
         const cur = map()[sc.id] || "";
-        const items = [{ id: "", label: "Yellow (default)", checked: !cur }];
+        const items = [{ id: "", label: _sx("Yellow (default)"), checked: !cur }];
         HEMMA_ACCENTS.forEach((acc) => items.push({
           id: acc.id, label: acc.label, swatch: acc.hex, checked: cur === acc.id,
         }));
@@ -16989,7 +17217,7 @@ class HemmaPanel extends HTMLElement {
         });
       };
       row.appendChild(pick);
-      const grip = glyphBtn("scgrip", "Reorder " + sc.label, '<path d="M5 8h14M5 12h14M5 16h14"/>');
+      const grip = glyphBtn("scgrip", _sx("Reorder {name}", { name: sc.label }), '<path d="M5 8h14M5 12h14M5 16h14"/>');
       grip.onpointerdown = (ev) => drag(ev, row);
       row.appendChild(grip);
       return row;
@@ -17001,7 +17229,7 @@ class HemmaPanel extends HTMLElement {
       hg.className = "schidden";
       const hl = document.createElement("div");
       hl.className = "schidden-head";
-      hl.textContent = "Hidden";
+      hl.textContent = _sx("Hidden");
       hg.appendChild(hl);
       hidden.forEach((sc) => hg.appendChild(makeRow(sc, false)));
       wrap.appendChild(hg);
@@ -17022,10 +17250,10 @@ class HemmaPanel extends HTMLElement {
     }
     const dirty = this._isDirty();
     const ok = await this._ask({
-      title: "Leave Hemma?",
-      message: "Home Assistant's scene editor opens in place of Hemma. Use its back arrow to return here."
-        + (dirty ? " Your changes are saved first." : ""),
-      confirmLabel: dirty ? "Save and Open" : "Open Editor",
+      title: _sx("Leave Hemma?"),
+      message: _sx("Home Assistant's scene editor opens in place of Hemma. Use its back arrow to return here.")
+        + (dirty ? " " + _sx("Your changes are saved first.") : ""),
+      confirmLabel: dirty ? _sx("Save and Open") : _sx("Open Editor"),
     });
     if (!ok || (dirty && !(await this._save()))) return;
     history.pushState(null, "", path);
@@ -17042,14 +17270,14 @@ class HemmaPanel extends HTMLElement {
       bar.className = "badgebar";
       const lab = document.createElement("span");
       lab.className = "bandtog";
-      lab.textContent = "Badge Order";
+      lab.textContent = _sx("Badge Order");
       bar.appendChild(lab);
       const eb = document.createElement("button");
       eb.className = "badgeedit";
       eb.type = "button";
       const paint = () => {
-        eb.textContent = this._editBadges ? "Done" : "Edit";
-        eb.title = this._editBadges ? "Finish editing" : "Reorder badges";
+        eb.textContent = this._editBadges ? _sx("Done") : _sx("Edit");
+        eb.title = this._editBadges ? _sx("Finish editing") : _sx("Reorder badges");
         eb.setAttribute("aria-pressed", this._editBadges ? "true" : "false");
       };
       paint();
@@ -17079,7 +17307,7 @@ class HemmaPanel extends HTMLElement {
       grip.type = "button";
       grip.tabIndex = -1;
       grip.setAttribute("aria-hidden", "true");
-      grip.title = "Drag to reorder";
+      grip.title = _sx("Drag to reorder");
       grip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
         + ' stroke-width="1.8" stroke-linecap="round">'
         + '<path d="M5 6.5h14M5 12h14M5 17.5h14"/></svg>';
@@ -17170,7 +17398,7 @@ class HemmaPanel extends HTMLElement {
     if (!room.tiles.length) {
       const e = document.createElement("div");
       e.className = "hint";
-      e.textContent = "No tiles yet. Add one above.";
+      e.textContent = _sx("No tiles yet. Add one above.");
       grid.appendChild(e);
     }
 
@@ -17185,18 +17413,18 @@ class HemmaPanel extends HTMLElement {
     let pickType = "";
     const typeLabels = { "": "" };
     addable.forEach((t) => {
-      typeLabels[t.id] = t.user ? t.label + "  (yours)" : t.label;
+      typeLabels[t.id] = t.user ? _sx("{name}  (yours)", { name: t.label }) : _sx(t.label);
     });
     const add = document.createElement("button");
     add.className = "plus";
-    add.setAttribute("aria-label", "Add a tile");
+    add.setAttribute("aria-label", _sx("Add a tile"));
     add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
     const syncAdd = () => {
       const ready = !!addable.find((t) => t.id === pickType);
       add.disabled = !ready;
-      add.title = ready ? "Add a tile" : "Choose a tile type first";
+      add.title = ready ? _sx("Add a tile") : _sx("Choose a tile type first");
     };
-    const sel = this._combo(pickType, addable.map((t) => t.id), "Choose type",
+    const sel = this._combo(pickType, addable.map((t) => t.id), _sx("Choose type"),
       (v) => { pickType = v; syncAdd(); }, { fixed: true, labels: typeLabels }).wrap;
     sel.style.width = "190px";
     syncAdd();
@@ -17219,12 +17447,12 @@ class HemmaPanel extends HTMLElement {
     const eb = document.createElement("button");
     eb.type = "button";
     eb.className = "editbtn" + (this._editTiles ? " on" : "");
-    eb.title = this._editTiles ? "Finish editing" : "Remove or reorder tiles";
-    eb.setAttribute("aria-label", this._editTiles ? "Finish editing" : "Edit tiles");
+    eb.title = this._editTiles ? _sx("Finish editing") : _sx("Remove or reorder tiles");
+    eb.setAttribute("aria-label", this._editTiles ? _sx("Finish editing") : _sx("Edit tiles"));
     eb.setAttribute("aria-pressed", this._editTiles ? "true" : "false");
     const ebl = document.createElement("span");
     ebl.className = "lbl";
-    ebl.textContent = "Edit";
+    ebl.textContent = _sx("Edit");
     const ebt = document.createElement("span");
     ebt.className = "tick";
     ebt.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
@@ -17238,8 +17466,8 @@ class HemmaPanel extends HTMLElement {
       grid.classList.toggle("editing", this._editTiles);
       grid.querySelectorAll(".tile.armed").forEach((t) => t.classList.remove("armed"));
       eb.classList.toggle("on", this._editTiles);
-      eb.title = this._editTiles ? "Finish editing" : "Remove or reorder tiles";
-      eb.setAttribute("aria-label", this._editTiles ? "Finish editing" : "Edit tiles");
+      eb.title = this._editTiles ? _sx("Finish editing") : _sx("Remove or reorder tiles");
+      eb.setAttribute("aria-label", this._editTiles ? _sx("Finish editing") : _sx("Edit tiles"));
       eb.setAttribute("aria-pressed", this._editTiles ? "true" : "false");
     };
     bar.appendChild(eb);
@@ -17278,10 +17506,10 @@ class HemmaPanel extends HTMLElement {
       head.className = "thead";
       const title = document.createElement("div");
       title.className = "grow";
-      title.textContent = t.name || "(unnamed)";
+      title.textContent = t.name || _sx("(unnamed)");
       const kind = document.createElement("span");
       kind.className = "kind";
-      kind.textContent = tileLabel(t) + " - failed to load";
+      kind.textContent = _sx("{name} - failed to load", { name: tileLabel(t) });
       title.appendChild(kind);
       head.appendChild(title);
       box.appendChild(head);
@@ -17303,8 +17531,8 @@ class HemmaPanel extends HTMLElement {
     const rm = document.createElement("button");
     rm.type = "button";
     rm.className = "rmbtn";
-    rm.title = "Remove this tile";
-    rm.setAttribute("aria-label", "Remove " + (tile.name || "tile"));
+    rm.title = _sx("Remove this tile");
+    rm.setAttribute("aria-label", tile.name ? _sx("Remove {name}", { name: tile.name }) : _sx("Remove tile"));
     rm.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
       + ' stroke-width="3" stroke-linecap="round"><path d="M6 12h12"/></svg>';
     rm.onpointerdown = (ev) => ev.stopPropagation();
@@ -17334,7 +17562,7 @@ class HemmaPanel extends HTMLElement {
     title.className = "grow";
     const kind = type.raw ? tileLabel(tile).replace(/^custom:/, "")
       : (tile.name && tile.name.trim() ? "" : type.label);
-    title.innerHTML = `${tile.name || "(unnamed)"}${kind ? ` <span class="kind">${kind}</span>` : ""}`;
+    title.innerHTML = `${tile.name || _sx("(unnamed)")}${kind ? ` <span class="kind">${kind}</span>` : ""}`;
     head.appendChild(title);
     const tFoldKey = room.path + "|tile|" + this._tileKey(tile);
     this._folded.add(tFoldKey);
@@ -17346,7 +17574,7 @@ class HemmaPanel extends HTMLElement {
     grip.className = "grip";
     grip.tabIndex = -1;
     grip.setAttribute("aria-hidden", "true");
-    grip.title = "Drag to reorder";
+    grip.title = _sx("Drag to reorder");
     grip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
       + ' stroke-width="1.8" stroke-linecap="round">'
       + '<path d="M5 6.5h14M5 12h14M5 17.5h14"/></svg>';
@@ -17355,13 +17583,13 @@ class HemmaPanel extends HTMLElement {
     const tileOn = (tile.variables || {}).enabled !== false;
     const notes = [];
     if (!tileOn) {
-      notes.push("Off");
+      notes.push(_sx("Off"));
       box.classList.add("off");
     } else {
       const surf = (tile.variables || {}).surfaces;
-      if (surf === "phone") notes.push("Phone only");
-      else if (surf === "desktop") notes.push("Desktop only");
-      if (tileShowWhen(type, tile.variables) === "active") notes.push("Shown when active");
+      if (surf === "phone") notes.push(_sx("Phone only"));
+      else if (surf === "desktop") notes.push(_sx("Desktop only"));
+      if (tileShowWhen(type, tile.variables) === "active") notes.push(_sx("Shown when active"));
     }
     if (notes.length) {
       const c = document.createElement("span");
@@ -17391,23 +17619,23 @@ class HemmaPanel extends HTMLElement {
 
     const dots = document.createElement("button");
     dots.className = "mini icon rowmenu";
-    dots.title = "More";
-    dots.setAttribute("aria-label", "More");
+    dots.title = _sx("More");
+    dots.setAttribute("aria-label", _sx("More"));
     dots.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
     dots.onpointerdown = (ev) => ev.stopPropagation();
     const grp = type && TILE_GROUP[type.id];
     const elsewhere = ((this._state && this._state.compact.rooms) || [])
       .filter((r) => r !== room).length > 0;
     const menu = elsewhere
-      ? [{ id: "move", label: "Move to Room\u2026" },
-         { id: "copy", label: "Copy to Room\u2026" },
-         { id: "remove", label: "Remove tile" }]
-      : [{ id: "remove", label: "Remove tile" }];
+      ? [{ id: "move", label: _sx("Move to Room\u2026") },
+         { id: "copy", label: _sx("Copy to Room\u2026") },
+         { id: "remove", label: _sx("Remove tile") }]
+      : [{ id: "remove", label: _sx("Remove tile") }];
     if (type.raw || type.id === "custom") {
-      menu.unshift({ id: "edit", label: "Edit card\u2026" });
+      menu.unshift({ id: "edit", label: _sx("Edit card\u2026") });
       // A phone view has no slot under the row, so it is not offered one.
       if ((this._state || {}).surface !== "mobile") {
-        menu.splice(1, 0, { id: "down", label: "Move below the tiles" });
+        menu.splice(1, 0, { id: "down", label: _sx("Move below the tiles") });
       }
     }
     dots.onclick = () => this._menuAt(dots, menu, (id) => {
@@ -17419,7 +17647,7 @@ class HemmaPanel extends HTMLElement {
         room._extraCards = (room._extraCards || []).concat([inner]);
         this._markDirty();
         this._renderForm();
-        return this._status("Moved below the tiles", "ok");
+        return this._status(_sx("Moved below the tiles"), "ok");
       }
       if (id === "remove") return removeTile();
       if (id === "move") return this._moveTileMenu(dots, room, tile);
@@ -17537,8 +17765,8 @@ class HemmaPanel extends HTMLElement {
     const del = document.createElement("button");
     del.type = "button";
     del.className = "delbtn";
-    del.textContent = "Delete";
-    del.setAttribute("aria-label", "Delete " + (tile.name || "tile"));
+    del.textContent = _sx("Delete");
+    del.setAttribute("aria-label", tile.name ? _sx("Delete {name}", { name: tile.name }) : _sx("Delete tile"));
     del.onpointerdown = (ev) => ev.stopPropagation();
     del.onclick = (ev) => { ev.stopPropagation(); this._armed = null; removeTile(); };
 
@@ -17553,7 +17781,7 @@ class HemmaPanel extends HTMLElement {
       const r = document.createElement("div");
       r.className = "row";
       const l = document.createElement("label");
-      l.textContent = label;
+      l.textContent = _sx(label);
       r.appendChild(l); r.appendChild(input);
       body.appendChild(r);
       return r;
@@ -17600,14 +17828,14 @@ class HemmaPanel extends HTMLElement {
           tile.variables.enabled = v;
         }
         this._renderForm();
-      }, "Show this tile on the dashboard");
+      }, _sx("Show this tile on the dashboard"));
     head.appendChild(tsw);
 
     const nameIn = document.createElement("input");
     nameIn.value = tile.name || "";
     nameIn.onchange = () => {
       tile.name = nameIn.value.trim();
-      title.firstChild.textContent = (tile.name || "(unnamed)") + " ";
+      title.firstChild.textContent = (tile.name || _sx("(unnamed)")) + " ";
       this._syncPreview();
     };
 
@@ -17617,13 +17845,13 @@ class HemmaPanel extends HTMLElement {
       return (e && e.attributes && e.attributes.friendly_name) || null;
     };
     const entCombo = this._combo(tile.entity || "", this._entityList(type.domains, type.classes),
-      type.entityPlaceholder || type.domains.map((d) => d + ".").join(" / "),
+      _sx(type.entityPlaceholder) || type.domains.map((d) => d + ".").join(" / "),
       (v) => {
         const prev = tile.entity;
         const was = glyphNow();
         tile.entity = v;
         const held = (tile.name || "").trim();
-        if (autoName && (!held || held === type.label || held === friendlyOf(prev)
+        if (autoName && (!held || held === type.label || held === _sx(type.label) || held === friendlyOf(prev)
             || held === this._prettyEntity(prev))) {
           const next = friendlyOf(v) || "";
           if (next) {
@@ -17661,27 +17889,27 @@ class HemmaPanel extends HTMLElement {
         if (rebuild) this._renderForm();
         else this._syncPreview();
       });
-    const entityLabel = isGroup ? grp.noun + " 1" : (type.entityLabel || "Entity");
+    const entityLabel = isGroup ? _sx("{noun} {n}", { noun: _sx(grp.noun), n: 1 }) : (_sx(type.entityLabel) || _sx("Entity"));
     const noEntityRow = !!type.noEntity;
     const entityInDrawer = !noEntityRow && !!type.entityAdvanced && !isGroup;
     if (noEntityRow) {
-      addRow("Name", nameIn);
+      addRow(_sx("Name"), nameIn);
     } else if (!entityInDrawer) {
       if (autoName) {
         addRow(entityLabel, entCombo.wrap);
-        addRow("Name", nameIn);
+        addRow(_sx("Name"), nameIn);
       } else {
-        addRow("Name", nameIn);
+        addRow(_sx("Name"), nameIn);
         addRow(entityLabel, entCombo.wrap);
       }
     } else {
-      addRow("Name", nameIn);
+      addRow(_sx("Name"), nameIn);
     }
 
     // Only a template that reads variables.icon can use one of Hemma's icons.
     // button-card's own icon: key wants an mdi name, so it stays in the YAML.
     if (type.raw && tile.template) {
-      addRow("Icon", this._combo((tile.variables || {}).icon || "",
+      addRow(_sx("Icon"), this._combo((tile.variables || {}).icon || "",
         [ICON_DEFAULT].concat(HEMMA_ICONS), "default",
         (v) => {
           const val = v === ICON_DEFAULT ? "" : v;
@@ -17716,8 +17944,8 @@ class HemmaPanel extends HTMLElement {
       const dropButton = (onclick) => {
         const drop = document.createElement("button");
         drop.className = "drop";
-        drop.title = "Remove";
-        drop.setAttribute("aria-label", "Remove");
+        drop.title = _sx("Remove");
+        drop.setAttribute("aria-label", _sx("Remove"));
         drop.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg>';
         drop.onclick = onclick;
         return drop;
@@ -17802,7 +18030,7 @@ class HemmaPanel extends HTMLElement {
             syncEntity();
             this._renderForm();   // the per-member rows below key off this
           });
-        memberRow(grp.noun + " " + (n + 1), row, dropButton(drop));
+        memberRow(_sx("{noun} {n}", { noun: _sx(grp.noun), n: n + 1 }), row, dropButton(drop));
       });
       if (pending) {
         const row = this._combo("", this._entityList(grp.domains),
@@ -17818,15 +18046,15 @@ class HemmaPanel extends HTMLElement {
             this._pendingMember.delete(pendingKey);
             this._renderForm();
           });
-        memberRow(grp.noun + " " + (Math.max(list.length, 1) + 1), row,
+        memberRow(_sx("{noun} {n}", { noun: _sx(grp.noun), n: Math.max(list.length, 1) + 1 }), row,
           dropButton(() => { this._pendingMember.delete(pendingKey); this._renderForm(); }),
           true);
       } else if (grp.entityless || tile.entity || list.length) {
         const add = document.createElement("button");
         add.type = "button";
         add.className = "addmore";
-        add.title = grp.add;
-        add.setAttribute("aria-label", grp.add);
+        add.title = _sx(grp.add);
+        add.setAttribute("aria-label", _sx(grp.add));
         add.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
           + ' stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
         add.onclick = () => {
@@ -17840,7 +18068,7 @@ class HemmaPanel extends HTMLElement {
     const tfields = tileFieldsFor(type, this._phoneReachable());
     const advFields = tfields.filter((f) => f.advanced);
     const firstGroup = advFields.length && advFields[0].group ? advFields[0].group : null;
-    const advLabel = type.advancedLabel || firstGroup || "Advanced";
+    const advLabel = type.advancedLabel || firstGroup || _sx("Advanced");
     let advBody = null, advDet = null;
     const advRow = (label, input, sub) => {
       if (!advBody) {
@@ -17852,7 +18080,7 @@ class HemmaPanel extends HTMLElement {
         sum.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"'
           + ' stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
         const sumLabel = document.createElement("span");
-        sumLabel.textContent = advLabel;
+        sumLabel.textContent = _sx(advLabel);
         sum.appendChild(sumLabel);
         advBody = document.createElement("div");
         advBody.className = "advbody";
@@ -17871,7 +18099,7 @@ class HemmaPanel extends HTMLElement {
       if (advPending) {
         const h = document.createElement("div");
         h.className = "subhead";
-        h.textContent = advPending;
+        h.textContent = _sx(advPending);
         advPending = null;
         advBody.appendChild(h);
       }
@@ -17880,13 +18108,13 @@ class HemmaPanel extends HTMLElement {
       const l = document.createElement("label");
       if (sub) {
         const t = document.createElement("span");
-        t.textContent = label;
+        t.textContent = _sx(label);
         const u = document.createElement("span");
         u.className = "lsub";
         u.textContent = sub;
         l.appendChild(t); l.appendChild(u);
       } else {
-        l.textContent = label;
+        l.textContent = _sx(label);
       }
       r.appendChild(l); r.appendChild(input);
       advBody.appendChild(r);
@@ -17950,7 +18178,7 @@ class HemmaPanel extends HTMLElement {
         if (!f.hint) return;
         const h = document.createElement("div");
         h.className = "hint";
-        h.textContent = f.hint;
+        h.textContent = _sx(f.hint);
         if (!f.advanced) h.dataset.opt = "1";
         (f.advanced && advBody ? advBody : body).appendChild(h);
       };
@@ -17987,9 +18215,9 @@ class HemmaPanel extends HTMLElement {
           const h = document.createElement("div");
           h.className = "hint";
           h.textContent = extra.length
-            ? "Each sensor's reading is taken from its entity id. Also passed through: "
-              + extra.join(", ")
-            : "Each sensor's reading is taken from its entity id.";
+            ? _sx("Each sensor's reading is taken from its entity id. Also passed through: {names}",
+              { names: extra.join(", ") })
+            : _sx("Each sensor's reading is taken from its entity id.");
           advBody.appendChild(h);
         }
         return;
@@ -18016,7 +18244,7 @@ class HemmaPanel extends HTMLElement {
         if (!over.length) {
           const h = document.createElement("div");
           h.className = "hint";
-          h.textContent = f.emptyHint || "Add the entities above first.";
+          h.textContent = _sx(f.emptyHint) || _sx("Add the entities above first.");
           put(f.label, h);
           return;
         }
@@ -18074,7 +18302,7 @@ class HemmaPanel extends HTMLElement {
             if (tile.variables && !Object.keys(tile.variables).length) delete tile.variables;
             after();
           },
-          { fixed: true, labels: { "": "Default", ...(f.optionLabels || {}) } }).wrap);
+          { fixed: true, labels: { "": _sx("Default"), ...(f.optionLabels || {}) } }).wrap);
         hintUnder();
         return;
       }
@@ -18086,7 +18314,7 @@ class HemmaPanel extends HTMLElement {
             if (tile.variables && !Object.keys(tile.variables).length) delete tile.variables;
             after();
           },
-          { fixed: true, labels: { "": "Default", ...(f.optionLabels || {}) } }).wrap);
+          { fixed: true, labels: { "": _sx("Default"), ...(f.optionLabels || {}) } }).wrap);
         hintUnder();
         return;
       }
@@ -18131,13 +18359,13 @@ class HemmaPanel extends HTMLElement {
           native.click();
         };
         btn.onclick = () => {
-          const items = [{ id: "", label: "From the entity's domain",
+          const items = [{ id: "", label: _sx("From the entity's domain"),
                            checked: !tile.variables || !tile.variables[f.key] }];
           HEMMA_ACCENTS.forEach((a) => items.push({
             id: a.id, label: a.label, swatch: a.hex, group: "Hemma",
             checked: cur2 === a.id,
           }));
-          items.push({ id: "__custom", label: "Custom\u2026", group: "Hemma" });
+          items.push({ id: "__custom", label: _sx("Custom\u2026"), group: "Hemma" });
           this._menuAt(btn, items, (id) => {
             if (id === "__custom") { openNative(); return; }
             write(id);
@@ -18154,7 +18382,7 @@ class HemmaPanel extends HTMLElement {
         const box = document.createElement("input");
         box.value = cur && typeof cur === "object" && Object.keys(cur).length
           ? JSON.stringify(cur) : "";
-        if (f.placeholder) box.placeholder = f.placeholder;
+        if (f.placeholder) box.placeholder = _sx(f.placeholder);
         box.onchange = () => {
           const raw = box.value.trim();
           if (!raw) {
@@ -18195,7 +18423,7 @@ class HemmaPanel extends HTMLElement {
           const ghost = f.iconNoGhost ? null
             : (f.iconDefault || glyphNow() || TILE_ICON[type.id] || null);
           put(f.label, this._combo(
-            cur, [ICON_DEFAULT].concat(HEMMA_ICONS), f.iconText || f.iconDefault || "default",
+            cur, [ICON_DEFAULT].concat(HEMMA_ICONS), _sx(f.iconText) || f.iconDefault || "default",
             (v) => set(v === ICON_DEFAULT ? "" : v),
             { icon: true, iconFallback: ghost }
           ).wrap);

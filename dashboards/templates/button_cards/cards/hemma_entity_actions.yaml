@@ -258,7 +258,7 @@ hemma_entity_actions:
         if (!A) return '';
         A.bind(this, variables, hass);
         const raw = this._config?.name;
-        const own = (typeof raw === 'string' && raw.indexOf('[[[') === -1)
+        const own = (typeof raw === 'string' && raw.indexOf('[' + '[[') === -1)
           ? raw : (entity?.attributes?.friendly_name || '');
         return A.markup(variables, 1, states, own, hass);
       ]]]
@@ -269,7 +269,7 @@ hemma_entity_actions:
         if (!A) return '';
         A.bind(this, variables, hass);
         const raw = this._config?.name;
-        const own = (typeof raw === 'string' && raw.indexOf('[[[') === -1)
+        const own = (typeof raw === 'string' && raw.indexOf('[' + '[[') === -1)
           ? raw : (entity?.attributes?.friendly_name || '');
         return A.markup(variables, 2, states, own, hass);
       ]]]

@@ -36,13 +36,15 @@ hemma_energy:
   # Idle · Normal · Heavy Usage · Extreme Usage (same tiers as the popup pill)
   state_display: |
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const id = variables.entity_power || entity?.entity_id;
       const w = parseFloat(states[id]?.state);
-      if (!Number.isFinite(w)) return 'Unavailable';
-      if (w >= Number(variables.extreme_threshold ?? 3000)) return 'Extreme Usage';
-      if (w >= Number(variables.heavy_threshold   ?? 1000)) return 'Heavy Usage';
-      if (w >= Number(variables.normal_threshold  ?? 200))  return 'Normal';
-      return 'Idle';
+      if (!Number.isFinite(w)) return L('state.default.unavailable', 'Unavailable');
+      if (w >= Number(variables.extreme_threshold ?? 3000)) return T('energy.extreme_usage', 'Extreme Usage');
+      if (w >= Number(variables.heavy_threshold   ?? 1000)) return T('energy.heavy_usage', 'Heavy Usage');
+      if (w >= Number(variables.normal_threshold  ?? 200))  return T('energy.normal', 'Normal');
+      return T('energy.idle', 'Idle');
     ]]]
 
   state:

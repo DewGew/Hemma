@@ -43,6 +43,10 @@ hemma_mobile_now_playing:
           // hemma-core.js owns the collector - one definition, served by the
           // integration. If it has not loaded, say so once and let the panel
           // draw empty rather than throwing on every template below.
+          // Redrawn by core's flush on arrival; otherwise the row waits for the next media update.
+          if (typeof window._hemmaNPView !== 'function' && window._hemmaCoreWaiters !== null) {
+            (window._hemmaCoreWaiters = window._hemmaCoreWaiters || new Set()).add(this);
+          }
           if (typeof window._hemmaNP !== 'function' && !window._hemmaNPNoCore) {
             window._hemmaNPNoCore = 1;
             // Not immediately: a module resource is still loading while the
@@ -214,6 +218,7 @@ hemma_mobile_now_playing:
       const anyActive = npList.length > 0;
       const shown = anyActive;
       const ov = shown ? 'visible' : 'hidden';
+      this.setAttribute('data-hemma-np', '');
       this.toggleAttribute('data-hemma-np-empty', !shown);
 
       return staticCSS + npCSS +

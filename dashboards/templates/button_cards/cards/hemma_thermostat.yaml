@@ -28,14 +28,16 @@ hemma_thermostat:
 
   state_display: |
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const mode = entity?.state;
       const target = entity.attributes.temperature;
       if (mode === 'cool') {
-        return "Cooling to " + target + "°";
+        return T('thermostat.cooling_to', 'Cooling to {t}°', { t: target });
       } else if (mode === 'heat') {
-        return "Heating to " + target + "°";
+        return T('thermostat.heating_to', 'Heating to {t}°', { t: target });
       } else {
-        return "Off";
+        return L('component.climate.entity_component._.state.off', 'Off');
       }
     ]]]
 
@@ -94,7 +96,7 @@ hemma_thermostat:
             const raw = states['input_number.hemma_thermostat_target_temperature']?.state;
             const n = Number(raw);
             if (raw == null || raw === 'unknown' || raw === 'unavailable' || Number.isNaN(n)) return '';
-            return Number.isInteger(n) ? `${n}°` : `${n.toFixed(1)}°`;
+            return (window.hemmaNum || ((x, a, b) => Number(x).toFixed(b ?? a ?? 0)))(n, 0, 1) + '°';
           ]]]
         tap_action:
           action: call-service
@@ -311,7 +313,7 @@ hemma_thermostat:
     }
 
     #ctl_set::before {
-      content: 'Set';
+      content: var(--hemma-set-label, 'Set');
       display: flex;
       align-items: center;
       justify-content: center;
@@ -580,6 +582,7 @@ hemma_thermostat:
             ]]]
 
       ctl_set:
+        - '--hemma-set-label': "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; }); return JSON.stringify(T('thermostat.set', 'Set')); ]]]"
         - position: absolute
         - right: var(--thermo-pad, 20px)
         - z-index: 5

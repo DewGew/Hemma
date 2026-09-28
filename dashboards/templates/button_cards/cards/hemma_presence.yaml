@@ -97,16 +97,18 @@ hemma_presence:
 
   state_display: >
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
       const s = (entity?.state || '').toLowerCase().replace(/_/g, ' ');
-      if (s === 'home' || s === 'just arrived') return 'Home';
-      if (s === 'not home' || s === 'away')     return 'Away';
+      if (s === 'home' || s === 'just arrived') return L('component.person.entity_component._.state.home', 'Home');
+      if (s === 'not home' || s === 'away')     return L('component.person.entity_component._.state.not_home', 'Away');
       if (!s || ['unavailable', 'unknown'].includes(s)) return '';
       return (entity?.state || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     ]]]
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       if (variables?.person_name) return variables.person_name;
       const fn = entity?.attributes?.friendly_name || '';
-      return fn.replace(/\s*status\s*/i, '').trim().split(' ')[0] || 'Person';
+      return fn.replace(/\s*status\s*/i, '').trim().split(' ')[0] || T('presence.person', 'Person');
     ]]]

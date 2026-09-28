@@ -7,7 +7,7 @@ hemma_popup_recently_added:
       ]]]
     entity: '[[[ return entity?.entity_id; ]]]'
     hemma_popup:
-      title: Recently Added
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; }); return T('plex.recently_added', 'Recently Added'); ]]]"
       dismissable: true
       dismiss_on_background: true
       popup_styles:
@@ -96,6 +96,7 @@ hemma_popup_recently_added:
           }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
           const moviesData = states['sensor.recently_added_movies']?.attributes?.data;
           const tvData     = states['sensor.recently_added_tv']?.attributes?.data;
 
@@ -125,10 +126,10 @@ hemma_popup_recently_added:
             const ms = Date.now() - new Date(iso).getTime();
             const h  = ms / 3600000;
             const d  = ms / 86400000;
-            if (h < 1)  return 'just now';
-            if (h < 24) return Math.floor(h) + 'h ago';
-            if (d < 7)  return Math.floor(d) + 'd ago';
-            return Math.floor(d / 7) + 'w ago';
+            if (h < 1)  return T('time.just_now', 'just now');
+            if (h < 24) return T('time.short.hours', '{n}h ago', { n: Math.floor(h) });
+            if (d < 7)  return T('time.short.days', '{n}d ago', { n: Math.floor(d) });
+            return T('time.short.weeks', '{n}w ago', { n: Math.floor(d / 7) });
           };
 
           /* empty state */
@@ -142,7 +143,7 @@ hemma_popup_recently_added:
 
             const emptyBadge = {
               type: 'custom:button-card',
-              name: 'Up to date',
+              name: T('plex.up_to_date', 'Up to date'),
               tap_action: { action: 'none' },
               show_icon: false, show_name: true, show_label: false, show_state: false,
               card_mod: {
@@ -200,7 +201,7 @@ hemma_popup_recently_added:
               },
               custom_fields: {
                 body: '<div style="font-family:var(--primary-font-family,system-ui);">'
-                  + '<div style="font-size:22px;color:var(--primary-text-color,#ffffff);font-weight:400;letter-spacing:-.5px;">Nothing recently added</div>'
+                  + '<div style="font-size:22px;color:var(--primary-text-color,#ffffff);font-weight:400;letter-spacing:-.5px;">' + T('plex.nothing_added', 'Nothing recently added') + '</div>'
                   + '</div>',
               },
             };
@@ -300,8 +301,8 @@ hemma_popup_recently_added:
               fstyle[name].push({ overflow: 'visible' });
               seq += list.length + 1;
             };
-            if (movies.length) addRow('movies', movies, 'Movies');
-            if (shows.length)  addRow('shows',  shows,  'TV Shows');
+            if (movies.length) addRow('movies', movies, T('plex.movies', 'Movies'));
+            if (shows.length)  addRow('shows',  shows,  T('plex.tv_shows', 'TV Shows'));
 
             /* This config is baked when the tile renders, so the fanart can be
                fetched on idle long before the popup is opened. */

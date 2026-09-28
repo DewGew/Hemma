@@ -10,8 +10,10 @@ hemma_popup_light:
   custom_fields:
     lpc_init: |
       [[[
-        if (typeof window._hemmaLPC !== 'function' || window._hemmaLPCv !== 72) {
-              window._hemmaLPCv = 72;
+        const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+        const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
+        if (typeof window._hemmaLPC !== 'function' || window._hemmaLPCv !== 73) {
+              window._hemmaLPCv = 73;
               window._hemmaLPC = function(__entity, __states, __hass, __vars, __mode) {
               const entity = __entity, states = __states, hass = __hass, variables = __vars;
               const _pgVar   = variables.popup_group || variables.group_entity || null;
@@ -112,8 +114,11 @@ hemma_popup_light:
               };
 
               const roomName = variables.room_name || _areaName(groupId)
-                            || (hasRooms ? 'Home' : states[groupId]?.attributes?.friendly_name)
-                            || 'Lighting';
+                            || (hasRooms ? T('filter.all', 'Home') : states[groupId]?.attributes?.friendly_name)
+                            || T('lights.lighting', 'Lighting');
+              const LBL_ON = L('component.light.entity_component._.state.on', 'On'), LBL_OFF = L('component.light.entity_component._.state.off', 'Off');
+              const HEAD_ALL_ON = T('lights.popup.all_on', 'All on'), HEAD_N_ON = T('lights.popup.n_on', '{n} on'), HEAD_TITLE = T('filter.lights', 'Lights');
+              const ALL_OFF_POP = T('lights.popup.all_off', 'All off');
 
               const rooms = hasRooms
                 ? topLevelIds.map(rid => ({
@@ -271,9 +276,9 @@ hemma_popup_light:
                 const _pRl = ${_roomLIds};
                 const _pIds = (_psel === -1) ? _pAll : (_pRl[_psel] || _pAll);
                 const _pName = (_psel >= 0 && _pRoom[_psel]) ? _pRoom[_psel]
-                  : ${JSON.stringify(rooms ? 'All Lights' : (roomName || 'Lights'))};
+                  : ${JSON.stringify(rooms ? T('lights.all_lights', 'All Lights') : (roomName || T('filter.lights', 'Lights')))};
                 const oc = _pIds.filter(id => states[id]?.state === 'on').length;
-                const _pText = (oc > 0 ? 'Turn ' + _pName + ' Off' : 'Turn ' + _pName + ' On');
+                const _pText = (oc > 0 ? ${JSON.stringify(T('lights.turn_off', 'Turn {name} Off'))} : ${JSON.stringify(T('lights.turn_on', 'Turn {name} On'))}).split('{name}').join(_pName);
               `;
 
               /* Same object as the close control, mirrored across the bar: same
@@ -389,7 +394,7 @@ hemma_popup_light:
                 },
                 custom_fields: {
                   ...(isDesktop ? { st: `[[[ ${_pwrSnip}
-                    const _w = oc === 0 ? 'All off' : (oc + ' on');
+                    const _w = oc === 0 ? ${JSON.stringify(ALL_OFF_POP)} : ${JSON.stringify(HEAD_N_ON)}.split('{n}').join(oc);
                     return '<div style="font-family:var(--primary-font-family,system-ui);'
                       + 'font-size:15px;font-weight:500;letter-spacing:-0.01em;white-space:nowrap;'
                       + 'color:var(--hemma-popup-tiles-text-secondary, rgba(255,255,255,0.56));'
@@ -420,9 +425,9 @@ hemma_popup_light:
 
               const headField = `[[[ ${_countSnip}
                 const _UI = window._hemmaUI;
-                const _w = oc === 0 ? 'Off' : (oc === tot ? 'All on' : oc + ' on');
+                const _w = oc === 0 ? ${JSON.stringify(LBL_OFF)} : (oc === tot ? ${JSON.stringify(HEAD_ALL_ON)} : ${JSON.stringify(HEAD_N_ON)}.split('{n}').join(oc));
                 return (_UI && _UI.headline)
-                  ? _UI.headline({ title: 'Lights', state: _w, barTitle: true }) : '';
+                  ? _UI.headline({ title: ${JSON.stringify(HEAD_TITLE)}, state: _w, barTitle: true }) : '';
               ]]]`;
 
 
@@ -462,7 +467,7 @@ hemma_popup_light:
               };
 
               if (__mode === 'header') {
-                return { eyebrow: '', title: rooms ? 'Lights' : (roomName || 'Lights'),
+                return { eyebrow: '', title: rooms ? T('filter.lights', 'Lights') : (roomName || T('filter.lights', 'Lights')),
                          actions: headerActionsCard, width: _deskW };
               }
 
@@ -534,7 +539,7 @@ hemma_popup_light:
                 show_name: true,
                 show_state: false,
                 show_label: true,
-                label: `[[[ const e=states["${lightId}"]; const b=e?.attributes?.brightness; return b?Math.round(b/2.55)+"%":e?.state==="on"?"On":"Off"; ]]]`,
+                label: `[[[ const e=states["${lightId}"]; const b=e?.attributes?.brightness; return b?Math.round(b/2.55)+"%":e?.state==="on"?${JSON.stringify(LBL_ON)}:${JSON.stringify(LBL_OFF)}; ]]]`,
                 extra_styles: ':host{--hemma-card-hover-filter:brightness(1.04);width:100%!important;max-width:none!important;display:block!important;box-sizing:border-box!important;--button-card-ripple-color:transparent!important;--button-card-ripple-hover-color:transparent!important;--ha-ripple-color:transparent!important;--ha-ripple-hover-color:transparent!important;}ha-card{transition:background 0.45s ease,transform var(--hemma-popup-tile-hover-duration,0.2s) ease,filter var(--hemma-popup-tile-hover-duration,0.2s) ease!important;transform:scale(1)!important;}ha-card:hover{transform:scale(var(--hemma-popup-tile-hover-scale,1.01))!important;}ha-card:active{transform:scale(1)!important;}@media (hover:hover){ha-card:hover{filter:var(--hemma-card-hover-filter,brightness(1.04))!important;}ha-card:hover::after{background:var(--lc-hover-tint,rgba(255,255,255,0.03))!important;}}ha-card::before{display:none!important;}ha-card::after{content:""!important;position:absolute!important;inset:0!important;border-radius:inherit!important;background:transparent!important;transition:background var(--hemma-popup-tile-hover-duration,0.2s) ease!important;pointer-events:none!important;}ha-ripple{display:none!important;}div#img-cell{position:relative!important;overflow:hidden!important;transition:transform var(--hemma-popup-tile-hover-duration,0.2s) ease!important;}div#img-cell::before{display:none!important;}div#img-cell::after{content:""!important;display:block!important;position:absolute!important;inset:0!important;background-color:var(--lc-clr,#ffffff)!important;-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%27-0.4809 -0.8399 16.9931 29.6759%27%3E%3Crect height=%2729.6759%27 opacity=%270%27 width=%2716.9931%27 x=%27-0.4809%27 y=%27-0.8399%27/%3E%3Cpath d=%27M4.13672 23.8711L11.5547 23.8711C11.9414 23.8711 12.2344 23.5664 12.2344 23.1797C12.2344 22.8047 11.9414 22.5 11.5547 22.5L4.13672 22.5C3.75 22.5 3.44531 22.8047 3.44531 23.1797C3.44531 23.5664 3.75 23.8711 4.13672 23.8711ZM7.83984 27.2695C9.65625 27.2695 11.168 26.3789 11.2852 25.0312L4.40625 25.0312C4.48828 26.3789 6.01172 27.2695 7.83984 27.2695Z%27 fill=%27white%27/%3E%3Cpath d=%27M0 7.21875C0 11.7188 2.96484 12.832 3.44531 20.6484C3.46875 21.0703 3.72656 21.3398 4.17188 21.3398L11.5078 21.3398C11.9648 21.3398 12.2109 21.0703 12.2461 20.6484C12.7266 12.832 15.6797 11.7188 15.6797 7.21875C15.6797 3.17578 12.2227 0 7.83984 0C3.45703 0 0 3.17578 0 7.21875Z%27 fill=%27white%27/%3E%3C/svg%3E")!important;-webkit-mask-repeat:no-repeat!important;-webkit-mask-position:center!important;-webkit-mask-size:auto 61.5%!important;mask-image:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%27-0.4809 -0.8399 16.9931 29.6759%27%3E%3Crect height=%2729.6759%27 opacity=%270%27 width=%2716.9931%27 x=%27-0.4809%27 y=%27-0.8399%27/%3E%3Cpath d=%27M4.13672 23.8711L11.5547 23.8711C11.9414 23.8711 12.2344 23.5664 12.2344 23.1797C12.2344 22.8047 11.9414 22.5 11.5547 22.5L4.13672 22.5C3.75 22.5 3.44531 22.8047 3.44531 23.1797C3.44531 23.5664 3.75 23.8711 4.13672 23.8711ZM7.83984 27.2695C9.65625 27.2695 11.168 26.3789 11.2852 25.0312L4.40625 25.0312C4.48828 26.3789 6.01172 27.2695 7.83984 27.2695Z%27 fill=%27white%27/%3E%3Cpath d=%27M0 7.21875C0 11.7188 2.96484 12.832 3.44531 20.6484C3.46875 21.0703 3.72656 21.3398 4.17188 21.3398L11.5078 21.3398C11.9648 21.3398 12.2109 21.0703 12.2461 20.6484C12.7266 12.832 15.6797 11.7188 15.6797 7.21875C15.6797 3.17578 12.2227 0 7.83984 0C3.45703 0 0 3.17578 0 7.21875Z%27 fill=%27white%27/%3E%3C/svg%3E")!important;mask-repeat:no-repeat!important;mask-position:center!important;mask-size:auto 61.5%!important;opacity:var(--lc-io,0.9)!important;pointer-events:none!important;transform:translateZ(0)!important;will-change:transform!important;}div#img-cell:hover,div#img-cell:active{transform:scale(1.03)!important;}#img-cell img{opacity:0!important;}',
                 styles: {
                   card: [
@@ -905,7 +910,7 @@ hemma_popup_light:
                   ? [{ height: '0' }, { overflow: 'hidden' }, { padding: '0' }, { margin: '0' }]
                   : [{ display: 'none' }];
 
-                pillFields.pill_all = { card: makePill('All', 'all', -1) };
+                pillFields.pill_all = { card: makePill(T('lights.all', 'All'), 'all', -1) };
                 pillFStyle.pill_all = [{ flex: '0 0 auto' }, { 'align-self': 'center' }];
 
                 rooms.forEach((room, i) => {
@@ -997,7 +1002,7 @@ hemma_popup_light:
               if (!rooms) {
                 const flatHeadField = `[[[ ${_countSnip}
                   const _UI = window._hemmaUI;
-                  const _w = oc === 0 ? 'Off' : (oc === tot ? 'All on' : oc + ' on');
+                  const _w = oc === 0 ? ${JSON.stringify(LBL_OFF)} : (oc === tot ? ${JSON.stringify(HEAD_ALL_ON)} : ${JSON.stringify(HEAD_N_ON)}.split('{n}').join(oc));
                   return (_UI && _UI.headline)
                     ? _UI.headline({ title: ${JSON.stringify(roomName)}, state: _w,
                                      barTitle: true }) : '';
@@ -1304,8 +1309,9 @@ hemma_popup_light:
     hemma_popup: &hemma_light_popup
       title: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           const _hdr = typeof window._hemmaLPC === 'function' ? window._hemmaLPC(entity, states, typeof hass !== 'undefined' ? hass : null, variables, 'header') : null;
-          return (_hdr && _hdr.title) || 'Light Control';
+          return (_hdr && _hdr.title) || T('lights.control', 'Light Control');
         ]]]
       header_actions: |
         [[[

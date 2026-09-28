@@ -135,6 +135,7 @@ hemma_badge_climate_group:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const sensors = [
         variables.temp_sensor,
         variables.temp_sensor_2,
@@ -154,7 +155,7 @@ hemma_badge_climate_group:
 
       return `
         <div class="badge-wrap">
-          <div class="badge-title">Climate</div>
+          <div class="badge-title">${T('filter.climate', 'Climate')}</div>
           ${sub ? `<div class="badge-sub">${sub}</div>` : ''}
         </div>
       `;

@@ -81,15 +81,18 @@ hemma_badge_presence:
 
   name: >
     [[[
-      const friendly = (entity?.attributes?.friendly_name || 'Person').split(' ')[0];
-      const raw = String(entity?.state || 'Unknown');
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+      const friendly = (entity?.attributes?.friendly_name || T('presence.person', 'Person')).split(' ')[0];
+      const raw = String(entity?.state || L('state.default.unknown', 'Unknown'));
       const s = raw.toLowerCase().replace(/_/g, ' ');
       const status =
-        s === 'home'           ? 'Home' :
-        s === 'not home' || s === 'away' ? 'Away' :
-        s === 'just arrived'   ? 'Just Arrived' :
-        s === 'just left'      ? 'Just Left' :
-        s === 'extended away'  ? 'Extended Away' :
+        s === 'home'           ? L('component.person.entity_component._.state.home', 'Home') :
+        s === 'not home' || s === 'away' ? L('component.person.entity_component._.state.not_home', 'Away') :
+        s === 'just arrived'   ? T('presence.just_arrived', 'Just Arrived') :
+        s === 'just left'      ? T('presence.just_left', 'Just Left') :
+        s === 'extended away'  ? T('presence.extended_away', 'Extended Away') :
                                   raw;
 
       const esc = (t) => String(t || '').replaceAll('"','&quot;');

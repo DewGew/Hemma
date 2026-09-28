@@ -14,6 +14,7 @@ hemma_popup_camera:
       force_eval: true
       value: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           if (typeof window.hemmaCameraAlert !== 'function') {
             /* Ring publishes ding/motion as event.* entities whose state is the
                timestamp of the last one, so "recent" is the whole alert model.
@@ -38,14 +39,14 @@ hemma_popup_camera:
                 if (/ding|doorbell|button/.test(id)) ding = true;
                 else if (/motion/.test(id)) motion = true;
               });
-              return ding ? 'Doorbell' : motion ? 'Motion Detected' : '';
+              return ding ? T('cameras.doorbell', 'Doorbell') : motion ? T('cameras.motion_detected', 'Motion Detected') : '';
             };
           }
           return true;
         ]]]
   tap_action:
     hemma_popup:
-      title: Cameras
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; }); return T('cameras.title', 'Cameras'); ]]]"
       style: '--popup-min-width: min(1040px, 92vw); --popup-max-width: min(1040px, 92vw);'
       dismiss_on_background: true
       popup_styles:
@@ -158,6 +159,8 @@ hemma_popup_camera:
           }
       content: |
         [[[
+          const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           const reg    = (hass && hass.entities) || {};
           const nameOv = variables.camera_names || {};
           const actOv  = variables.activity_entities || {};
@@ -182,7 +185,7 @@ hemma_popup_camera:
 
           const cams = ids.map(id => ({ id: id, s: states[id] })).filter(c => c.s);
 
-          const TPL = 24;
+          const TPL = 26;
 
           /* Owns the selected camera, the live card and its hass pump.
              Only one stream is ever mounted; the grid stays on stills. */
@@ -361,7 +364,7 @@ hemma_popup_camera:
                 const self = this;
                 self.teardown();
                 self._mount = mountEl;
-                self._modeText = 'Live';
+                self._modeText = T('cameras.live', 'Live');
                 const ha = self._ha();
                 if (!ha || !mountEl) return;
 
@@ -621,7 +624,7 @@ hemma_popup_camera:
                 for (let i = 0; i < btns.length; i++) {
                   const b = btns[i];
                   const ic = b.querySelector('ha-icon');
-                  b.setAttribute('data-tip', on ? 'Zoom to Fit' : 'Zoom to Fill');
+                  b.setAttribute('data-tip', on ? T('cameras.zoom_to_fit', 'Zoom to Fit') : T('cameras.zoom_to_fill', 'Zoom to Fill'));
                   this.mark(b, on);
                   b.style.background = on ? 'rgba(255,255,255,0.92)' : 'var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))';
                   b.style.color = on ? '#1c1c1e' : 'rgba(255,255,255,0.92)';
@@ -664,7 +667,7 @@ hemma_popup_camera:
                 const ic  = btn && btn.querySelector('ha-icon');
                 const off = this._muted !== false;
                 if (ic) ic.setAttribute('icon', off ? 'mdi:volume-off' : 'mdi:volume-high');
-                if (btn) btn.setAttribute('data-tip', off ? 'Unmute' : 'Mute');
+                if (btn) btn.setAttribute('data-tip', off ? T('cameras.unmute', 'Unmute') : T('cameras.mute', 'Mute'));
                 this.mark(btn, !off);
                 if (btn) {
                   btn.style.background = off
@@ -683,7 +686,7 @@ hemma_popup_camera:
                 if (!scope) return;
                 self.syncAudio(scope);
                 if (self._audT) { clearTimeout(self._audT); self._audT = null; }
-                self.setMode(scope, self._modeText || 'Live');
+                self.setMode(scope, self._modeText || T('cameras.live', 'Live'));
                 if (self._muted) return;
                 /* audioTracks/webkitAudioDecodedByteCount are both empty until the
                    decoder has actually run, so an immediate verdict always reads
@@ -691,7 +694,7 @@ hemma_popup_camera:
                 self._audT = setTimeout(function () {
                   self._audT = null;
                   if (self._muted === false && !self.hasAudio()) {
-                    self.setMode(scope, (self._modeText || 'Live') + ' \xb7 no audio');
+                    self.setMode(scope, T('cameras.no_audio', '{mode} · no audio', { mode: self._modeText || T('cameras.live', 'Live') }));
                   }
                 }, 1500);
               },
@@ -802,8 +805,8 @@ hemma_popup_camera:
               },
 
               confirmLabel: function (id, open) {
-                if (id.indexOf('siren.') === 0) return open ? 'Stop siren?' : 'Sound siren?';
-                return open ? 'Disarm?' : 'Arm away?';
+                if (id.indexOf('siren.') === 0) return open ? T('cameras.stop_siren', 'Stop siren?') : T('cameras.sound_siren', 'Sound siren?');
+                return open ? T('cameras.disarm_q', 'Disarm?') : T('cameras.arm_away_q', 'Arm away?');
               },
 
               clearConfirm: function () {
@@ -900,11 +903,11 @@ hemma_popup_camera:
               /* Live is still running underneath, so just say so and put the header back. */
               unavailable: function (scope) {
                 const self = this;
-                self.setMode(scope, 'Recording unavailable');
+                self.setMode(scope, T('cameras.recording_unavailable', 'Recording unavailable'));
                 if (self._recT) clearTimeout(self._recT);
                 self._recT = setTimeout(function () {
                   self._recT = null;
-                  self.setMode(scope, self._modeText || 'Live');
+                  self.setMode(scope, self._modeText || T('cameras.live', 'Live'));
                 }, 1800);
               },
 
@@ -916,7 +919,7 @@ hemma_popup_camera:
                   ? 'rgba(255,255,255,0.92)'
                   : 'var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))';
                 b.style.color = playing ? '#1c1c1e' : 'rgba(255,255,255,0.92)';
-                b.setAttribute('data-tip', playing ? 'Live' : 'Last Recording');
+                b.setAttribute('data-tip', playing ? T('cameras.live', 'Live') : T('cameras.last_recording', 'Last Recording'));
                 this.mark(b, playing);
                 if (ic) ic.style.color = playing ? '#1c1c1e' : 'rgba(255,255,255,0.92)';
               },
@@ -967,8 +970,8 @@ hemma_popup_camera:
                   const pl = v.play();
                   if (pl && pl.catch) pl.catch(function () {});
                   self.applyFit(false);
-                  self._modeText = 'Last Recording';
-                  self.setMode(scope, 'Last Recording');
+                  self._modeText = T('cameras.last_recording', 'Last Recording');
+                  self.setMode(scope, T('cameras.last_recording', 'Last Recording'));
                   self.paintRec(scope, true);
                 };
 
@@ -988,8 +991,8 @@ hemma_popup_camera:
                 const mount = scope && scope.querySelector('.cam-stream-mount');
                 if (this._recT) { clearTimeout(this._recT); this._recT = null; }
                 this.mount(camId, mount);
-                this._modeText = 'Live';
-                this.setMode(scope, 'Live');
+                this._modeText = T('cameras.live', 'Live');
+                this.setMode(scope, T('cameras.live', 'Live'));
                 this.paintRec(scope, false);
               },
 
@@ -1006,7 +1009,8 @@ hemma_popup_camera:
              previous version of this popup until someone hard-refreshes. */
           const _ck = 'hemma_cams_' + TPL + '_' + (entity?.entity_id || 'x');
           const _ch = cams.map(c => [c.id, c.s.state, c.s.attributes?.entity_picture, c.s.last_changed].join(':')).join('|')
-            + '|' + Object.keys(reg).length + '|' + window.innerWidth;
+            + '|' + Object.keys(reg).length + '|' + window.innerWidth
+            + '|' + (hass?.language || '') + (window._hemmaT ? '+' : '-');
           window._hc = window._hc || {};
           if (window._hc[_ck]?.h === _ch) return window._hc[_ck].r;
 
@@ -1278,7 +1282,7 @@ hemma_popup_camera:
             const dead  = ['unavailable', 'unknown'].includes(String(cam.s.state || '').toLowerCase());
             const pic   = resolveUrl(cam.s.attributes?.entity_picture);
             const label = labelOf(cam);
-            const age   = dead ? 'Unavailable' : ageOf(cam);
+            const age   = dead ? L('state.default.unavailable', 'Unavailable') : ageOf(cam);
 
             const placeholder = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);">'
               + '<ha-icon icon="mdi:cctv" style="--mdc-icon-size:30px;color:rgba(255,255,255,0.20);"></ha-icon></div>';
@@ -1352,7 +1356,7 @@ hemma_popup_camera:
             const label = labelOf(cam);
             const row = [];
 
-            row.push(circleBtn('cam-mute', 'mdi:volume-off', 'mute', null, 'Unmute'));
+            row.push(circleBtn('cam-mute', 'mdi:volume-off', 'mute', null, T('cameras.unmute', 'Unmute')));
 
             /* Only the camera's own siren. Apple's camera view carries no locks or
                alarm panel, and neither does this one — accessory_entities is the
@@ -1366,10 +1370,10 @@ hemma_popup_camera:
               const dom = id.split('.')[0];
               const open = accState(id) === 'open';
               const META = {
-                lock:                 ['mdi:lock-open-variant', 'mdi:lock',             'Unlocked', 'Locked'],
-                siren:                ['mdi:bullhorn',          'mdi:bullhorn-outline', 'Siren On', 'Siren'],
-                alarm_control_panel:  ['mdi:shield-check',      'mdi:shield-off-outline', 'Armed',  'Disarmed'],
-                cover:                ['mdi:garage-open',       'mdi:garage',           'Open',     'Closed'],
+                lock:                 ['mdi:lock-open-variant', 'mdi:lock',             L('component.lock.entity_component._.state.unlocked', 'Unlocked'), L('component.lock.entity_component._.state.locked', 'Locked')],
+                siren:                ['mdi:bullhorn',          'mdi:bullhorn-outline', T('cameras.siren_on', 'Siren On'), T('cameras.siren', 'Siren')],
+                alarm_control_panel:  ['mdi:shield-check',      'mdi:shield-off-outline', T('security.armed', 'Armed'), L('component.alarm_control_panel.entity_component._.state.disarmed', 'Disarmed')],
+                cover:                ['mdi:garage-open',       'mdi:garage',           L('component.cover.entity_component._.state.open', 'Open'), L('component.cover.entity_component._.state.closed', 'Closed')],
               };
               const m = META[dom] || META.cover;
               const icOpen = m[0], icShut = m[1], lbOpen = m[2], lbShut = m[3];
@@ -1396,10 +1400,10 @@ hemma_popup_camera:
             const recId = states[recAlt] ? recAlt
               : sibs(cam.id).find(id => id.startsWith('camera.') && /_last_recording$/.test(id) && states[id]);
             if (recId) {
-              row.push(circleBtn('cam-rec', 'mdi:play-circle-outline', 'rec', recId, 'Last Recording'));
+              row.push(circleBtn('cam-rec', 'mdi:play-circle-outline', 'rec', recId, T('cameras.last_recording', 'Last Recording')));
             }
 
-            row.push(circleBtn('cam-fit', 'mdi:fit-to-screen-outline', 'fit', null, 'Zoom to Fit'));
+            row.push(circleBtn('cam-fit', 'mdi:fit-to-screen-outline', 'fit', null, T('cameras.zoom_to_fit', 'Zoom to Fit')));
 
 
 
@@ -1445,7 +1449,7 @@ hemma_popup_camera:
               ? '<div style="display:flex;flex-wrap:wrap;gap:' + GAP + 'px;padding:4px ' + pad + 'px 26px;">'
                 + cams.map(buildTile).join('') + '</div>'
               : '<div style="padding:8px ' + pad + 'px 26px;' + font + 'font-size:22px;font-weight:400;letter-spacing:-.5px;'
-                + 'text-align:left;color:var(--hemma-popup-tiles-text-primary,#fff);">No cameras available</div>')
+                + 'text-align:left;color:var(--hemma-popup-tiles-text-primary,#fff);">' + T('cameras.none_available', 'No cameras available') + '</div>')
             + '</div>';
 
           const _r = {
@@ -1476,7 +1480,7 @@ hemma_popup_camera:
         ]]]
   icon_tap_action:
     hemma_popup:
-      title: Cameras
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; }); return T('cameras.title', 'Cameras'); ]]]"
       style: '--popup-min-width: min(1040px, 92vw); --popup-max-width: min(1040px, 92vw);'
       dismiss_on_background: true
       popup_styles:
@@ -1587,6 +1591,8 @@ hemma_popup_camera:
           }
       content: |
         [[[
+          const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           const reg    = (hass && hass.entities) || {};
           const nameOv = variables.camera_names || {};
           const actOv  = variables.activity_entities || {};
@@ -1611,7 +1617,7 @@ hemma_popup_camera:
 
           const cams = ids.map(id => ({ id: id, s: states[id] })).filter(c => c.s);
 
-          const TPL = 24;
+          const TPL = 26;
 
           /* Owns the selected camera, the live card and its hass pump.
              Only one stream is ever mounted; the grid stays on stills. */
@@ -1790,7 +1796,7 @@ hemma_popup_camera:
                 const self = this;
                 self.teardown();
                 self._mount = mountEl;
-                self._modeText = 'Live';
+                self._modeText = T('cameras.live', 'Live');
                 const ha = self._ha();
                 if (!ha || !mountEl) return;
 
@@ -2050,7 +2056,7 @@ hemma_popup_camera:
                 for (let i = 0; i < btns.length; i++) {
                   const b = btns[i];
                   const ic = b.querySelector('ha-icon');
-                  b.setAttribute('data-tip', on ? 'Zoom to Fit' : 'Zoom to Fill');
+                  b.setAttribute('data-tip', on ? T('cameras.zoom_to_fit', 'Zoom to Fit') : T('cameras.zoom_to_fill', 'Zoom to Fill'));
                   this.mark(b, on);
                   b.style.background = on ? 'rgba(255,255,255,0.92)' : 'var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))';
                   b.style.color = on ? '#1c1c1e' : 'rgba(255,255,255,0.92)';
@@ -2093,7 +2099,7 @@ hemma_popup_camera:
                 const ic  = btn && btn.querySelector('ha-icon');
                 const off = this._muted !== false;
                 if (ic) ic.setAttribute('icon', off ? 'mdi:volume-off' : 'mdi:volume-high');
-                if (btn) btn.setAttribute('data-tip', off ? 'Unmute' : 'Mute');
+                if (btn) btn.setAttribute('data-tip', off ? T('cameras.unmute', 'Unmute') : T('cameras.mute', 'Mute'));
                 this.mark(btn, !off);
                 if (btn) {
                   btn.style.background = off
@@ -2112,7 +2118,7 @@ hemma_popup_camera:
                 if (!scope) return;
                 self.syncAudio(scope);
                 if (self._audT) { clearTimeout(self._audT); self._audT = null; }
-                self.setMode(scope, self._modeText || 'Live');
+                self.setMode(scope, self._modeText || T('cameras.live', 'Live'));
                 if (self._muted) return;
                 /* audioTracks/webkitAudioDecodedByteCount are both empty until the
                    decoder has actually run, so an immediate verdict always reads
@@ -2120,7 +2126,7 @@ hemma_popup_camera:
                 self._audT = setTimeout(function () {
                   self._audT = null;
                   if (self._muted === false && !self.hasAudio()) {
-                    self.setMode(scope, (self._modeText || 'Live') + ' \xb7 no audio');
+                    self.setMode(scope, T('cameras.no_audio', '{mode} · no audio', { mode: self._modeText || T('cameras.live', 'Live') }));
                   }
                 }, 1500);
               },
@@ -2231,8 +2237,8 @@ hemma_popup_camera:
               },
 
               confirmLabel: function (id, open) {
-                if (id.indexOf('siren.') === 0) return open ? 'Stop siren?' : 'Sound siren?';
-                return open ? 'Disarm?' : 'Arm away?';
+                if (id.indexOf('siren.') === 0) return open ? T('cameras.stop_siren', 'Stop siren?') : T('cameras.sound_siren', 'Sound siren?');
+                return open ? T('cameras.disarm_q', 'Disarm?') : T('cameras.arm_away_q', 'Arm away?');
               },
 
               clearConfirm: function () {
@@ -2329,11 +2335,11 @@ hemma_popup_camera:
               /* Live is still running underneath, so just say so and put the header back. */
               unavailable: function (scope) {
                 const self = this;
-                self.setMode(scope, 'Recording unavailable');
+                self.setMode(scope, T('cameras.recording_unavailable', 'Recording unavailable'));
                 if (self._recT) clearTimeout(self._recT);
                 self._recT = setTimeout(function () {
                   self._recT = null;
-                  self.setMode(scope, self._modeText || 'Live');
+                  self.setMode(scope, self._modeText || T('cameras.live', 'Live'));
                 }, 1800);
               },
 
@@ -2345,7 +2351,7 @@ hemma_popup_camera:
                   ? 'rgba(255,255,255,0.92)'
                   : 'var(--hemma-glass-pill-fill, rgba(255,255,255,0.12))';
                 b.style.color = playing ? '#1c1c1e' : 'rgba(255,255,255,0.92)';
-                b.setAttribute('data-tip', playing ? 'Live' : 'Last Recording');
+                b.setAttribute('data-tip', playing ? T('cameras.live', 'Live') : T('cameras.last_recording', 'Last Recording'));
                 this.mark(b, playing);
                 if (ic) ic.style.color = playing ? '#1c1c1e' : 'rgba(255,255,255,0.92)';
               },
@@ -2396,8 +2402,8 @@ hemma_popup_camera:
                   const pl = v.play();
                   if (pl && pl.catch) pl.catch(function () {});
                   self.applyFit(false);
-                  self._modeText = 'Last Recording';
-                  self.setMode(scope, 'Last Recording');
+                  self._modeText = T('cameras.last_recording', 'Last Recording');
+                  self.setMode(scope, T('cameras.last_recording', 'Last Recording'));
                   self.paintRec(scope, true);
                 };
 
@@ -2417,8 +2423,8 @@ hemma_popup_camera:
                 const mount = scope && scope.querySelector('.cam-stream-mount');
                 if (this._recT) { clearTimeout(this._recT); this._recT = null; }
                 this.mount(camId, mount);
-                this._modeText = 'Live';
-                this.setMode(scope, 'Live');
+                this._modeText = T('cameras.live', 'Live');
+                this.setMode(scope, T('cameras.live', 'Live'));
                 this.paintRec(scope, false);
               },
 
@@ -2435,7 +2441,8 @@ hemma_popup_camera:
              previous version of this popup until someone hard-refreshes. */
           const _ck = 'hemma_cams_' + TPL + '_' + (entity?.entity_id || 'x');
           const _ch = cams.map(c => [c.id, c.s.state, c.s.attributes?.entity_picture, c.s.last_changed].join(':')).join('|')
-            + '|' + Object.keys(reg).length + '|' + window.innerWidth;
+            + '|' + Object.keys(reg).length + '|' + window.innerWidth
+            + '|' + (hass?.language || '') + (window._hemmaT ? '+' : '-');
           window._hc = window._hc || {};
           if (window._hc[_ck]?.h === _ch) return window._hc[_ck].r;
 
@@ -2707,7 +2714,7 @@ hemma_popup_camera:
             const dead  = ['unavailable', 'unknown'].includes(String(cam.s.state || '').toLowerCase());
             const pic   = resolveUrl(cam.s.attributes?.entity_picture);
             const label = labelOf(cam);
-            const age   = dead ? 'Unavailable' : ageOf(cam);
+            const age   = dead ? L('state.default.unavailable', 'Unavailable') : ageOf(cam);
 
             const placeholder = '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);">'
               + '<ha-icon icon="mdi:cctv" style="--mdc-icon-size:30px;color:rgba(255,255,255,0.20);"></ha-icon></div>';
@@ -2781,7 +2788,7 @@ hemma_popup_camera:
             const label = labelOf(cam);
             const row = [];
 
-            row.push(circleBtn('cam-mute', 'mdi:volume-off', 'mute', null, 'Unmute'));
+            row.push(circleBtn('cam-mute', 'mdi:volume-off', 'mute', null, T('cameras.unmute', 'Unmute')));
 
             /* Only the camera's own siren. Apple's camera view carries no locks or
                alarm panel, and neither does this one — accessory_entities is the
@@ -2795,10 +2802,10 @@ hemma_popup_camera:
               const dom = id.split('.')[0];
               const open = accState(id) === 'open';
               const META = {
-                lock:                 ['mdi:lock-open-variant', 'mdi:lock',             'Unlocked', 'Locked'],
-                siren:                ['mdi:bullhorn',          'mdi:bullhorn-outline', 'Siren On', 'Siren'],
-                alarm_control_panel:  ['mdi:shield-check',      'mdi:shield-off-outline', 'Armed',  'Disarmed'],
-                cover:                ['mdi:garage-open',       'mdi:garage',           'Open',     'Closed'],
+                lock:                 ['mdi:lock-open-variant', 'mdi:lock',             L('component.lock.entity_component._.state.unlocked', 'Unlocked'), L('component.lock.entity_component._.state.locked', 'Locked')],
+                siren:                ['mdi:bullhorn',          'mdi:bullhorn-outline', T('cameras.siren_on', 'Siren On'), T('cameras.siren', 'Siren')],
+                alarm_control_panel:  ['mdi:shield-check',      'mdi:shield-off-outline', T('security.armed', 'Armed'), L('component.alarm_control_panel.entity_component._.state.disarmed', 'Disarmed')],
+                cover:                ['mdi:garage-open',       'mdi:garage',           L('component.cover.entity_component._.state.open', 'Open'), L('component.cover.entity_component._.state.closed', 'Closed')],
               };
               const m = META[dom] || META.cover;
               const icOpen = m[0], icShut = m[1], lbOpen = m[2], lbShut = m[3];
@@ -2825,10 +2832,10 @@ hemma_popup_camera:
             const recId = states[recAlt] ? recAlt
               : sibs(cam.id).find(id => id.startsWith('camera.') && /_last_recording$/.test(id) && states[id]);
             if (recId) {
-              row.push(circleBtn('cam-rec', 'mdi:play-circle-outline', 'rec', recId, 'Last Recording'));
+              row.push(circleBtn('cam-rec', 'mdi:play-circle-outline', 'rec', recId, T('cameras.last_recording', 'Last Recording')));
             }
 
-            row.push(circleBtn('cam-fit', 'mdi:fit-to-screen-outline', 'fit', null, 'Zoom to Fit'));
+            row.push(circleBtn('cam-fit', 'mdi:fit-to-screen-outline', 'fit', null, T('cameras.zoom_to_fit', 'Zoom to Fit')));
 
 
 
@@ -2874,7 +2881,7 @@ hemma_popup_camera:
               ? '<div style="display:flex;flex-wrap:wrap;gap:' + GAP + 'px;padding:4px ' + pad + 'px 26px;">'
                 + cams.map(buildTile).join('') + '</div>'
               : '<div style="padding:8px ' + pad + 'px 26px;' + font + 'font-size:22px;font-weight:400;letter-spacing:-.5px;'
-                + 'text-align:left;color:var(--hemma-popup-tiles-text-primary,#fff);">No cameras available</div>')
+                + 'text-align:left;color:var(--hemma-popup-tiles-text-primary,#fff);">' + T('cameras.none_available', 'No cameras available') + '</div>')
             + '</div>';
 
           const _r = {

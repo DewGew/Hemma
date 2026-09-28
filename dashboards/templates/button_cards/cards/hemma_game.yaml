@@ -56,5 +56,8 @@ hemma_game:
         return `<span class="hemma-media-state">${esc(variables.game)}</span>`;
       }
       if (!entity?.state) return "";
-      return hass.formatEntityState(entity) || entity.state;
+      // Switching HA's language swaps localize while the new strings are
+      // still loading, and formatEntityState throws for that window.
+      try { return hass.formatEntityState(entity) || entity.state; }
+      catch (e) { return entity.state; }
     ]]]

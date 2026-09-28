@@ -53,6 +53,7 @@ hemma_network:
   # Idle · Light Downloads/Uploads · Active Downloads/Uploads · Heavy Downloads/Uploads
   state_display: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const dlId  = variables.entity_download || entity?.entity_id;
       const ulId  = variables.entity_upload   || variables.upload_sensor || null;
       const stat1 = variables.entity_stat_1 || null;
@@ -76,11 +77,11 @@ hemma_network:
       const light = Number(variables.light_threshold ?? 10);
       const heavy = Number(variables.heavy_threshold ?? 50);
 
-      if (max < idle) return fit('Idle');
+      if (max < idle) return fit(T('network.idle', 'Idle'));
 
-      const tier = max < light ? 'Light' : max < heavy ? 'Active' : 'Heavy';
-      const dir  = (!dlOk || (ulOk && ul > dl)) ? 'Upload' : 'Download';
-      return fit(`${tier} ${dir}`);
+      const tier = max < light ? T('network.light', 'Light') : max < heavy ? T('network.active', 'Active') : T('network.heavy', 'Heavy');
+      const dir  = (!dlOk || (ulOk && ul > dl)) ? T('network.upload', 'Upload') : T('network.download', 'Download');
+      return fit(T('network.activity', '{tier} {dir}', { tier, dir }));
     ]]]
 
   # Icon Activity

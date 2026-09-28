@@ -11,7 +11,7 @@ window.hemmaMenuGlass = {
       // The panel's menus, not the card radius: a dropdown is chrome and reads as
       // a different object from the cards it floats over.
       + '.hemma-menu-glass{--hemma-menu-radius:'
-      + ' var(--hemma-menu-radius-desktop, 16px);'
+      + ' var(--hemma-menu-radius-desktop, 22px);'
       + '--hemma-menu-pane-auto: rgba(30,33,38,0.30);'
       + '--hemma-popup-chev-opacity: .35;'
       + '--hemma-menu-shadow: var(--hemma-elevation-floating, 0 8px 20px rgba(0,0,0,0.13));}'
@@ -440,8 +440,78 @@ window.hemmaMenuGlass = {
   apply();
 })();
 
+// ── Number and money formatting ──────────────────────────────────────────────
+(function () {
+  var hassNow = function () {
+    var h = document.querySelector('home-assistant');
+    return (h && h.hass) || null;
+  };
+  var LOCALES = {
+    comma_decimal: ['en-US', 'en'], decimal_comma: ['de', 'es', 'it'],
+    space_comma: ['fr', 'sv', 'cs'], quote_decimal: ['de-CH'],
+  };
+  var cache = {};
+  var formatter = function (min, max, cur) {
+    var hass = hassNow();
+    var nf = (hass && hass.locale && hass.locale.number_format) || 'language';
+    var lang = (hass && (hass.locale && hass.locale.language || hass.language)) || 'en';
+    var key = nf + '|' + lang + '|' + min + '|' + max + '|' + (cur || '');
+    if (cache[key]) return cache[key];
+    var locale = nf === 'language' ? lang : nf === 'system' ? undefined
+      : nf === 'none' ? 'en-US' : (LOCALES[nf] || lang);
+    var opts = { minimumFractionDigits: min, maximumFractionDigits: max };
+    if (nf === 'none') opts.useGrouping = false;
+    if (cur) { opts.style = 'currency'; opts.currency = cur; }
+    var f;
+    try { f = new Intl.NumberFormat(locale, opts); } catch (e) { f = null; }
+    return (cache[key] = f);
+  };
+  window.hemmaNum = function (v, min, max) {
+    var n = Number(v);
+    if (v === null || v === undefined || v === '' || !isFinite(n)) return '—';
+    var lo = min == null ? 0 : min, hi = max == null ? Math.max(lo, 2) : max;
+    var f = formatter(lo, hi, null);
+    return f ? f.format(n) : n.toFixed(hi);
+  };
+  window.hemmaCurrency = function (unit) {
+    var u = String(unit || '').trim();
+    if (/^[A-Z]{3}$/.test(u)) return u;
+    var hass = hassNow();
+    var c = hass && hass.config && hass.config.currency;
+    return c ? String(c).toUpperCase() : '';
+  };
+  window.hemmaMoney = function (v, unit, digits) {
+    var n = Number(v);
+    if (v === null || v === undefined || v === '' || !isFinite(n)) return '—';
+    var d = digits == null ? (Math.abs(n) >= 100 ? 0 : 2) : digits;
+    var cur = window.hemmaCurrency(unit);
+    var f = cur ? formatter(d, d, cur) : null;
+    if (f) return f.format(n);
+    var u = String(unit || '').trim();
+    return (window.hemmaNum(n, d, d) + (u ? ' ' + u : '')).trim();
+  };
+  window.hemmaCurrencySymbol = function (unit) {
+    var cur = window.hemmaCurrency(unit);
+    var f = cur ? formatter(0, 0, cur) : null;
+    var part = f && f.formatToParts ? f.formatToParts(1).filter(function (x) { return x.type === 'currency'; })[0] : null;
+    return part ? part.value : (String(unit || '').trim() || '$');
+  };
+})();
+
 // ── Now Playing collector ────────────────────────────────────────────────────
 (function () {
+  // The table may load before or after this file, so look it up per call.
+  var _hemmaT = function (k, en, v) {
+    if (typeof window._hemmaT === 'function') return window._hemmaT(k, en, v);
+    var s = String(en);
+    if (v) for (var p in v) s = s.split('{' + p + '}').join(String(v[p]));
+    return s;
+  };
+  var _hemmaL = function (k, en) {
+    var h = document.querySelector('home-assistant');
+    var v = h && h.hass && h.hass.localize && h.hass.localize(k);
+    return (v && v !== k) ? v : en;
+  };
   if (!window.HEMMA_ACTIVE_STATES) {
     window.HEMMA_ACTIVE_STATES = new Set([
       'on', 'open', 'opening', 'playing', 'unlocked', 'unlocking',
@@ -808,7 +878,7 @@ window.hemmaMenuGlass = {
 
     function moreMarkup(variables, eid) {
       if (!any(variables)) return '';
-      return '<div class="hemma-act-hit hemma-act-more" role="button" aria-label="Actions"'
+      return '<div class="hemma-act-hit hemma-act-more" role="button" aria-label="' + _hemmaT('a11y.actions', 'Actions') + '"'
         + ' data-more-key="' + esc(openKey(eid)) + '">'
         + '<svg class="hemma-act-dots" viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
         + '<circle cx="3" cy="12" r="2.5"></circle>'
@@ -1314,7 +1384,7 @@ window.hemmaMenuGlass = {
           kind: 'player',
           entity: eid,
           art: art,
-          title: title || norm(a.friendly_name) || 'Media',
+          title: title || norm(a.friendly_name) || _hemmaT('media.title', 'Media'),
           subtitle: artist,
           source: norm(a.app_name || a.source || a.friendly_name),
           started: ms(s.last_changed),
@@ -1350,7 +1420,7 @@ window.hemmaMenuGlass = {
           art: abs(a.image_url || a.entity_picture_local || a.entity_picture || a.media_image_url),
           title: full,
           subtitle: '',
-          source: 'Plex · ' + (norm(a.user) || 'Unknown'),
+          source: _hemmaT('media.plex_user', 'Plex · {user}', { user: norm(a.user) || _hemmaL('state.default.unknown', 'Unknown') }),
           started: ms(sState.last_changed),
           state: 'playing',
           playing: true,
@@ -2120,8 +2190,8 @@ window.hemmaMenuGlass = {
               const mediaType = (a.media_type || '').toLowerCase();
               const isEpisode = mediaType === 'episode';
               const showTitle = isEpisode
-                ? (a.grandparent_title || a.full_title || 'Unknown')
-                : (a.title || a.full_title || 'Unknown');
+                ? (a.grandparent_title || a.full_title || _hemmaL('state.default.unknown', 'Unknown'))
+                : (a.title || a.full_title || _hemmaL('state.default.unknown', 'Unknown'));
               const episodeTitle = isEpisode ? (a.title || '') : '';
               const seasonEpisode = isEpisode
                 ? 'S' + (a.parent_media_index || '?') + ' · E' + (a.media_index || '?')
@@ -2137,9 +2207,9 @@ window.hemmaMenuGlass = {
                      : p.length === 2 ? p[0]*60 + p[1] : null;
               })();
               const timeLeft = (remSecs == null || remSecs <= 0) ? ''
-                : remSecs < 90   ? 'Less than 1 min left'
-                : remSecs < 3600 ? Math.floor(remSecs/60) + ' min left'
-                : Math.floor(remSecs/3600) + ' hr ' + Math.floor((remSecs%3600)/60) + ' min left';
+                : remSecs < 90   ? _hemmaT('time.less_than_min_left', 'Less than 1 min left')
+                : remSecs < 3600 ? _hemmaT('time.min_left', '{n} min left', { n: Math.floor(remSecs/60) })
+                : _hemmaT('time.hr_min_left', '{h} hr {m} min left', { h: Math.floor(remSecs/3600), m: Math.floor((remSecs%3600)/60) });
 
               /* Video / Audio Formatting */
               const fmtVCodec = (c) => {
@@ -2180,7 +2250,7 @@ window.hemmaMenuGlass = {
               const videoRes = fmtRes(a.stream_video_full_resolution || (a.video_resolution ? a.video_resolution+'p' : ''));
               const videoCodec = fmtVCodec(a.stream_video_codec || a.video_codec || '');
               const vBrKbps = parseInt(a.stream_video_bitrate || '0');
-              const videoBitrate = vBrKbps > 0 ? (vBrKbps >= 1000 ? (vBrKbps/1000).toFixed(1)+' Mbps' : vBrKbps+' Kbps') : '';
+              const videoBitrate = vBrKbps > 0 ? (vBrKbps >= 1000 ? window.hemmaNum(vBrKbps/1000, 1, 1)+' Mbps' : vBrKbps+' Kbps') : '';
               const videoDR = fmtVideoDR(a.stream_video_dynamic_range || a.video_dynamic_range || '');
               const hasDV = videoDR.startsWith('Dolby Vision');
               const videoDVExtra = hasDV ? 'Dolby Vision' : '';
@@ -2197,7 +2267,7 @@ window.hemmaMenuGlass = {
               const qualityProfile = a.quality_profile || '';
               const streamBrKbps = parseInt(a.stream_bitrate || a.bitrate || '0');
               const streamBrStr = streamBrKbps > 0
-                ? (streamBrKbps >= 1000 ? (streamBrKbps/1000).toFixed(1)+' Mbps' : streamBrKbps+' Kbps')
+                ? (streamBrKbps >= 1000 ? window.hemmaNum(streamBrKbps/1000, 1, 1)+' Mbps' : streamBrKbps+' Kbps')
                 : '';
 
               /* ip_address is NOT part of hasConn: without location or the local
@@ -2210,7 +2280,7 @@ window.hemmaMenuGlass = {
               const relayed = String(a.relayed ?? '') === '1' || String(a.relay ?? '') === '1';
               const playerStr = String(a.player || a.device || a.platform || '').trim();
               const connValue = [
-                hasConn ? (isLocal ? 'Local' : 'Remote') : '',
+                hasConn ? (isLocal ? _hemmaT('media.local', 'Local') : _hemmaT('media.remote', 'Remote')) : '',
                 playerStr,
               ].filter(Boolean).join(' · ');
               const connHint = [
@@ -2218,16 +2288,16 @@ window.hemmaMenuGlass = {
                   ? ([a.geo_city || '', a.geo_region || ''].filter(Boolean).join(', ')
                      || String(a.geo_country || ''))
                   : '',
-                relayed ? 'Proxied by Plex Relay rather than served directly' : '',
+                relayed ? _hemmaT('media.relay_note', 'Proxied by Plex Relay rather than served directly') : '',
               ].filter(Boolean).join(' — ');
 
               /* Doubled backslashes, and they must stay: this block is a template
                * literal, so the JS engine consumes escapes BEFORE button-card
                * evals it. A single \\s arrives as a bare s and matches the wrong
                * thing silently. */
-              const decisionLabel = (raw) => raw === 'direct play' ? 'Direct Play'
-                : raw === 'direct stream' || raw === 'copy' ? 'Direct Stream'
-                : raw === 'transcode' ? 'Transcode'
+              const decisionLabel = (raw) => raw === 'direct play' ? _hemmaT('media.direct_play', 'Direct Play')
+                : raw === 'direct stream' || raw === 'copy' ? _hemmaT('media.direct_stream', 'Direct Stream')
+                : raw === 'transcode' ? _hemmaT('media.transcode', 'Transcode')
                 : raw ? raw.replace(/(^|\\s)\\S/g, c => c.toUpperCase()) : '';
               const decisionColor = (raw) => raw === 'direct play'
                 ? 'var(--hemma-popup-primary-color,#00c3d0)'
@@ -2324,19 +2394,19 @@ window.hemmaMenuGlass = {
                 : '';
 
               const videoTile = '<div style="' + tileStyle + '">'
-                + tileHead('mdi:movie-open-outline', 'Video', tdLabel, tdColor)
+                + tileHead('mdi:movie-open-outline', _hemmaT('media.video', 'Video'), tdLabel, tdColor)
                 + tileValue(videoStr || '—')
                 + tileSub(videoDVExtra)
               + '</div>';
 
               const audioTile = '<div style="' + tileStyle + '">'
-                + tileHead('mdi:volume-high', 'Audio', adLabel, adColor)
+                + tileHead('mdi:volume-high', _hemmaT('media.audio', 'Audio'), adLabel, adColor)
                 + tileValue(audioStr || '—')
                 + tileSub(audioExtra)
               + '</div>';
 
               const qualityTile = '<div style="' + tileStyle + '">'
-                + tileHead('mdi:quality-high', 'Quality', '', '')
+                + tileHead('mdi:quality-high', _hemmaT('media.quality', 'Quality'), '', '')
                 + tileValue([qualityProfile, streamBrStr].filter(Boolean).join(' · ') || '—')
               + '</div>';
 
@@ -2346,8 +2416,8 @@ window.hemmaMenuGlass = {
                * server directly, and is bandwidth-capped. */
               const connectionTile = '<div style="' + tileStyle + '"'
                   + (connHint ? ' title="' + esc(connHint) + '"' : '') + '>'
-                + tileHead(isLocal ? 'mdi:lan-connect' : 'mdi:earth', 'Connection',
-                    relayed ? 'Relayed' : '', 'var(--hemma-popup-orange-color,#ff9230)')
+                + tileHead(isLocal ? 'mdi:lan-connect' : 'mdi:earth', _hemmaT('media.connection', 'Connection'),
+                    relayed ? _hemmaT('media.relayed', 'Relayed') : '', 'var(--hemma-popup-orange-color,#ff9230)')
                 + tileValue(connValue || '—')
               + '</div>';
 
@@ -2697,6 +2767,12 @@ window.hemmaMenuGlass = {
 
 // ── Navigation ───────────────────────────────────────────────────────────────
 (function () {
+  var _hemmaT = function (k, en, v) {
+    if (typeof window._hemmaT === 'function') return window._hemmaT(k, en, v);
+    var s = String(en);
+    if (v) for (var p in v) s = s.split('{' + p + '}').join(String(v[p]));
+    return s;
+  };
   if (customElements.get('hemma-nav')) return;
 
   const CHEVRON =
@@ -2900,7 +2976,8 @@ window.hemmaMenuGlass = {
 
         const label = document.createElement('span');
         label.className = 'label';
-        label.textContent = route.label || '';
+        label.textContent = route.menu === 'scenes' && route.label === 'Scenes'
+          ? _hemmaT('nav.scenes', 'Scenes') : (route.label || '');
         btn.appendChild(label);
 
         const badge = document.createElement('span');
@@ -3720,6 +3797,18 @@ window.hemmaMenuGlass = {
 })();
 
 (function () {
+  // The table may load before or after this file, so look it up per call.
+  var _hemmaT = function (k, en, v) {
+    if (typeof window._hemmaT === 'function') return window._hemmaT(k, en, v);
+    var s = String(en);
+    if (v) for (var p in v) s = s.split('{' + p + '}').join(String(v[p]));
+    return s;
+  };
+  var _hemmaL = function (k, en) {
+    var h = document.querySelector('home-assistant');
+    var v = h && h.hass && h.hass.localize && h.hass.localize(k);
+    return (v && v !== k) ? v : en;
+  };
   if (window.hemmaPopup) return;
 
   var SHEET_MAX = 768;
@@ -4193,8 +4282,9 @@ window.hemmaMenuGlass = {
         var shT = Number(shTot.state);
         if (isNaN(shV) || isNaN(shT) || shT <= 0) { el.textContent = ''; continue; }
         var shPct = Math.round((shV / shT) * 100);
-        el.textContent = shPct > 0
-          ? shPct + (el.dataset.hemmaSuffix || '%') : '';
+        var shSfx = el.dataset.hemmaSuffix || '%';
+        el.textContent = shPct <= 0 ? ''
+          : shSfx.indexOf('{n}') >= 0 ? shSfx.split('{n}').join(String(shPct)) : shPct + shSfx;
         continue;
       }
       if (el.dataset.hemmaLive === 'fill') {
@@ -4263,7 +4353,7 @@ window.hemmaMenuGlass = {
       if (el.dataset.hemmaLive === 'bar') {
         el.style.width = Math.max(0, Math.min(100, n)) + '%';
       } else {
-        el.textContent = Math.round(n) + (el.dataset.hemmaSuffix || '');
+        el.textContent = window.hemmaNum(Math.round(n), 0, 0) + (el.dataset.hemmaSuffix || '');
       }
     }
   }
@@ -4297,7 +4387,7 @@ window.hemmaMenuGlass = {
             '<div class="header" hidden>' +
               '<div class="header-bar">' +
                 '<section class="header-nav">' +
-                  '<button class="header-close" type="button" aria-label="Close">' +
+                  '<button class="header-close" type="button" aria-label="' + _hemmaL('ui.common.close', 'Close') + '">' +
                     '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
                       '<path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"></path>' +
                     '</svg>' +
@@ -4981,6 +5071,18 @@ window.hemmaMenuGlass = {
 })();
 
 (function () {
+  // The table may load before or after this file, so look it up per call.
+  var _hemmaT = function (k, en, v) {
+    if (typeof window._hemmaT === 'function') return window._hemmaT(k, en, v);
+    var s = String(en);
+    if (v) for (var p in v) s = s.split('{' + p + '}').join(String(v[p]));
+    return s;
+  };
+  var _hemmaL = function (k, en) {
+    var h = document.querySelector('home-assistant');
+    var v = h && h.hass && h.hass.localize && h.hass.localize(k);
+    return (v && v !== k) ? v : en;
+  };
   if (window._hemmaUI) return;
 
   var esc = function (s) {
@@ -5218,7 +5320,7 @@ window.hemmaMenuGlass = {
       + '@media (min-width: 340px){'
       +   '.hui-sub{display:inline-block;max-width:100%;vertical-align:bottom;'
       +     'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
-      +   '.hui-sub2::before{content:"  \\00b7  ";opacity:.6}'
+      +   '.hui-sub2::before{content:"\\00b7";opacity:.6;margin:0 .4em}'
       + '}'
       + '.hui-row{overflow:hidden;position:relative;--cf-w:88px;}'
       + '.hui-cf{position:absolute;top:12px;bottom:12px;right:8px;width:var(--cf-w);'
@@ -5377,7 +5479,7 @@ window.hemmaMenuGlass = {
 
       if (arming) {
         out += '<div class="hui-cf" data-hemma-cf="' + esc(JSON.stringify(r.svc)) + '">'
-          + esc(r.confirm === true ? 'Confirm' : r.confirm) + '</div>';
+          + esc(r.confirm === true ? _hemmaT('common.confirm', 'Confirm') : r.confirm) + '</div>';
       }
       out += '</div>';   // .hui-row
     });
@@ -5919,7 +6021,7 @@ window.hemmaMenuGlass = {
       });
       out += '</div>';
       out += '<div class="hui-mov" hidden><div class="hui-movin">'
-        + '<div class="hui-mback" role="button" aria-label="Back">'
+        + '<div class="hui-mback" role="button" aria-label="' + _hemmaL('ui.common.back', 'Back') + '">'
         +   '<svg width="14" height="24" viewBox="0 0 14 24" fill="none"'
         +   ' style="margin-right:2px;pointer-events:none;">'
         +   '<path d="M12 2.5 L2.8 12 L12 21.5" stroke="#fff" stroke-width="3"'
@@ -6072,15 +6174,15 @@ window.hemmaMenuGlass = {
   }
 
   var COVER_KINDS = {
-    curtain: { key: 'curtain', label: 'Curtains', open: 'curtain-open',         closed: 'curtain-closed' },
-    blind:   { key: 'blind',   label: 'Blinds',   open: 'blinds-vertical-open', closed: 'blinds-vertical-closed' },
-    shade:   { key: 'shade',   label: 'Shades',   open: 'roller-shade-open',    closed: 'roller-shade-closed' },
-    shutter: { key: 'shutter', label: 'Shutters', open: 'window-shade-open',    closed: 'window-shade-closed' },
-    awning:  { key: 'awning',  label: 'Awnings',  open: 'window-shade-open',    closed: 'window-shade-closed' },
-    window:  { key: 'window',  label: 'Windows',  open: 'window-shade-open',    closed: 'window-shade-closed' },
-    door:    { key: 'door',    label: 'Doors',    open: 'door-open',            closed: 'door-closed' },
-    garage:  { key: 'garage',  label: 'Garage',   open: 'door-open',            closed: 'door-closed' },
-    gate:    { key: 'gate',    label: 'Gates',    open: 'door-open',            closed: 'door-closed' },
+    curtain: { key: 'curtain', get label() { return _hemmaT('covers.kind.curtain', 'Curtains'); }, open: 'curtain-open',         closed: 'curtain-closed' },
+    blind:   { key: 'blind',   get label() { return _hemmaT('covers.kind.blind', 'Blinds'); },   open: 'blinds-vertical-open', closed: 'blinds-vertical-closed' },
+    shade:   { key: 'shade',   get label() { return _hemmaT('covers.kind.shade', 'Shades'); },   open: 'roller-shade-open',    closed: 'roller-shade-closed' },
+    shutter: { key: 'shutter', get label() { return _hemmaT('covers.kind.shutter', 'Shutters'); }, open: 'window-shade-open',    closed: 'window-shade-closed' },
+    awning:  { key: 'awning',  get label() { return _hemmaT('covers.kind.awning', 'Awnings'); },  open: 'window-shade-open',    closed: 'window-shade-closed' },
+    window:  { key: 'window',  get label() { return _hemmaT('covers.kind.window', 'Windows'); },  open: 'window-shade-open',    closed: 'window-shade-closed' },
+    door:    { key: 'door',    get label() { return _hemmaT('covers.kind.door', 'Doors'); },    open: 'door-open',            closed: 'door-closed' },
+    garage:  { key: 'garage',  get label() { return _hemmaT('covers.kind.garage', 'Garage'); },   open: 'door-open',            closed: 'door-closed' },
+    gate:    { key: 'gate',    get label() { return _hemmaT('covers.kind.gate', 'Gates'); },    open: 'door-open',            closed: 'door-closed' },
   };
   // device_class first, then a guess from the entity_id, then curtain.
   window.hemmaCoverKind = function (dc, id) {
@@ -6156,8 +6258,8 @@ window.hemmaMenuGlass = {
       var d0 = new Date(); d0.setHours(0, 0, 0, 0);
       var dw = new Date(ms(watered)); dw.setHours(0, 0, 0, 0);
       var days = Math.round((d0 - dw) / 86400000);
-      bits.push(days <= 0 ? 'Watered today'
-        : days === 1 ? 'Watered yesterday' : 'Watered ' + days + ' days ago');
+      bits.push(days <= 0 ? _hemmaT('plant.watered_today', 'Watered today')
+        : days === 1 ? _hemmaT('plant.watered_yesterday', 'Watered yesterday') : _hemmaT('plant.watered_days_ago', 'Watered {n} days ago', { n: days }));
     }
     // Drying rate from the tail since the last watering, in points per day.
     var tail = watered ? pts.filter(function (p) { return ms(p) >= ms(watered); }) : pts;
@@ -6170,8 +6272,8 @@ window.hemmaMenuGlass = {
         var floorPct = isFinite(dryPct) ? dryPct : 20;
         var left = (last.v - floorPct) / perDay;
         if (left >= 1 && left < 60) {
-          bits.push('dry in about ' + Math.round(left)
-            + (Math.round(left) === 1 ? ' day' : ' days'));
+          bits.push(Math.round(left) === 1 ? _hemmaT('plant.dry_in_day', 'dry in about {n} day', { n: 1 }) : _hemmaT('plant.dry_in_days', 'dry in about {n} days', { n: Math.round(left) }));
+            
         }
       }
     }
@@ -6181,6 +6283,18 @@ window.hemmaMenuGlass = {
   window._hemmaUI = { hero: hero, headline: headline, group: group, legend: legend, note: note, shelf: shelf, mediaRow: mediaRow, segments: segments, slider: slider, icon: icon, esc: esc, prime: prime, plantWater: plantWater, tokens: T, v: 146 };
 })();
 (function () {
+  // The table may load before or after this file, so look it up per call.
+  var _hemmaT = function (k, en, v) {
+    if (typeof window._hemmaT === 'function') return window._hemmaT(k, en, v);
+    var s = String(en);
+    if (v) for (var p in v) s = s.split('{' + p + '}').join(String(v[p]));
+    return s;
+  };
+  var _hemmaL = function (k, en) {
+    var h = document.querySelector('home-assistant');
+    var v = h && h.hass && h.hass.localize && h.hass.localize(k);
+    return (v && v !== k) ? v : en;
+  };
   if (window._hemmaNotify) return;
 
   var HOURS = 24;
@@ -6233,20 +6347,28 @@ window.hemmaMenuGlass = {
     var id = readEntityId();
     if (!id) return false;
     var h = hassOf();
-    if (!h || !h.callService) return false;
+    if (!h || !h.callWS) return false;
+    // A write while Core shuts down fails, and callService turns that into an error toast.
+    if (h.connection && h.connection.connected === false) return false;
     var dom = String(id).split('.')[0];
+    var service, data;
+    if (dom === 'input_datetime') {
+      service = 'set_datetime';
+      data = { entity_id: id, timestamp: Math.round(ts / 1000) };
+    } else if (dom === 'input_text') {
+      service = 'set_value';
+      data = { entity_id: id, value: String(ts) };
+    } else if (dom === 'input_number') {
+      service = 'set_value';
+      data = { entity_id: id, value: ts };
+    } else {
+      return false;
+    }
     try {
-      if (dom === 'input_datetime') {
-        h.callService('input_datetime', 'set_datetime',
-          { entity_id: id, timestamp: Math.round(ts / 1000) });
-      } else if (dom === 'input_text') {
-        h.callService('input_text', 'set_value',
-          { entity_id: id, value: String(ts) });
-      } else if (dom === 'input_number') {
-        h.callService('input_number', 'set_value', { entity_id: id, value: ts });
-      } else {
-        return false;
-      }
+      Promise.resolve(h.callWS({ type: 'call_service', domain: dom, service: service, service_data: data }))
+        .catch(function () {
+          try { localStorage.setItem(KEY, String(ts)); } catch (e) {}
+        });
     } catch (e) { return false; }
     return true;
   }
@@ -6295,24 +6417,24 @@ window.hemmaMenuGlass = {
 
   function ago(ms) {
     var s = Math.max(0, (Date.now() - ms) / 1000);
-    if (s < 60) return 'Just now';
+    if (s < 60) return _hemmaT('time.just_now_cap', 'Just now');
     var m = Math.round(s / 60);
-    if (m < 60) return m + ' min ago';
+    if (m < 60) return _hemmaT('time.min_ago', '{n} min ago', { n: m });
     var h = Math.round(m / 60);
-    if (h < 24) return h + (h === 1 ? ' hr ago' : ' hrs ago');
+    if (h < 24) return h === 1 ? _hemmaT('time.hr_ago', '{n} hr ago', { n: 1 }) : _hemmaT('time.hrs_ago', '{n} hrs ago', { n: h });
     var d = Math.round(h / 24);
-    return d === 1 ? 'Yesterday' : d + ' days ago';
+    return d === 1 ? _hemmaT('time.yesterday', 'Yesterday') : _hemmaT('time.days_ago', '{n} days ago', { n: d });
   }
 
 
   var ALARM_WORD = {
-    armed_home: 'Alarm armed (Home)',
-    armed_away: 'Alarm armed (Away)',
-    armed_night: 'Alarm armed (Night)',
-    armed_vacation: 'Alarm armed (Vacation)',
-    armed_custom_bypass: 'Alarm armed (Custom)',
-    disarmed: 'Alarm disarmed',
-    triggered: 'Alarm triggered',
+    get armed_home() { return _hemmaT('notify.alarm.armed_home', 'Alarm armed (Home)'); },
+    get armed_away() { return _hemmaT('notify.alarm.armed_away', 'Alarm armed (Away)'); },
+    get armed_night() { return _hemmaT('notify.alarm.armed_night', 'Alarm armed (Night)'); },
+    get armed_vacation() { return _hemmaT('notify.alarm.armed_vacation', 'Alarm armed (Vacation)'); },
+    get armed_custom_bypass() { return _hemmaT('notify.alarm.armed_custom_bypass', 'Alarm armed (Custom)'); },
+    get disarmed() { return _hemmaT('notify.alarm.disarmed', 'Alarm disarmed'); },
+    get triggered() { return _hemmaT('notify.alarm.triggered', 'Alarm triggered'); },
   };
 
   var VACUUM_BUSY = { cleaning: 1, returning: 1 };
@@ -6355,18 +6477,18 @@ window.hemmaMenuGlass = {
   }
 
   var PLANT_WORD = {
-    'moisture:Low': 'needs water',
-    'moisture:High': 'has been overwatered',
-    'conductivity:Low': 'needs feeding',
-    'conductivity:High': 'has too much fertilizer',
-    'illuminance:Low': 'needs more light',
-    'illuminance:High': 'is getting too much light',
-    'dli:Low': 'needs more light',
-    'dli:High': 'is getting too much light',
-    'temperature:Low': 'is too cold',
-    'temperature:High': 'is too warm',
-    'humidity:Low': 'is in air that is too dry',
-    'humidity:High': 'is in air that is too humid',
+    get 'moisture:Low'() { return _hemmaT('notify.plant.needs_water', '{name} needs water'); },
+    get 'moisture:High'() { return _hemmaT('notify.plant.overwatered', '{name} has been overwatered'); },
+    get 'conductivity:Low'() { return _hemmaT('notify.plant.needs_feeding', '{name} needs feeding'); },
+    get 'conductivity:High'() { return _hemmaT('notify.plant.too_much_fertilizer', '{name} has too much fertilizer'); },
+    get 'illuminance:Low'() { return _hemmaT('notify.plant.needs_light', '{name} needs more light'); },
+    get 'illuminance:High'() { return _hemmaT('notify.plant.too_much_light', '{name} is getting too much light'); },
+    get 'dli:Low'() { return _hemmaT('notify.plant.needs_light', '{name} needs more light'); },
+    get 'dli:High'() { return _hemmaT('notify.plant.too_much_light', '{name} is getting too much light'); },
+    get 'temperature:Low'() { return _hemmaT('notify.plant.too_cold', '{name} is too cold'); },
+    get 'temperature:High'() { return _hemmaT('notify.plant.too_warm', '{name} is too warm'); },
+    get 'humidity:Low'() { return _hemmaT('notify.plant.air_too_dry', '{name} is in air that is too dry'); },
+    get 'humidity:High'() { return _hemmaT('notify.plant.air_too_humid', '{name} is in air that is too humid'); },
   };
 
   var APPLIANCE_DONE = /^(off|idle|finished|complete|completed|standby|end|ready)$/i;
@@ -6439,9 +6561,9 @@ window.hemmaMenuGlass = {
 
     if (id.indexOf('lock.') === 0) {
       var lk = { opens: ['hemma_badge_lock_group', 'hemma_popup_lock'] };
-      if (s === 'locked') return { label: name + ' locked', icon: 'lock-fill', tone: 'good', opens: lk.opens };
-      if (s === 'unlocked') return { label: name + ' unlocked', icon: 'lock-open-fill', tone: 'warn', opens: lk.opens };
-      if (s === 'jammed') return { label: name + ' jammed', icon: 'exclamation', tone: 'bad', opens: lk.opens };
+      if (s === 'locked') return { label: _hemmaT('notify.lock_locked', '{name} locked', { name }), icon: 'lock-fill', tone: 'good', opens: lk.opens };
+      if (s === 'unlocked') return { label: _hemmaT('notify.lock_unlocked', '{name} unlocked', { name }), icon: 'lock-open-fill', tone: 'warn', opens: lk.opens };
+      if (s === 'jammed') return { label: _hemmaT('notify.lock_jammed', '{name} jammed', { name }), icon: 'exclamation', tone: 'bad', opens: lk.opens };
       return null;
     }
 
@@ -6453,11 +6575,11 @@ window.hemmaMenuGlass = {
         image: pic || undefined, imageFit: 'cover',
       };
       if (s === 'home') {
-        return { label: name + ' arrived', tone: 'good', icon: who.icon,
+        return { label: _hemmaT('notify.arrived', '{name} arrived', { name }), tone: 'good', icon: who.icon,
           image: who.image, imageFit: who.imageFit, once: who.once };
       }
       if (s === 'not_home') {
-        return { label: name + ' left', tone: AWAY, icon: who.icon,
+        return { label: _hemmaT('notify.left', '{name} left', { name }), tone: AWAY, icon: who.icon,
           image: who.image, imageFit: who.imageFit, once: who.once };
       }
       if (s && s !== 'unknown' && s !== 'unavailable') {
@@ -6479,23 +6601,23 @@ window.hemmaMenuGlass = {
 
     if (id.indexOf('vacuum.') === 0) {
       if (VACUUM_DONE[s] && VACUUM_BUSY[prev]) {
-        return { label: name + ' finished cleaning', icon: 'vacuum-charge', tone: 'good' };
+        return { label: _hemmaT('notify.finished_cleaning', '{name} finished cleaning', { name }), icon: 'vacuum-charge', tone: 'good' };
       }
-      if (s === 'error') return { label: name + ' needs attention', icon: 'vacuum', tone: 'bad' };
+      if (s === 'error') return { label: _hemmaT('notify.needs_attention', '{name} needs attention', { name }), icon: 'vacuum', tone: 'bad' };
       return null;
     }
 
     if (isDoorbell(id, st)) {
       // "Front Door Ding" is the entity, "Front Door" is the thing that rang.
       var who = name.replace(/\s+(ding|doorbell|chime|button)$/i, '');
-      return { label: (who || name) + ' rang', icon: 'doorbell', tone: 'accent' };
+      return { label: _hemmaT('notify.rang', '{name} rang', { name: who || name }), icon: 'doorbell', tone: 'accent' };
     }
 
     var appl = applianceFor(id);
     if (appl) {
       var done = appl.done ? new RegExp('^' + appl.done + '$', 'i') : APPLIANCE_DONE;
       if (done.test(s) && APPLIANCE_BUSY.test(prev || '')) {
-        return { label: (appl.name || name) + ' finished', icon: 'default', tone: 'good' };
+        return { label: _hemmaT('notify.finished', '{name} finished', { name: appl.name || name }), icon: 'default', tone: 'good' };
       }
       return null;
     }
@@ -6537,8 +6659,8 @@ window.hemmaMenuGlass = {
         id: 'hemma:updates',
         when: newest(updates) || Date.now(),
         label: updates.length === 1
-          ? nameOf(updates[0]).replace(/\s+Update$/i, '') + ' update available'
-          : updates.length + ' updates available',
+          ? _hemmaT('notify.update_available', '{name} update available', { name: nameOf(updates[0]).replace(/\s+Update$/i, '') })
+          : _hemmaT('notify.updates_available', '{n} updates available', { n: updates.length }),
         icon: 'updates',
         tone: 'accent',
         entity: updates[0].entity_id,
@@ -6550,10 +6672,10 @@ window.hemmaMenuGlass = {
       rows.push({
         id: 'hemma:restart',
         when: newest(restarts) || Date.now(),
-        label: 'Restart pending',
+        label: _hemmaT('notify.restart_pending', 'Restart pending'),
         sub: restarts.length === 1
-          ? 'Finishes the ' + nameOf(restarts[0]).replace(/\s+Update$/i, '') + ' update'
-          : 'Finishes ' + restarts.length + ' updates',
+          ? _hemmaT('notify.finishes_one', 'Finishes the {name} update', { name: nameOf(restarts[0]).replace(/\s+Update$/i, '') })
+          : _hemmaT('notify.finishes_n', 'Finishes {n} updates', { n: restarts.length }),
         icon: 'exclamation',
         tone: 'warn',
         entity: restarts[0].entity_id,
@@ -6596,8 +6718,8 @@ window.hemmaMenuGlass = {
         id: 'hemma:battery',
         when: newest(low.map(function (x) { return x.st; })) || Date.now(),
         label: low.length === 1
-          ? nameOf(low[0].st).replace(/\s+Battery$/i, '') + ' battery low'
-          : low.length + ' devices low on battery',
+          ? _hemmaT('notify.battery_low_one', '{name} battery low', { name: nameOf(low[0].st).replace(/\s+Battery$/i, '') })
+          : _hemmaT('notify.battery_low_n', '{n} devices low on battery', { n: low.length }),
         value: low.length === 1 && low[0].pct != null ? low[0].pct + '%' : null,
         icon: 'battery',
         tone: 'bad',
@@ -6607,11 +6729,11 @@ window.hemmaMenuGlass = {
     }
 
     var SAFETY = {
-      moisture: { word: 'Water detected', icon: 'exclamation' },
-      smoke: { word: 'Smoke detected', icon: 'exclamation' },
-      gas: { word: 'Gas detected', icon: 'gas' },
-      carbon_monoxide: { word: 'Carbon monoxide detected', icon: 'exclamation' },
-      safety: { word: 'Safety alert', icon: 'exclamation' },
+      moisture: { word: _hemmaT('notify.safety.moisture', 'Water detected'), icon: 'exclamation' },
+      smoke: { word: _hemmaT('notify.safety.smoke', 'Smoke detected'), icon: 'exclamation' },
+      gas: { word: _hemmaT('notify.safety.gas', 'Gas detected'), icon: 'gas' },
+      carbon_monoxide: { word: _hemmaT('notify.safety.carbon_monoxide', 'Carbon monoxide detected'), icon: 'exclamation' },
+      safety: { word: _hemmaT('notify.safety.safety', 'Safety alert'), icon: 'exclamation' },
     };
     if (on('safety')) {
       ids.forEach(function (id) {
@@ -6636,6 +6758,7 @@ window.hemmaMenuGlass = {
     var openMins = Number(window.HEMMA_NOTIFY_OPEN_MINUTES);
     if (!isFinite(openMins)) openMins = 10;
     if (on('doors') && openMins > 0) {
+      var openSeen = {};
       ids.forEach(function (id) {
         if (id.indexOf('binary_sensor.') !== 0) return;
         var st = S[id];
@@ -6647,12 +6770,18 @@ window.hemmaMenuGlass = {
         if (!isFinite(since)) return;
         var mins = Math.round((Date.now() - since) / 60000);
         if (mins < openMins) return;
+        // A lock's door sensor and a contact sensor on the same door report twice.
+        var openName = tidyName(nameOf(st));
+        if (openSeen[openName]) return;
+        openSeen[openName] = true;
         rows.push({
           id: 'hemma:open:' + id,
           when: since,
-          label: tidyName(nameOf(st)) + ' is open',
-          sub: 'For ' + (mins < 60 ? mins + ' min'
-            : Math.round(mins / 60) + (mins < 120 ? ' hr' : ' hrs')),
+          label: _hemmaT('notify.is_open', '{name} is open', { name: tidyName(nameOf(st)) }),
+          sub: mins < 60 ? _hemmaT('notify.open_for_min', 'For {n} min', { n: mins })
+            : mins < 120 ? _hemmaT('notify.open_for_hr', 'For {n} hr', { n: Math.round(mins / 60) })
+            : _hemmaT('notify.open_for_hrs', 'For {n} hrs', { n: Math.round(mins / 60) }),
+            
           ongoing: true,
           icon: kind === 'window' ? 'window-shade-open' : 'door-open',
           tone: 'warn',
@@ -6688,12 +6817,12 @@ window.hemmaMenuGlass = {
         rows.push({
           id: 'hemma:co2:' + id,
           when: crossed,
-          label: 'Carbon dioxide is high',
+          label: _hemmaT('notify.co2_high', 'Carbon dioxide is high'),
           sub: (function () {
             var where = nameOf(st)
               .replace(/\s*(carbon dioxide|co2)\s*/gi, ' ')
               .replace(/\s+/g, ' ').trim();
-            return Math.round(ppm) + ' ppm' + (where ? ' in ' + where : '');
+            return where ? _hemmaT('notify.co2_in', '{ppm} ppm in {where}', { ppm: Math.round(ppm), where }) : _hemmaT('notify.co2', '{ppm} ppm', { ppm: Math.round(ppm) });
           })(),
           icon: 'co2-fill',
           tone: bad ? 'bad' : 'warn',
@@ -6727,9 +6856,9 @@ window.hemmaMenuGlass = {
         rows.push({
           id: 'hemma:plant:' + id,
           when: Math.max(Date.parse(st.last_changed || '') || 0, midnight.getTime()),
-          label: nameOf(st) + ' ' + word,
+          label: word.split('{name}').join(nameOf(st)),
           sub: (first.sensor_type === 'moisture' && isFinite(soil))
-            ? 'Soil at ' + Math.round(soil) + '%' : null,
+            ? _hemmaT('notify.soil_at', 'Soil at {n}%', { n: Math.round(soil) }) : null,
           icon: 'plant',
           tone: 'warn',
           entity: id,
@@ -6749,11 +6878,11 @@ window.hemmaMenuGlass = {
         rows.push({
           id: 'hemma:appliance:' + a.entity,
           when: Date.now(),
-          label: (a.name || nameOf(st)) + (left > 0 ? ' is running' : ' is finishing up'),
+          label: left > 0 ? _hemmaT('notify.appliance_running', '{name} is running', { name: a.name || nameOf(st) }) : _hemmaT('notify.appliance_finishing', '{name} is finishing up', { name: a.name || nameOf(st) }),
           sub: left > 0
-            ? (left < 60 ? left + ' min left'
-               : Math.floor(left / 60) + ' hr ' + (left % 60) + ' min left')
-            : 'Almost done',
+            ? (left < 60 ? _hemmaT('time.min_left', '{n} min left', { n: left })
+               : _hemmaT('time.hr_min_left', '{h} hr {m} min left', { h: Math.floor(left / 60), m: left % 60 }))
+            : _hemmaT('notify.almost_done', 'Almost done'),
           icon: 'default',
           tone: 'accent',
           entity: a.entity,
@@ -6946,7 +7075,7 @@ window.hemmaMenuGlass = {
     if (!_rows.length) {
       return '<div style="font-family:' + UI.tokens.font + ';text-align:center;'
         + 'padding:34px 16px 38px;color:' + UI.tokens.ink3 + ';font-size:15px;">'
-        + 'Nothing new</div>';
+        + _hemmaT('notify.nothing_new', 'Nothing new') + '</div>';
     }
 
     var toRow = function (r) {
@@ -6966,8 +7095,8 @@ window.hemmaMenuGlass = {
 
     var opts = { labelInside: true };
     var out = '';
-    if (g.fresh.length) out += UI.group(g.fresh.map(toRow), g.old.length ? 'New' : null, null, opts);
-    if (g.old.length) out += UI.group(g.old.map(toRow), g.fresh.length ? 'Earlier' : null, null, opts);
+    if (g.fresh.length) out += UI.group(g.fresh.map(toRow), g.old.length ? _hemmaT('notify.new', 'New') : null, null, opts);
+    if (g.old.length) out += UI.group(g.old.map(toRow), g.fresh.length ? _hemmaT('notify.earlier', 'Earlier') : null, null, opts);
     return out;
   }
 
@@ -7164,7 +7293,7 @@ window.hemmaMenuGlass = {
     if (!window.hemmaPopup) return;
     lift(anchor, true);
     window.hemmaPopup.open({
-      title: 'Notifications',
+      title: _hemmaT('notify.title', 'Notifications'),
       dismissable: true,
       popup_styles: [{
         style: 'all',
@@ -7266,7 +7395,7 @@ window.hemmaMenuGlass = {
     });
     var clear = document.createElement('button');
     clear.type = 'button';
-    clear.textContent = 'Mark all read';
+    clear.textContent = _hemmaT('notify.mark_all_read', 'Mark all read');
     Object.assign(clear.style, {
       border: '0', background: 'transparent', font: 'inherit', fontSize: '14px',
       fontWeight: '500', letterSpacing: '-0.01em', cursor: 'pointer', padding: '0',
@@ -7614,11 +7743,14 @@ window.hemmaMenuGlass = {
   // Keeps the helper current for anyone automating on it. The other devices
   // ignore it, because each one rewrites it with its own value on the way in.
   function share(hass, v) {
-    if (!hass || typeof hass.callService !== 'function') return;
+    if (!hass || typeof hass.callWS !== 'function') return;
+    if (hass.connection && hass.connection.connected === false) return;
     var ent = hass.states && hass.states[ENTITY];
     if (!ent || ent.state === v) return;
     try {
-      hass.callService('input_select', 'select_option', { entity_id: ENTITY, option: v });
+      Promise.resolve(hass.callWS({ type: 'call_service', domain: 'input_select',
+        service: 'select_option', service_data: { entity_id: ENTITY, option: v } }))
+        .catch(function () {});
     } catch (e) {}
   }
 

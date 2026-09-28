@@ -36,7 +36,11 @@ hemma_now_playing_button:
       - width: var(--np-btn-size-current, var(--np-btn-size, 40px))
       - height: var(--np-btn-size-current, var(--np-btn-size, 40px))
       - border-radius: 9999px
+      # The skip glyphs are two triangles, far wider than the triangle and bar
+      # they replaced, so they reach past this fixed 40px box.
+      - overflow: visible
       - background: rgba(0,0,0,0)
+      - box-shadow: none !important
       - backdrop-filter: none !important
       - -webkit-backdrop-filter: none !important
       - border: none !important
@@ -76,13 +80,6 @@ hemma_now_playing_button:
 
   extra_styles: >
     [[[
-      // Skip and previous carried a stronger halo than play did, and on a flat
-      // card it read as a button outline sitting there at rest. Apple draws no
-      // disc behind these at all, so only the primary keeps its trace of one.
-      const glow = variables.primary
-        ? '0 0 3px 0px rgba(255,255,255,0.05), 0 0 7px 0px rgba(255,255,255,0.02)'
-        : 'none';
-
       return `
         :host{
           display: ${variables.shown ? 'block' : 'none'} !important;
@@ -95,25 +92,26 @@ hemma_now_playing_button:
           display: none !important;
         }
 
+        /* A skip glyph wider than the button overflowed right only and #container cut its tip. */
+        #container, #g{
+          overflow: visible !important;
+        }
+        #g{
+          display: flex !important;
+          justify-content: center;
+          align-items: center;
+          width: 100%;
+        }
+
         .np-glyph{
           display: block;
+          flex: none;
           width: auto;
           overflow: visible;
         }
 
         .np-glyph path{
           fill: var(--np-glyph-color, rgba(255,255,255,0.96));
-        }
-
-        ha-card::after{
-          content:"";
-          position:absolute;
-          inset:0;
-          border-radius:9999px;
-          pointer-events:none;
-          mix-blend-mode: screen;
-          z-index: 1;
-          box-shadow: ${glow};
         }
 
         ha-card::before{

@@ -9,6 +9,8 @@ hemma_settings_button:
     action: javascript
     javascript: |
       [[[
+        const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+        const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
         const OPEN = 'hemma-settings-menu';
         const gone = document.querySelector('.' + OPEN);
         if (gone) { if (gone._close) gone._close(); return; }
@@ -71,9 +73,9 @@ hemma_settings_button:
         }
 
         const ITEMS = [
-          { label: 'Refresh', icon: 'mdi:refresh',
+          { label: L('ui.common.refresh', 'Refresh'), glyph: 'refresh',
             run: function () { window.location.reload(); } },
-          { label: 'Edit dashboard', icon: 'mdi:pencil', run: function () {
+          { label: L('ui.panel.lovelace.menu.configure_ui', 'Edit dashboard'), glyph: 'pencil', run: function () {
             const seg = (window.location.pathname || '').split('/').filter(Boolean);
             const view = seg.length > 1 ? seg[1] : '';
             const dash = seg.length ? seg[0] : '';
@@ -84,7 +86,7 @@ hemma_settings_button:
         ];
 
         if (overflowAssist) {
-          ITEMS.unshift({ label: 'Assist', glyph: 'assist-fill', run: function () {
+          ITEMS.unshift({ label: T('menu.assist', 'Assist'), glyph: 'assist-fill', run: function () {
             const root = document.querySelector('home-assistant') || host;
             root.dispatchEvent(new CustomEvent('hass-action', {
               bubbles: true, composed: true,

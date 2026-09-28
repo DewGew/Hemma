@@ -24,14 +24,15 @@ hemma_plex_recently_added:
 
   state_display: |
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const moviesData = states['sensor.recently_added_movies']?.attributes?.data;
       const tvData     = states['sensor.recently_added_tv']?.attributes?.data;
       const rawM = Array.isArray(moviesData) ? moviesData.slice(1).filter(i => i && i.title) : [];
       const rawT = Array.isArray(tvData)     ? tvData.slice(1).filter(i => i && i.title)     : [];
       const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
       const count = [...rawM, ...rawT].filter(i => i.airdate && new Date(i.airdate).getTime() >= cutoff).length;
-      if (count <= 0) return 'Up to date';
-      return count === 1 ? '1 Added' : `${count} Added`;
+      if (count <= 0) return T('plex.up_to_date', 'Up to date');
+      return count === 1 ? T('plex.one_added', '1 Added') : T('plex.n_added', '{n} Added', { n: count });
     ]]]
 
   state:

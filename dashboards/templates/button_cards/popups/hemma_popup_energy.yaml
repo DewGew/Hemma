@@ -22,7 +22,7 @@ hemma_popup_energy:
       ]]]
     entity: '[[[ return variables.entity_power || entity?.entity_id; ]]]'
     hemma_popup:
-      title: Energy Usage
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; }); return T('energy.popup_title', 'Energy Usage'); ]]]"
       dismissable: true
       dismiss_on_background: true
       popup_styles:
@@ -144,12 +144,13 @@ hemma_popup_energy:
           }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           const powerId     = variables.entity_power || entity?.entity_id;
           const todayId     = variables.entity_usage_today;
           const monthId     = variables.entity_usage_month;
           const costTodayId = variables.entity_cost_today;
           const costMonthId = variables.entity_cost_month;
-          const roomName    = variables.room_name || 'Energy';
+          const roomName    = variables.room_name || T('filter.energy', 'Energy');
 
           const safeNum = (id) => {
             if (!id) return null;
@@ -180,7 +181,7 @@ hemma_popup_energy:
           const tExtreme = Number(variables.extreme_threshold ?? 3000);
 
           // Usage tier — drives the graph line and the memo keys below
-          const statusLabel = power >= tExtreme ? 'Extreme' : power >= tHeavy ? 'Heavy' : power >= tNormal ? 'Normal' : 'Idle';
+          const statusLabel = power >= tExtreme ? T('energy.extreme', 'Extreme') : power >= tHeavy ? T('energy.heavy', 'Heavy') : power >= tNormal ? T('energy.normal', 'Normal') : T('energy.idle', 'Idle');
           // apexcharts can't resolve CSS vars, so these mirror the Apple palette literally
           /* ApexCharts writes the color into an SVG attribute, which does not
              accept var(), so the token is resolved to a literal here. The line
@@ -205,16 +206,16 @@ hemma_popup_energy:
 
           // Shared helper snippets
           const _safe = "const safeNum=(id)=>{if(!id)return null;const s=states[id]&&states[id].state;if(!s||s==='unknown'||s==='unavailable')return null;const n=parseFloat(s);return isNaN(n)?null:n;};";
-          const _fmt  = "const fmtPower=(v)=>v==null?'—':String(Math.round(v));const fmtEnergy=(v)=>{if(v==null)return'—';if(v<1)return v.toFixed(2);if(v<10)return v.toFixed(1);return Math.round(v).toString();};";
+          const _fmt  = "const NUM=window.hemmaNum||((v,a,b)=>Number(v).toFixed(b==null?(a||0):b));const fmtPower=(v)=>v==null?'—':NUM(Math.round(v),0,0);const fmtEnergy=(v)=>{if(v==null)return'—';if(v<1)return NUM(v,2,2);if(v<10)return NUM(v,1,1);return NUM(Math.round(v),0,0);};const fmtMoney=(v,u)=>window.hemmaMoney?window.hemmaMoney(v,u,2):u+v.toFixed(2);";
 
           // Power → color
           const _powerScore = `
             const tNormal = ${tNormal}, tHeavy = ${tHeavy}, tExtreme = ${tExtreme};
             const power = safeNum(powerId);
-            let color = 'var(--hemma-popup-green-color, #30D158)', label = 'Idle';
-            if (power >= tExtreme)     { color = 'var(--hemma-popup-red-color, #ff4245)';    label = 'Extreme'; }
-            else if (power >= tHeavy)  { color = 'var(--hemma-popup-orange-color, #ff9230)'; label = 'Heavy'; }
-            else if (power >= tNormal) { color = 'var(--hemma-popup-yellow-color, #ffd600)'; label = 'Normal'; }
+            let color = 'var(--hemma-popup-green-color, #30D158)', label = T('energy.idle', 'Idle');
+            if (power >= tExtreme)     { color = 'var(--hemma-popup-red-color, #ff4245)';    label = T('energy.extreme', 'Extreme'); }
+            else if (power >= tHeavy)  { color = 'var(--hemma-popup-orange-color, #ff9230)'; label = T('energy.heavy', 'Heavy'); }
+            else if (power >= tNormal) { color = 'var(--hemma-popup-yellow-color, #ffd600)'; label = T('energy.normal', 'Normal'); }
           `;
 
           // Tooltip time format
@@ -505,7 +506,7 @@ hemma_popup_energy:
                 ${_fmt}
                 const v     = safeNum(entityId);
                 const costV = safeNum(costEntityId);
-                const costStr = costV != null ? costCurrency + costV.toFixed(2) : '';
+                const costStr = costV != null ? fmtMoney(costV, costCurrency) : '';
                 return '<div style="text-align:left;' + (side === 'right' ? 'padding-right:6px;' : side === 'left' ? 'padding-left:6px;' : '') + '">'
                   + '<div style="font-size:11px;color:var(--hemma-popup-tiles-text-muted);letter-spacing:.06em;font-weight:500;">' + labelText + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:4px;margin-top:5px;">'
@@ -570,7 +571,7 @@ hemma_popup_energy:
             },
             custom_fields: {
               title: '<div style="font-family:var(--primary-font-family,system-ui);color:var(--hemma-popup-tiles-text-primary);text-align:left;">'
-                + '<div style="font-size:22px;font-weight:400;letter-spacing:-.5px;margin-top:20px;margin-bottom:16px;">Energy Usage</div>'
+                + '<div style="font-size:22px;font-weight:400;letter-spacing:-.5px;margin-top:20px;margin-bottom:16px;">' + T('energy.popup_title', 'Energy Usage') + '</div>'
                 + '</div>',
               right: { card: rightColCard },
               stats: { card: statsWrapperCard },
@@ -683,6 +684,7 @@ hemma_popup_energy:
             styles: tileCardStyles,
             custom_fields: {
               c: `[[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
                 const powerId = ${_pid};
                 ${_safe}
                 ${_fmt}
@@ -698,7 +700,7 @@ hemma_popup_energy:
 
                 return '<div style="margin-top:1px;min-width:0;overflow:hidden;">'
                   + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'
-                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">Now</span>'
+                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">' + T('energy.now', 'Now') + '</span>'
                     + '<span style="font-size:13px;color:' + color + ';white-space:nowrap;font-weight:600;letter-spacing:.01em;flex-shrink:0;">' + label + '</span>'
                   + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:3px;">'
@@ -723,6 +725,7 @@ hemma_popup_energy:
             styles: tileCardStyles,
             custom_fields: {
               c: `[[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
                 const todayId     = ${_tid};
                 const costTodayId = ${_ctid};
                 const costCurrency = ${_cur};
@@ -730,13 +733,13 @@ hemma_popup_energy:
                 ${_fmt}
                 const v     = safeNum(todayId);
                 const costV = safeNum(costTodayId);
-                const costStr = costV != null ? costCurrency + costV.toFixed(2) : '';
+                const costStr = costV != null ? fmtMoney(costV, costCurrency) : '';
                 const pct = Math.max(0, Math.min(100, (v || 0) / 50 * 100));
                 const color = pct >= 85 ? 'var(--hemma-popup-red-color, #ff4245)' : pct >= 45 ? 'var(--hemma-popup-orange-color, #ff9230)' : 'var(--hemma-popup-green-color, #30D158)';
                 const gradient = color;
                 return '<div style="margin-top:1px;min-width:0;overflow:hidden;">'
                   + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'
-                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">Today</span>'
+                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">' + T('energy.today', 'Today') + '</span>'
                     + (costStr ? '<span style="font-size:13px;color:' + color + ';white-space:nowrap;font-weight:600;letter-spacing:.01em;flex-shrink:0;">' + costStr + '</span>' : '')
                   + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:3px;">'
@@ -761,6 +764,7 @@ hemma_popup_energy:
             styles: tileCardStyles,
             custom_fields: {
               c: `[[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
                 const monthId     = ${_mid};
                 const costMonthId = ${_cmid};
                 const costCurrency = ${_cur};
@@ -768,13 +772,13 @@ hemma_popup_energy:
                 ${_fmt}
                 const v     = safeNum(monthId);
                 const costV = safeNum(costMonthId);
-                const costStr = costV != null ? costCurrency + costV.toFixed(2) : '';
+                const costStr = costV != null ? fmtMoney(costV, costCurrency) : '';
                 const pct = Math.max(0, Math.min(100, (v || 0) / 1500 * 100));
                 const color = pct >= 85 ? 'var(--hemma-popup-red-color, #ff4245)' : pct >= 45 ? 'var(--hemma-popup-orange-color, #ff9230)' : 'var(--hemma-popup-green-color, #30D158)';
                 const gradient = color;
                 return '<div style="margin-top:1px;min-width:0;overflow:hidden;">'
                   + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'
-                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">Month</span>'
+                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">' + T('energy.month', 'Month') + '</span>'
                     + (costStr ? '<span style="font-size:13px;color:' + color + ';white-space:nowrap;font-weight:600;letter-spacing:.01em;flex-shrink:0;">' + costStr + '</span>' : '')
                   + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:3px;">'
@@ -825,9 +829,11 @@ hemma_popup_energy:
           /* Shared popup anatomy: hero, chart, grouped rows. */
           const UI = window._hemmaUI;
           if (UI) {
+            const NUM = window.hemmaNum || ((v, a, b) => Number(v).toFixed(b ?? a ?? 0));
             const fmtN = (v) => v == null ? '\u2014'
-              : (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10);
+              : (v >= 100 ? NUM(Math.round(v), 0, 0) : NUM(v, 0, 1));
             const money = (v) => v == null ? null
+              : window.hemmaMoney ? window.hemmaMoney(v, costCurrency, 2)
               : (costCurrency === '$' ? '$' + v.toFixed(2) : v.toFixed(2) + ' ' + costCurrency).trim();
 
             const tone = power >= tExtreme ? 'bad'
@@ -850,10 +856,10 @@ hemma_popup_energy:
 
             addMetric('head', UI.hero({
               compact: true,
-              label: 'Power',
+              label: T('energy.power', 'Power'),
               value: statusLabel,
-              trailingLabel: power == null ? null : 'Current draw',
-              trailing: power == null ? null : Math.round(power) + ' W',
+              trailingLabel: power == null ? null : T('energy.current_draw', 'Current draw'),
+              trailing: power == null ? null : NUM(Math.round(power), 0, 0) + ' W',
               subTone: tone,
             }));
 
@@ -884,8 +890,8 @@ hemma_popup_energy:
                 iconTone: 'var(--hemma-popup-ui-action, var(--hemma-color-teal, #00C3D0))',
               });
             };
-            addUse('Today', todayId, costTodayId, 'calendar-day');
-            addUse('This month', monthId, costMonthId, 'calendar');
+            addUse(T('energy.today', 'Today'), todayId, costTodayId, 'calendar-day');
+            addUse(T('energy.this_month', 'This month'), monthId, costMonthId, 'calendar');
             /* This had no heading while it was a section stacked under the
                hero: "Today" and "This month" sitting below "Now / 171 W" are
                self-describing, and Apple does not label a section whose rows
@@ -930,8 +936,8 @@ hemma_popup_energy:
                   entity: x.id,
                   icon: iconFor(x.id),
                   label: String(nm).replace(/\s*power$/i, '').trim() || nm,
-                  sub: pct != null && pct > 0 ? pct + '% of current draw' : null,
-                  subLive: powerId ? { total: powerId, suffix: '% of current draw' } : null,
+                  sub: pct != null && pct > 0 ? T('energy.pct_of_draw', '{n}% of current draw', { n: pct }) : null,
+                  subLive: powerId ? { total: powerId, suffix: T('energy.pct_of_draw', '{n}% of current draw') } : null,
                   value: fmtN(x.w) + ' W',
                   liveAttr: 'state',
                   liveSuffix: ' W',
@@ -1069,7 +1075,7 @@ hemma_popup_energy:
       ]]]
     entity: '[[[ return variables.entity_power || entity?.entity_id; ]]]'
     hemma_popup:
-      title: Energy Usage
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; }); return T('energy.popup_title', 'Energy Usage'); ]]]"
       dismissable: true
       dismiss_on_background: true
       popup_styles:
@@ -1186,12 +1192,13 @@ hemma_popup_energy:
           }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
           const powerId     = variables.entity_power || entity?.entity_id;
           const todayId     = variables.entity_usage_today;
           const monthId     = variables.entity_usage_month;
           const costTodayId = variables.entity_cost_today;
           const costMonthId = variables.entity_cost_month;
-          const roomName    = variables.room_name || 'Energy';
+          const roomName    = variables.room_name || T('filter.energy', 'Energy');
 
           const safeNum = (id) => {
             if (!id) return null;
@@ -1222,7 +1229,7 @@ hemma_popup_energy:
           const tExtreme = Number(variables.extreme_threshold ?? 3000);
 
           // Usage tier — drives the graph line and the memo keys below
-          const statusLabel = power >= tExtreme ? 'Extreme' : power >= tHeavy ? 'Heavy' : power >= tNormal ? 'Normal' : 'Idle';
+          const statusLabel = power >= tExtreme ? T('energy.extreme', 'Extreme') : power >= tHeavy ? T('energy.heavy', 'Heavy') : power >= tNormal ? T('energy.normal', 'Normal') : T('energy.idle', 'Idle');
           // apexcharts can't resolve CSS vars, so these mirror the Apple palette literally
           /* ApexCharts writes the color into an SVG attribute, which does not
              accept var(), so the token is resolved to a literal here. The line
@@ -1247,16 +1254,16 @@ hemma_popup_energy:
 
           // Shared helper snippets
           const _safe = "const safeNum=(id)=>{if(!id)return null;const s=states[id]&&states[id].state;if(!s||s==='unknown'||s==='unavailable')return null;const n=parseFloat(s);return isNaN(n)?null:n;};";
-          const _fmt  = "const fmtPower=(v)=>v==null?'—':String(Math.round(v));const fmtEnergy=(v)=>{if(v==null)return'—';if(v<1)return v.toFixed(2);if(v<10)return v.toFixed(1);return Math.round(v).toString();};";
+          const _fmt  = "const NUM=window.hemmaNum||((v,a,b)=>Number(v).toFixed(b==null?(a||0):b));const fmtPower=(v)=>v==null?'—':NUM(Math.round(v),0,0);const fmtEnergy=(v)=>{if(v==null)return'—';if(v<1)return NUM(v,2,2);if(v<10)return NUM(v,1,1);return NUM(Math.round(v),0,0);};const fmtMoney=(v,u)=>window.hemmaMoney?window.hemmaMoney(v,u,2):u+v.toFixed(2);";
 
           // Power → color
           const _powerScore = `
             const tNormal = ${tNormal}, tHeavy = ${tHeavy}, tExtreme = ${tExtreme};
             const power = safeNum(powerId);
-            let color = 'var(--hemma-popup-green-color, #30D158)', label = 'Idle';
-            if (power >= tExtreme)     { color = 'var(--hemma-popup-red-color, #ff4245)';    label = 'Extreme'; }
-            else if (power >= tHeavy)  { color = 'var(--hemma-popup-orange-color, #ff9230)'; label = 'Heavy'; }
-            else if (power >= tNormal) { color = 'var(--hemma-popup-yellow-color, #ffd600)'; label = 'Normal'; }
+            let color = 'var(--hemma-popup-green-color, #30D158)', label = T('energy.idle', 'Idle');
+            if (power >= tExtreme)     { color = 'var(--hemma-popup-red-color, #ff4245)';    label = T('energy.extreme', 'Extreme'); }
+            else if (power >= tHeavy)  { color = 'var(--hemma-popup-orange-color, #ff9230)'; label = T('energy.heavy', 'Heavy'); }
+            else if (power >= tNormal) { color = 'var(--hemma-popup-yellow-color, #ffd600)'; label = T('energy.normal', 'Normal'); }
           `;
 
           // Tooltip time format
@@ -1547,7 +1554,7 @@ hemma_popup_energy:
                 ${_fmt}
                 const v     = safeNum(entityId);
                 const costV = safeNum(costEntityId);
-                const costStr = costV != null ? costCurrency + costV.toFixed(2) : '';
+                const costStr = costV != null ? fmtMoney(costV, costCurrency) : '';
                 return '<div style="text-align:left;' + (side === 'right' ? 'padding-right:6px;' : side === 'left' ? 'padding-left:6px;' : '') + '">'
                   + '<div style="font-size:11px;color:var(--hemma-popup-tiles-text-muted);letter-spacing:.06em;font-weight:500;">' + labelText + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:4px;margin-top:5px;">'
@@ -1612,7 +1619,7 @@ hemma_popup_energy:
             },
             custom_fields: {
               title: '<div style="font-family:var(--primary-font-family,system-ui);color:var(--hemma-popup-tiles-text-primary);text-align:left;">'
-                + '<div style="font-size:22px;font-weight:400;letter-spacing:-.5px;margin-top:20px;margin-bottom:16px;">Energy Usage</div>'
+                + '<div style="font-size:22px;font-weight:400;letter-spacing:-.5px;margin-top:20px;margin-bottom:16px;">' + T('energy.popup_title', 'Energy Usage') + '</div>'
                 + '</div>',
               right: { card: rightColCard },
               stats: { card: statsWrapperCard },
@@ -1725,6 +1732,7 @@ hemma_popup_energy:
             styles: tileCardStyles,
             custom_fields: {
               c: `[[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
                 const powerId = ${_pid};
                 ${_safe}
                 ${_fmt}
@@ -1740,7 +1748,7 @@ hemma_popup_energy:
 
                 return '<div style="margin-top:1px;min-width:0;overflow:hidden;">'
                   + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'
-                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">Now</span>'
+                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">' + T('energy.now', 'Now') + '</span>'
                     + '<span style="font-size:13px;color:' + color + ';white-space:nowrap;font-weight:600;letter-spacing:.01em;flex-shrink:0;">' + label + '</span>'
                   + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:3px;">'
@@ -1765,6 +1773,7 @@ hemma_popup_energy:
             styles: tileCardStyles,
             custom_fields: {
               c: `[[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
                 const todayId     = ${_tid};
                 const costTodayId = ${_ctid};
                 const costCurrency = ${_cur};
@@ -1772,13 +1781,13 @@ hemma_popup_energy:
                 ${_fmt}
                 const v     = safeNum(todayId);
                 const costV = safeNum(costTodayId);
-                const costStr = costV != null ? costCurrency + costV.toFixed(2) : '';
+                const costStr = costV != null ? fmtMoney(costV, costCurrency) : '';
                 const pct = Math.max(0, Math.min(100, (v || 0) / 50 * 100));
                 const color = pct >= 85 ? 'var(--hemma-popup-red-color, #ff4245)' : pct >= 45 ? 'var(--hemma-popup-orange-color, #ff9230)' : 'var(--hemma-popup-green-color, #30D158)';
                 const gradient = color;
                 return '<div style="margin-top:1px;min-width:0;overflow:hidden;">'
                   + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'
-                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">Today</span>'
+                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">' + T('energy.today', 'Today') + '</span>'
                     + (costStr ? '<span style="font-size:13px;color:' + color + ';white-space:nowrap;font-weight:600;letter-spacing:.01em;flex-shrink:0;">' + costStr + '</span>' : '')
                   + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:3px;">'
@@ -1803,6 +1812,7 @@ hemma_popup_energy:
             styles: tileCardStyles,
             custom_fields: {
               c: `[[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split(String.fromCharCode(123) + p + String.fromCharCode(125)).join(String(v[p])); return s; });
                 const monthId     = ${_mid};
                 const costMonthId = ${_cmid};
                 const costCurrency = ${_cur};
@@ -1810,13 +1820,13 @@ hemma_popup_energy:
                 ${_fmt}
                 const v     = safeNum(monthId);
                 const costV = safeNum(costMonthId);
-                const costStr = costV != null ? costCurrency + costV.toFixed(2) : '';
+                const costStr = costV != null ? fmtMoney(costV, costCurrency) : '';
                 const pct = Math.max(0, Math.min(100, (v || 0) / 1500 * 100));
                 const color = pct >= 85 ? 'var(--hemma-popup-red-color, #ff4245)' : pct >= 45 ? 'var(--hemma-popup-orange-color, #ff9230)' : 'var(--hemma-popup-green-color, #30D158)';
                 const gradient = color;
                 return '<div style="margin-top:1px;min-width:0;overflow:hidden;">'
                   + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'
-                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">Month</span>'
+                    + '<span style="font-size:13px;color:var(--hemma-popup-tiles-text-primary);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em;">' + T('energy.month', 'Month') + '</span>'
                     + (costStr ? '<span style="font-size:13px;color:' + color + ';white-space:nowrap;font-weight:600;letter-spacing:.01em;flex-shrink:0;">' + costStr + '</span>' : '')
                   + '</div>'
                   + '<div style="display:flex;align-items:baseline;gap:3px;">'
@@ -1867,9 +1877,11 @@ hemma_popup_energy:
           /* Shared popup anatomy: hero, chart, grouped rows. */
           const UI = window._hemmaUI;
           if (UI) {
+            const NUM = window.hemmaNum || ((v, a, b) => Number(v).toFixed(b ?? a ?? 0));
             const fmtN = (v) => v == null ? '\u2014'
-              : (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10);
+              : (v >= 100 ? NUM(Math.round(v), 0, 0) : NUM(v, 0, 1));
             const money = (v) => v == null ? null
+              : window.hemmaMoney ? window.hemmaMoney(v, costCurrency, 2)
               : (costCurrency === '$' ? '$' + v.toFixed(2) : v.toFixed(2) + ' ' + costCurrency).trim();
 
             const tone = power >= tExtreme ? 'bad'
@@ -1892,10 +1904,10 @@ hemma_popup_energy:
 
             addMetric('head', UI.hero({
               compact: true,
-              label: 'Power',
+              label: T('energy.power', 'Power'),
               value: statusLabel,
-              trailingLabel: power == null ? null : 'Current draw',
-              trailing: power == null ? null : Math.round(power) + ' W',
+              trailingLabel: power == null ? null : T('energy.current_draw', 'Current draw'),
+              trailing: power == null ? null : NUM(Math.round(power), 0, 0) + ' W',
               subTone: tone,
             }));
 
@@ -1926,8 +1938,8 @@ hemma_popup_energy:
                 iconTone: 'var(--hemma-popup-ui-action, var(--hemma-color-teal, #00C3D0))',
               });
             };
-            addUse('Today', todayId, costTodayId, 'calendar-day');
-            addUse('This month', monthId, costMonthId, 'calendar');
+            addUse(T('energy.today', 'Today'), todayId, costTodayId, 'calendar-day');
+            addUse(T('energy.this_month', 'This month'), monthId, costMonthId, 'calendar');
             /* This had no heading while it was a section stacked under the
                hero: "Today" and "This month" sitting below "Now / 171 W" are
                self-describing, and Apple does not label a section whose rows
@@ -1972,8 +1984,8 @@ hemma_popup_energy:
                   entity: x.id,
                   icon: iconFor(x.id),
                   label: String(nm).replace(/\s*power$/i, '').trim() || nm,
-                  sub: pct != null && pct > 0 ? pct + '% of current draw' : null,
-                  subLive: powerId ? { total: powerId, suffix: '% of current draw' } : null,
+                  sub: pct != null && pct > 0 ? T('energy.pct_of_draw', '{n}% of current draw', { n: pct }) : null,
+                  subLive: powerId ? { total: powerId, suffix: T('energy.pct_of_draw', '{n}% of current draw') } : null,
                   value: fmtN(x.w) + ' W',
                   liveAttr: 'state',
                   liveSuffix: ' W',

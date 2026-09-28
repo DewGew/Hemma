@@ -14,8 +14,9 @@ hemma_mobile_header:
         ]]]
     mobile_filter_categories: null
     room_key: null
-    # Favorites auto-hides its own caret by name (see tap_action/arrow below)
-    # - this is a manual override for any OTHER non-tappable section.
+    # Set on any section with nothing to open. Hemma Studio sets it on the
+    # favorites section. The name check below only carries dashboards saved
+    # before that, which are all still called Favorites.
     hide_caret: false
     motion_helper_entity: null
 

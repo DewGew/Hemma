@@ -43,6 +43,8 @@ hemma_badge_security:
 
   name: >
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const esc = (t) => String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
       const id  = String(entity?.entity_id || '');
@@ -50,31 +52,31 @@ hemma_badge_security:
       const s   = String(entity?.state || '').toLowerCase();
       const dc  = String(entity?.attributes?.device_class || '').toLowerCase();
 
-      const title = variables?.label || entity?.attributes?.friendly_name || 'Security';
+      const title = variables?.label || entity?.attributes?.friendly_name || T('filter.security', 'Security');
 
       let sub = '';
       if (dom === 'lock') {
-        sub = s === 'locked' ? 'Locked' : s === 'unlocked' ? 'Unlocked' : 'Jammed';
+        sub = s === 'locked' ? L('component.lock.entity_component._.state.locked', 'Locked') : s === 'unlocked' ? L('component.lock.entity_component._.state.unlocked', 'Unlocked') : L('component.lock.entity_component._.state.jammed', 'Jammed');
       } else if (dom === 'alarm_control_panel') {
-        sub = s === 'disarmed' ? 'Disarmed'
-            : s === 'triggered' ? 'Triggered'
-            : s === 'armed_home' ? 'Armed Home'
-            : s === 'armed_away' ? 'Armed Away'
-            : 'Armed';
+        sub = s === 'disarmed' ? L('component.alarm_control_panel.entity_component._.state.disarmed', 'Disarmed')
+            : s === 'triggered' ? L('component.alarm_control_panel.entity_component._.state.triggered', 'Triggered')
+            : s === 'armed_home' ? L('component.alarm_control_panel.entity_component._.state.armed_home', 'Armed Home')
+            : s === 'armed_away' ? L('component.alarm_control_panel.entity_component._.state.armed_away', 'Armed Away')
+            : T('security.armed', 'Armed');
       } else if (dom === 'camera') {
         /* "Idle" is every camera, all day, so it says nothing. Fall through to the
            same alert wording the aggregated camera badge uses. */
         const alert = window.hemmaCameraAlert
           ? window.hemmaCameraAlert(hass, states, [id], variables?.alert_window_minutes) : '';
-        sub = s === 'recording' ? 'Recording'
-            : s === 'streaming' ? 'Live'
-            : (alert || 'No Alerts');
+        sub = s === 'recording' ? L('component.camera.entity_component._.state.recording', 'Recording')
+            : s === 'streaming' ? T('security.live', 'Live')
+            : (alert || T('security.no_alerts', 'No Alerts'));
       } else if (dom === 'cover') {
-        sub = s === 'closed' ? 'Closed' : 'Open';
+        sub = s === 'closed' ? L('component.cover.entity_component._.state.closed', 'Closed') : L('component.cover.entity_component._.state.open', 'Open');
       } else if (dc === 'motion') {
-        sub = s === 'on' ? 'Motion' : 'Clear';
+        sub = s === 'on' ? T('motion.title', 'Motion') : L('component.binary_sensor.entity_component.motion.state.off', 'Clear');
       } else {
-        sub = s === 'on' ? 'Open' : 'Closed';
+        sub = s === 'on' ? T('security.open', 'Open') : T('security.closed', 'Closed');
       }
 
       return `

@@ -146,11 +146,13 @@ hemma_badge_activity:
 
   name: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
       const a = entity?.attributes || {};
       const norm = (x) => String(x ?? '').trim();
 
       const title = norm(a.full_title) || norm(a.media_title) || norm(a.title)
-        || norm(a.friendly_name) || 'Activity';
+        || norm(a.friendly_name) || T('activity.title', 'Activity');
 
       const device = norm(a.friendly_name) || norm(a.source);
       const who    = norm(a.user);

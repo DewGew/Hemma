@@ -3,6 +3,13 @@
   'use strict';
   if (customElements.get('hemma-filter-overlay')) return;
 
+  const _hemmaT = function (k, en, v) {
+    if (typeof window._hemmaT === 'function') return window._hemmaT(k, en, v);
+    let s = String(en);
+    if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p]));
+    return s;
+  };
+
   const HEMMA_VARS = [
     '--hemma-entity-height-current','--hemma-entity-inner-pad-current',
     '--hemma-entity-icon-size-current','--hemma-entity-name-font-current',
@@ -82,6 +89,17 @@
     requestAnimationFrame(tick);
   };
   let _badgeNaturalTop = null;
+
+  // Two separate marks: a disabled tile carries dataset.off, a `show_when`
+  // tile with nothing to show carries dataset.showWhen, and they are exclusive.
+  // Restoring display on either puts back a tile the row hides again a frame
+  // later, which grows the section and drops everything below it.
+  function _restorable(el) {
+    const d = el && el.dataset;
+    if (!d || d.off === '1' || d.showWhen === '1') return false;
+    const card = el.firstElementChild;
+    return !(card && (card.hidden || card.style.display === 'none'));
+  }
 
   function _measureBadgeNaturalTop(badgeEl) {
     if (!badgeEl) return _badgeNaturalTop;
@@ -318,13 +336,13 @@
   const ROOM_SECTION_ORDER = ['climate', 'lights', 'media', 'security', 'energy', 'presence'];
   const ROOM_SECTION_OTHER = 'other';
   const ROOM_SECTION_LABEL = {
-    climate:  'Climate',
-    lights:   'Lights',
-    media:    'Media',
-    security: 'Security',
-    energy:   'Energy',
-    presence: 'People',
-    other:    'Other',
+    get climate()  { return _hemmaT('filter.climate', 'Climate'); },
+    get lights()   { return _hemmaT('filter.lights', 'Lights'); },
+    get media()    { return _hemmaT('filter.media', 'Media'); },
+    get security() { return _hemmaT('filter.security', 'Security'); },
+    get energy()   { return _hemmaT('filter.energy', 'Energy'); },
+    get presence() { return _hemmaT('filter.presence', 'People'); },
+    get other()    { return _hemmaT('filter.other', 'Other'); },
   };
 
   const H_SCROLL_IDS = new Set(['media_row', 'climate_row', 'rooms_row']);
@@ -591,7 +609,7 @@
       'font-size:20px', 'font-weight:700', 'color:#ffffff', 'letter-spacing:-0.3px',
       'opacity:0', 'transform:translateY(5px)', 'pointer-events:none', 'cursor:pointer',
     ].join(';');
-    title.textContent = 'Home';
+    title.textContent = _hemmaT('filter.all', 'Home');
     title.addEventListener('click', () => {
       const se = _dashHeader?.scrollEl;
       if (se === window) window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1097,7 +1115,7 @@
             type:       'custom:button-card',
             template:   'hemma_mobile_header',
             full_width: true,
-            name:       'Scenes',
+            name:       _hemmaT('nav.scenes', 'Scenes'),
             variables:  { hide_caret: true, mobile_filter_categories: null },
             styles:     {
               card:          [{ padding: `24px var(--hemma-rail-left, 16px) 10px calc(max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) + ${LANDSCAPE_GUTTER_CALC})` }],
@@ -1191,8 +1209,8 @@
         type:      'custom:button-card',
         template:  'hemma_mobile_header',
         full_width: true,
-        name:      'Favorites',
-        variables: { mobile_filter_categories: null },
+        name:      _hemmaT('mobile.favorites', 'Favorites'),
+        variables: { hide_caret: true, mobile_filter_categories: null },
         // Mirrors hemma_mobile_header.yaml's padding formula.
         styles:    { card: [{ padding: `24px var(--hemma-rail-left, 16px) 10px calc(max(var(--hemma-measured-safe-left, 0px), var(--hemma-rail-left, 16px)) + ${LANDSCAPE_GUTTER_CALC})` }] },
       }, frag, 0);
@@ -1373,12 +1391,12 @@
           wrapper.style.removeProperty('opacity');
           wrapper.style.removeProperty('pointer-events');
           const isInOuter = wrapper.getRootNode() === animContainer;
-          if (!isInOuter && wrapper.style.display === 'none') wrapper.style.display = '';
+          if (!isInOuter && wrapper.style.display === 'none' && _restorable(wrapper)) wrapper.style.display = '';
         }
       }
 
       for (const hsr of (window._hemmaSmartRows || [])) {
-        if (hsr.style.display === 'none') hsr.style.display = '';
+        if (hsr.style.display === 'none' && _restorable(hsr)) hsr.style.display = '';
         hsr.style.removeProperty('opacity');
         hsr.style.removeProperty('pointer-events');
         const sr = hsr.shadowRoot;
@@ -1388,7 +1406,7 @@
           if (!scalableSet.has(w)) {
             w.style.removeProperty('opacity');
             w.style.removeProperty('pointer-events');
-            if (!isOuter && w.style.display === 'none') w.style.display = '';
+            if (!isOuter && w.style.display === 'none' && _restorable(w)) w.style.display = '';
           }
         }
       }
@@ -1399,7 +1417,7 @@
         hsr.style.removeProperty('opacity');
         hsr.style.removeProperty('pointer-events');
         hsr.style.removeProperty('transition');
-        if (hsr.style.display === 'none') hsr.style.display = '';
+        if (hsr.style.display === 'none' && _restorable(hsr)) hsr.style.display = '';
       }
 
       // ── Reveal: snap all wrappers visible, animate only the blur layer ─────────
@@ -1419,14 +1437,14 @@
           el.style.transformOrigin = '50% 30%';
           el.style.transform       = 'scale(0.93) translateY(20px)';
         }
-        if (el.style.display === 'none' && restoreDisplaySet.has(el)) el.style.display = '';
+        if (el.style.display === 'none' && restoreDisplaySet.has(el) && _restorable(el)) el.style.display = '';
       }
 
       const mo = new MutationObserver((mutations) => {
         if (this._showing || _activeOverlay) { mo.disconnect(); return; }
         for (const mut of mutations) {
           const t = mut.target;
-          if (t.style.display === 'none') t.style.display = '';
+          if (t.style.display === 'none' && _restorable(t)) t.style.display = '';
           // Leave !important alone: it is the suppression stamp.
           if (t.style.opacity === '0' && !t.style.getPropertyPriority('opacity')) {
             t.style.removeProperty('opacity');
@@ -1479,7 +1497,7 @@
       const sweepReHidden = () => {
         if (this._showing || _activeOverlay) return;
         for (const hsr of (window._hemmaSmartRows || [])) {
-          if (hsr.style.display === 'none') hsr.style.display = '';
+          if (hsr.style.display === 'none' && _restorable(hsr)) hsr.style.display = '';
           hsr.style.removeProperty('opacity');
           hsr.style.removeProperty('pointer-events');
           const sr = hsr.shadowRoot;
@@ -1493,10 +1511,10 @@
                 w.style.removeProperty('height');
                 w.style.removeProperty('overflow');
                 w.style.removeProperty('transition');
-                if (w.style.display === 'none') w.style.display = '';
+                if (w.style.display === 'none' && _restorable(w)) w.style.display = '';
               }
             } else if (w.style.display === 'none' && restoreDisplaySet.has(w)) {
-              w.style.display = '';
+              if (_restorable(w)) w.style.display = '';
             }
           }
         }
@@ -1810,11 +1828,10 @@
       const nameRect   = nameSrcEl?.getBoundingClientRect();
 
       const filterState = this._hass?.states?.['input_select.hemma_mobile_filter']?.state;
-      const CATEGORY_TITLES = { presence: 'People' };
       const titleText   = this._config?.room
-        ? this._config.room
-        : (!filterState || filterState === 'all' ? 'Home'
-          : (CATEGORY_TITLES[filterState] || filterState.charAt(0).toUpperCase() + filterState.slice(1)));
+        ? (this._config.room === 'Scenes' ? _hemmaT('nav.scenes', 'Scenes') : this._config.room)
+        : (!filterState || filterState === 'all' ? _hemmaT('filter.all', 'Home')
+          : (ROOM_SECTION_LABEL[filterState] || filterState.charAt(0).toUpperCase() + filterState.slice(1)));
       const titleEl = document.createElement('div');
       titleEl.style.cssText = [
         'display:block', 'width:100%', 'box-sizing:border-box',

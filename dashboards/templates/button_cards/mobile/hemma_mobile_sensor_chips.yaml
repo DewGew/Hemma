@@ -232,11 +232,13 @@ hemma_mobile_sensor_chips:
                 const mems = eid ? states[eid]?.attributes?.entity_id : null;
                 const eids = (Array.isArray(mems) && mems.length) ? mems : (eid ? [eid] : []);
                 const onCount = eids.filter(e => states[e]?.state === 'on').length;
-                const sub = eids.length === 0 ? 'Off'
-                          : onCount === 0 ? 'All Off'
-                          : onCount === eids.length ? 'All On'
-                          : `${onCount} On`;
-                return `<div class="badge-wrap"><div class="badge-title">Lights</div><div class="badge-sub">${sub}</div></div>`;
+                const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+                  (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
+                const sub = eids.length === 0 ? T('lights.off', 'Off')
+                          : onCount === 0 ? T('lights.all_off', 'All Off')
+                          : onCount === eids.length ? T('lights.all_on', 'All On')
+                          : T('lights.n_on', '{n} On', { n: onCount });
+                return `<div class="badge-wrap"><div class="badge-title">${T('filter.lights', 'Lights')}</div><div class="badge-sub">${sub}</div></div>`;
               ]]]
           - type: custom:button-card
             template: hemma_badge_base
@@ -277,10 +279,16 @@ hemma_mobile_sensor_chips:
                 - display: '[[[ const f = states["input_select.hemma_mobile_filter"]?.state; return variables.room_chips?.[f]?.motion_entity ? "flex" : "none" ]]]'
             name: >
               [[[
+                const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
                 const f = states['input_select.hemma_mobile_filter']?.state;
                 const eid = variables.room_chips?.[f]?.motion_entity;
                 const st  = eid ? (states[eid]?.state || 'unavailable') : 'unavailable';
-                const sub = st === 'on' ? 'Detected' : st === 'off' ? 'Not Detected' : 'Unavailable';
-                return `<div class="badge-wrap"><div class="badge-title">Motion</div><div class="badge-sub">${sub}</div></div>`;
+                const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
+                const sub = st === 'on'
+                  ? L('component.binary_sensor.entity_component._.state.on', 'Detected')
+                  : st === 'off'
+                  ? L('component.binary_sensor.entity_component._.state.off', 'Not Detected')
+                  : L('state.default.unavailable', 'Unavailable');
+                return `<div class="badge-wrap"><div class="badge-title">${T('motion.title', 'Motion')}</div><div class="badge-sub">${sub}</div></div>`;
               ]]]
 

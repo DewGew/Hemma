@@ -2383,11 +2383,12 @@ hemma_room:
                       ]]]
               name: >
                 [[[
+                  const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
                   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                   const P = window._hemmaPCSources?.(states, variables);
                   const row = P?.discord;
                   const title = row ? row.label : 'Discord';
-                  const sub = row ? (row.details ? `${row.game} — ${row.details}` : row.game) : 'Online';
+                  const sub = row ? (row.details ? `${row.game} — ${row.details}` : row.game) : T('presence.online', 'Online');
                   return `<div class="badge-wrap"><div class="badge-title">${esc(title)}</div><div class="badge-sub">${esc(sub)}</div></div>`;
                 ]]]
           activity_steam:
@@ -2427,11 +2428,12 @@ hemma_room:
                       ]]]
               name: >
                 [[[
+                  const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
                   const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                   const P = window._hemmaPCSources?.(states, variables);
                   const row = P?.steam;
                   const title = row ? row.label : 'Steam';
-                  const sub = row ? (row.details ? `${row.game} — ${row.details}` : row.game) : 'Online';
+                  const sub = row ? (row.details ? `${row.game} — ${row.details}` : row.game) : T('presence.online', 'Online');
                   return `<div class="badge-wrap"><div class="badge-title">${esc(title)}</div><div class="badge-sub">${esc(sub)}</div></div>`;
                 ]]]
     badges_lights:

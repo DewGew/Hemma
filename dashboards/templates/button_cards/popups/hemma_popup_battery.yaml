@@ -10,20 +10,20 @@ hemma_popup_battery:
     entity_filter: null
   tap_action:
     hemma_popup:
-      title: Batteries
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; }); return T('battery.title', 'Batteries'); ]]]"
       dismiss_on_background: true
       style: |
         [[[
           /* 500 for the main list plus the card's own 26px gutters. The
              attention column adds 318 on top; the main list never resizes. */
-          const _b = (Array.isArray(variables.battery_entities) && variables.battery_entities.length)
-            ? variables.battery_entities
-            : Object.keys(states).filter(id => id.startsWith('sensor.')
-                && states[id]?.attributes?.device_class === 'battery');
-          const _lo = _b.filter(id => {
-            const v = Number(states[id]?.state);
-            return !isNaN(v) && v <= 20;
-          }).length;
+          // Must pick batteries exactly as the list below does, or the surface widens for an aside that never draws.
+          const _pairs = variables.battery_entities || {};
+          const _filter = variables.batteries || variables.entity_filter
+            || (Object.keys(_pairs).length ? Object.keys(_pairs).map(k => _pairs[k]) : null);
+          const _b = (_filter ? _filter.map(id => states[id]).filter(Boolean) : Object.values(states))
+            .filter(e => e.state !== 'unavailable' && e.state !== 'unknown'
+              && !isNaN(parseFloat(e.state)) && e.attributes?.device_class === 'battery');
+          const _lo = _b.filter(e => Math.round(parseFloat(e.state)) <= 20).length;
           const _w = (_lo > 0 && _b.length > _lo) ? 870 : 552;
           return '--popup-min-width: min(' + _w + 'px, 92vw);'
                + ' --popup-max-width: min(' + _w + 'px, 92vw);';
@@ -137,6 +137,7 @@ hemma_popup_battery:
           }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
           const iconOverrides = variables.device_icons || {};
           const nameOverrides = variables.device_names || {};
           const pairs = variables.battery_entities || {};
@@ -376,7 +377,7 @@ hemma_popup_battery:
             }
           `;
 
-          const roomName = variables.room_name ?? 'Devices';
+          const roomName = variables.room_name ?? T('battery.devices', 'Devices');
 
           const baseCardStyle = [
             { '--ha-card-box-shadow': 'none' },
@@ -407,7 +408,7 @@ hemma_popup_battery:
                   grid: [{ 'grid-template-areas': '"empty"' }, { 'grid-template-columns': '1fr' }],
                   custom_fields: { empty: [{ 'justify-self': 'stretch' }] },
                 },
-                custom_fields: { empty: UI.note('No battery sensors found') },
+                custom_fields: { empty: UI.note(T('battery.none_found', 'No battery sensors found')) },
               }] };
             }
             const pctOf = (e) => Math.round(e.battery_pct);
@@ -431,7 +432,7 @@ hemma_popup_battery:
                    color so a row reads the same here as on the dashboard. The
                    low-battery warning is on the percentage and the section. */
                 label: info.name || e.entity_id,
-                sub: charging ? 'Charging' : null,
+                sub: charging ? T('battery.charging', 'Charging') : null,
                 value: v + '%',
                 valueTone: charging ? 'good' : toneOf(v),
               };
@@ -455,7 +456,7 @@ hemma_popup_battery:
                 { labelInside: true }));
             }
             if (low.length) {
-              add('low', UI.group(low.map(rowOf), 'Needs attention', null,
+              add('low', UI.group(low.map(rowOf), T('common.needs_attention', 'Needs attention'), null,
                 { labelInside: true }));
             }
 
@@ -515,20 +516,20 @@ hemma_popup_battery:
         ]]]
   icon_tap_action:
     hemma_popup:
-      title: Batteries
+      title: "[[[ const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; }); return T('battery.title', 'Batteries'); ]]]"
       dismiss_on_background: true
       style: |
         [[[
           /* 500 for the main list plus the card's own 26px gutters. The
              attention column adds 318 on top; the main list never resizes. */
-          const _b = (Array.isArray(variables.battery_entities) && variables.battery_entities.length)
-            ? variables.battery_entities
-            : Object.keys(states).filter(id => id.startsWith('sensor.')
-                && states[id]?.attributes?.device_class === 'battery');
-          const _lo = _b.filter(id => {
-            const v = Number(states[id]?.state);
-            return !isNaN(v) && v <= 20;
-          }).length;
+          // Must pick batteries exactly as the list below does, or the surface widens for an aside that never draws.
+          const _pairs = variables.battery_entities || {};
+          const _filter = variables.batteries || variables.entity_filter
+            || (Object.keys(_pairs).length ? Object.keys(_pairs).map(k => _pairs[k]) : null);
+          const _b = (_filter ? _filter.map(id => states[id]).filter(Boolean) : Object.values(states))
+            .filter(e => e.state !== 'unavailable' && e.state !== 'unknown'
+              && !isNaN(parseFloat(e.state)) && e.attributes?.device_class === 'battery');
+          const _lo = _b.filter(e => Math.round(parseFloat(e.state)) <= 20).length;
           const _w = (_lo > 0 && _b.length > _lo) ? 870 : 552;
           return '--popup-min-width: min(' + _w + 'px, 92vw);'
                + ' --popup-max-width: min(' + _w + 'px, 92vw);';
@@ -640,6 +641,7 @@ hemma_popup_battery:
           }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
           const iconOverrides = variables.device_icons || {};
           const nameOverrides = variables.device_names || {};
           const pairs = variables.battery_entities || {};
@@ -879,7 +881,7 @@ hemma_popup_battery:
             }
           `;
 
-          const roomName = variables.room_name ?? 'Devices';
+          const roomName = variables.room_name ?? T('battery.devices', 'Devices');
 
           const baseCardStyle = [
             { '--ha-card-box-shadow': 'none' },
@@ -910,7 +912,7 @@ hemma_popup_battery:
                   grid: [{ 'grid-template-areas': '"empty"' }, { 'grid-template-columns': '1fr' }],
                   custom_fields: { empty: [{ 'justify-self': 'stretch' }] },
                 },
-                custom_fields: { empty: UI.note('No battery sensors found') },
+                custom_fields: { empty: UI.note(T('battery.none_found', 'No battery sensors found')) },
               }] };
             }
             const pctOf = (e) => Math.round(e.battery_pct);
@@ -934,7 +936,7 @@ hemma_popup_battery:
                    color so a row reads the same here as on the dashboard. The
                    low-battery warning is on the percentage and the section. */
                 label: info.name || e.entity_id,
-                sub: charging ? 'Charging' : null,
+                sub: charging ? T('battery.charging', 'Charging') : null,
                 value: v + '%',
                 valueTone: charging ? 'good' : toneOf(v),
               };
@@ -958,7 +960,7 @@ hemma_popup_battery:
                 { labelInside: true }));
             }
             if (low.length) {
-              add('low', UI.group(low.map(rowOf), 'Needs attention', null,
+              add('low', UI.group(low.map(rowOf), T('common.needs_attention', 'Needs attention'), null,
                 { labelInside: true }));
             }
 

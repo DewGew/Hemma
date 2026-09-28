@@ -44,14 +44,17 @@ hemma_badge_camera_group:
       const total = cams.length;
       const dead = cams.filter(id => ['unavailable','unknown',''].includes(String(states[id]?.state ?? '').toLowerCase())).length;
       const alert = window.hemmaCameraAlert ? window.hemmaCameraAlert(hass, states, cams, variables?.alert_window_minutes) : '';
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
       const sub = total === 0 ? ''
-                : dead === total ? (total === 1 ? 'Offline' : 'All Offline')
-                : dead > 0 ? dead + ' Offline'
-                : alert || 'No Alerts';
+                : dead === total ? (total === 1 ? T('cameras.offline', 'Offline')
+                                                : T('cameras.all_offline', 'All Offline'))
+                : dead > 0 ? T('cameras.n_offline', '{n} Offline', { n: dead })
+                : alert || T('cameras.no_alerts', 'No Alerts');
 
       return `
         <div class="badge-wrap">
-          <div class="badge-title">${esc(variables?.label || 'Cameras')}</div>
+          <div class="badge-title">${esc(variables?.label || T('cameras.title', 'Cameras'))}</div>
           ${sub ? `<div class="badge-sub">${esc(sub)}</div>` : ''}
         </div>
       `;

@@ -5,9 +5,10 @@ hemma_popup_plant:
     hemma_popup:
       title: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
           return (variables.room_name
             || states[entity?.entity_id]?.attributes?.friendly_name
-            || '').trim() || 'Plant';
+            || '').trim() || T('plant.title', 'Plant');
         ]]]
       dismiss_on_background: true
       popup_styles:
@@ -115,6 +116,7 @@ hemma_popup_plant:
           }
       content: |
         [[[
+          const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
           const plant      = entity?.entity_id;
           const _plantName = plant ? plant.replace(/^[^.]+\./, '') : '';
           const plantAttrs = states[plant]?.attributes || {};
@@ -191,27 +193,27 @@ hemma_popup_plant:
 
           let advice;
           if (plantIsOk) {
-            advice = 'Plant is healthy';
+            advice = T('plant.is_healthy', 'Plant is healthy');
           } else if (plantIsBad && blind) {
-            advice = 'Needs attention';
+            advice = T('common.needs_attention', 'Needs attention');
           } else if (plantIsBad) {
             const maxScore = readable.length || gradable.length || 1;
             const badCount = Math.min(Object.keys(badTypes).length || 1, maxScore);
             const ratio    = (maxScore - badCount) / maxScore;
 
-            if (ratio >= 0.8)      advice = 'Needs some attention';
-            else if (ratio >= 0.6) advice = 'Plant is struggling';
-            else if (ratio >= 0.4) advice = 'Needs immediate care';
-            else                   advice = 'Needs urgent attention';
+            if (ratio >= 0.8)      advice = T('plant.needs_some_attention', 'Needs some attention');
+            else if (ratio >= 0.6) advice = T('plant.is_struggling', 'Plant is struggling');
+            else if (ratio >= 0.4) advice = T('plant.needs_immediate_care', 'Needs immediate care');
+            else                   advice = T('plant.needs_urgent_attention', 'Needs urgent attention');
 
             const dir = (t) => badTypes[t];
-            if (dir('temperature'))  advice = dir('temperature')  === 'low' ? 'Too cold' : 'Too warm';
-            if (dir('humidity'))     advice = dir('humidity')     === 'low' ? 'Air is too dry' : 'Air is too humid';
-            if (dir('conductivity')) advice = dir('conductivity') === 'low' ? 'Needs fertilizing' : 'Too much fertilizer';
-            if (dir('illuminance'))  advice = dir('illuminance')  === 'low' ? 'Needs more light' : 'Getting too much light';
-            if (dir('moisture'))     advice = dir('moisture')     === 'low' ? 'Needs watering' : 'Soil is too wet';
+            if (dir('temperature'))  advice = dir('temperature')  === 'low' ? T('plant.too_cold', 'Too cold') : T('plant.too_warm', 'Too warm');
+            if (dir('humidity'))     advice = dir('humidity')     === 'low' ? T('plant.air_too_dry', 'Air is too dry') : T('plant.air_too_humid', 'Air is too humid');
+            if (dir('conductivity')) advice = dir('conductivity') === 'low' ? T('plant.needs_fertilizing', 'Needs fertilizing') : T('plant.too_much_fertilizer', 'Too much fertilizer');
+            if (dir('illuminance'))  advice = dir('illuminance')  === 'low' ? T('plant.needs_more_light', 'Needs more light') : T('plant.too_much_light', 'Getting too much light');
+            if (dir('moisture'))     advice = dir('moisture')     === 'low' ? T('plant.needs_watering', 'Needs watering') : T('plant.soil_too_wet', 'Soil is too wet');
           } else {
-            advice = readable.length ? 'Waiting for plant data' : 'Sensor data unavailable';
+            advice = readable.length ? T('plant.waiting_for_data', 'Waiting for plant data') : T('plant.sensor_unavailable', 'Sensor data unavailable');
           }
 
           const cleanName = (eid) => {
@@ -293,16 +295,16 @@ hemma_popup_plant:
                  not "800 lx-6.0k lx". No space before % or a degree sign, a
                  space before everything else - Apple's own rule. */
               const n = (v) => v == null ? ''
-                : v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k'
+                : v >= 1000 ? (window.hemmaNum || ((x, a, b) => Number(x).toFixed(b ?? a ?? 0)))(v / 1000, 0, v >= 10000 ? 0 : 1) + 'k'
                 : String(Math.round(v));
               const u = !unit ? ''
                 : (unit === '%' || unit.charAt(0) === '\u00b0') ? unit
                 : ' ' + unit;
 
               const band = (minOpt != null && maxOpt != null)
-                ? 'Target ' + n(minOpt) + '\u2013' + n(maxOpt) + u
-                : minOpt != null ? 'Target above ' + n(minOpt) + u
-                : maxOpt != null ? 'Target below ' + n(maxOpt) + u
+                ? T('plant.target_range', 'Target {min}–{max}{u}', { min: n(minOpt), max: n(maxOpt), u })
+                : minOpt != null ? T('plant.target_above', 'Target above {v}{u}', { v: n(minOpt), u })
+                : maxOpt != null ? T('plant.target_below', 'Target below {v}{u}', { v: n(maxOpt), u })
                 : null;
 
               const tone = noVerdict ? null : (isOk ? null : 'warn');
@@ -340,8 +342,8 @@ hemma_popup_plant:
             const _moist = sensors.find(e => getSensorType(e) === 'moisture') || null;
             const _capId = 'plantcap-' + String(plant || 'x').replace(/[^a-zA-Z0-9]/g, '_');
             add('head', UI.headline ? UI.headline({
-              title: (variables.room_name || plantAttrs.friendly_name || '').trim() || 'Plant',
-              state: plantIsOk ? 'Healthy' : (advice || 'Needs attention'),
+              title: (variables.room_name || plantAttrs.friendly_name || '').trim() || T('plant.title', 'Plant'),
+              state: plantIsOk ? T('state.healthy', 'Healthy') : (advice || T('common.needs_attention', 'Needs attention')),
               barTitle: true,
               // the lock and cover measure, so the sheets read alike
               measure: 'sheet',
@@ -388,7 +390,7 @@ hemma_popup_plant:
             const ordered = problem.concat(rest);
             if (ordered.length) add('all', UI.group(ordered.map(rowFor), null, null,
               { labelInside: true }));
-            if (!sensors.length) add('none', UI.note('No plant sensors configured'));
+            if (!sensors.length) add('none', UI.note(T('plant.none_configured', 'No plant sensors configured')));
 
             areas.forEach((a, i) => {
               const key = a.replace(/"/g, '');

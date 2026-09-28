@@ -89,6 +89,7 @@ hemma_motion:
 
   name: |
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const sensors = [
         { id: variables.sensor_1, label: variables.label_1 },
         { id: variables.sensor_2, label: variables.label_2 },
@@ -97,21 +98,22 @@ hemma_motion:
         { id: variables.sensor_5, label: variables.label_5 },
         { id: variables.sensor_6, label: variables.label_6 },
       ].filter(s => s.id);
-      if (sensors.length === 0) return variables.default_name || 'Motion';
+      if (sensors.length === 0) return variables.default_name || T('motion.title', 'Motion');
       const active = sensors.find(s => states[s.id]?.state === 'on');
-      return active ? active.label : (variables.default_name || 'Motion');
+      return active ? active.label : (variables.default_name || T('motion.title', 'Motion'));
     ]]]
 
   state_display: |
     [[[
+      const L = (k, en) => { const v = hass?.localize?.(k); return (v && v !== k) ? v : en; };
       const sensors = [
         variables.sensor_1, variables.sensor_2, variables.sensor_3,
         variables.sensor_4, variables.sensor_5, variables.sensor_6,
       ].filter(Boolean);
       if (sensors.length > 0) {
-        return sensors.some(id => states[id]?.state === 'on') ? 'Detected' : 'Clear';
+        return sensors.some(id => states[id]?.state === 'on') ? L('component.binary_sensor.entity_component.motion.state.on', 'Detected') : L('component.binary_sensor.entity_component.motion.state.off', 'Clear');
       }
-      return entity?.state === 'on' ? 'Detected' : 'Clear';
+      return entity?.state === 'on' ? L('component.binary_sensor.entity_component.motion.state.on', 'Detected') : L('component.binary_sensor.entity_component.motion.state.off', 'Clear');
     ]]]
 
   state:

@@ -231,11 +231,15 @@ hemma_badge_media_group:
       ].filter(Boolean);
 
       const activeCount = eids.filter(e => isActive(e)).length + Number(variables?.pc_count || 0);
-      const sub = activeCount === 0 ? 'None Playing' : activeCount === 1 ? '1 Playing' : `${activeCount} Playing`;
+      const T = window._hemmaT || ((k, en, v) => String(en).replace(/\{(\w+)\}/g,
+        (m, p) => (v && Object.prototype.hasOwnProperty.call(v, p) ? String(v[p]) : m)));
+      const sub = activeCount === 0 ? T('media.none_playing', 'None Playing')
+        : activeCount === 1 ? T('media.one_playing', '1 Playing')
+        : T('media.n_playing', '{n} Playing', { n: activeCount });
 
       return `
         <div class="badge-wrap">
-          <div class="badge-title">Media</div>
+          <div class="badge-title">${T('media.title', 'Media')}</div>
           <div class="badge-sub">${sub}</div>
         </div>
       `;

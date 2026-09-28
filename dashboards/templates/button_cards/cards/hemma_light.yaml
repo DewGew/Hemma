@@ -24,6 +24,7 @@ hemma_light:
 
   state_display: >
     [[[
+      const T = window._hemmaT || ((k, en, v) => { let s = String(en); if (v) for (const p in v) s = s.split('{' + p + '}').join(String(v[p])); return s; });
       const memsOf = (eid) => {
         const m = states[eid]?.attributes?.entity_id;
         return Array.isArray(m) ? m.filter(x => typeof x === "string" && x.startsWith("light.")) : [];
@@ -41,9 +42,9 @@ hemma_light:
       const all = [...new Set(units(entity?.entity_id, seen))];
       const onCount = all.filter(eid => states[eid]?.state === "on").length;
 
-      return onCount === 0 ? "All Off"
-           : onCount === all.length ? "All On"
-           : `${onCount} On`;
+      return onCount === 0 ? T('lights.all_off', 'All Off')
+           : onCount === all.length ? T('lights.all_on', 'All On')
+           : T('lights.n_on', '{n} On', { n: onCount });
     ]]]
 
   variables:
