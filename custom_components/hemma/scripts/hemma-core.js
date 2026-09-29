@@ -6582,10 +6582,11 @@ window.hemmaMenuGlass = {
         return { label: _hemmaT('notify.left', '{name} left', { name }), tone: AWAY, icon: who.icon,
           image: who.image, imageFit: who.imageFit, once: who.once };
       }
-      if (s && s !== 'unknown' && s !== 'unavailable') {
-        return { label: name + ' is at ' + s, tone: AWAY, icon: who.icon,
-          image: who.image, imageFit: who.imageFit, once: who.once };
-      }
+			if (s && s !== 'unknown' && s !== 'unavailable') {
+				return {
+					label: _hemmaT('notify.is_at', '{name} is at {place}', {name: name, place: s}),
+					tone: AWAY, icon: who.icon, image: who.image, imageFit: who.imageFit, once: who.once};
+			}
       return null;
     }
 
