@@ -213,6 +213,7 @@
   "notify.finished_cleaning": "{name} finished cleaning",
   "notify.finishes_n": "Finishes {n} updates",
   "notify.finishes_one": "Finishes the {name} update",
+	"notify.is_at": "{name} is at {place}",
   "notify.is_open": "{name} is open",
   "notify.left": "{name} left",
   "notify.lock_jammed": "{name} jammed",

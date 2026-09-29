@@ -213,6 +213,7 @@
 "notify.finished_cleaning": "{name} har städat klart",
 "notify.finishes_n": "Slutför {n} uppdateringar",
 "notify.finishes_one": "Slutför uppdateringen av {name}",
+"notify.is_at": "{name} är på {place}",
 "notify.is_open": "{name} är öppen",
 "notify.left": "{name} lämnade",
 "notify.lock_jammed": "{name} har fastnat",
